@@ -1,0 +1,6 @@
+{
+  "name": "Smash Premier League",
+  "description": "Premier badminton tournament platform featuring live match scoring, round-robin & knockout brackets, automated team draws, player registrations, and comprehensive statistics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
