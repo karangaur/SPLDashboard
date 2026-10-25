@@ -22,16 +22,20 @@ import {
 import { ConfirmModal } from '../common/ConfirmModal';
 
 export const RegisteredView: React.FC = () => {
-  const { state, updateRegistration, deleteRegistration } = useTournament();
+  const { state, updateRegistration, deleteRegistration, approveRegistration } = useTournament();
 
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending' | 'complimentary'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   const stats = calculateRegistrationStats(state.registrations);
 
   const filtered = state.registrations.filter((r) => {
-    if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+    if (statusFilter !== 'all') {
+      if (statusFilter === 'approved' && r.status !== 'approved' && r.status !== 'paid') return false;
+      if (statusFilter === 'pending' && r.status !== 'pending') return false;
+      if (statusFilter === 'rejected' && r.status !== 'rejected') return false;
+    }
     if (search) {
       const q = search.toLowerCase();
       const matchName = r.name.toLowerCase().includes(q);
@@ -155,9 +159,9 @@ export const RegisteredView: React.FC = () => {
         <div className="flex items-center gap-1.5 overflow-x-auto p-1 bg-white/5 rounded-xl">
           {[
             { id: 'all', label: 'All Entries' },
-            { id: 'paid', label: 'Paid' },
             { id: 'pending', label: 'Pending' },
-            { id: 'complimentary', label: 'Complimentary' },
+            { id: 'approved', label: 'Approved' },
+            { id: 'rejected', label: 'Rejected' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -214,22 +218,25 @@ export const RegisteredView: React.FC = () => {
                       <td className="py-3.5">
                         <select
                           value={r.status}
-                          onChange={(e) =>
-                            updateRegistration(r.id, {
-                              status: e.target.value as any,
-                            })
-                          }
+                          onChange={(e) => {
+                            const newStatus = e.target.value as any;
+                            if (newStatus === 'approved') {
+                              approveRegistration(r.id);
+                            } else {
+                              updateRegistration(r.id, { status: newStatus });
+                            }
+                          }}
                           className={`text-xs font-bold rounded-lg px-2.5 py-1 border transition-colors ${
-                            r.status === 'paid'
+                            r.status === 'approved' || r.status === 'paid'
                               ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
                               : r.status === 'pending'
                               ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                              : 'bg-blue-500/15 text-blue-400 border-blue-500/30'
+                              : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
                           }`}
                         >
-                          <option value="paid" className="bg-slate-900 text-white">Paid</option>
                           <option value="pending" className="bg-slate-900 text-white">Pending</option>
-                          <option value="complimentary" className="bg-slate-900 text-white">Complimentary</option>
+                          <option value="approved" className="bg-slate-900 text-white">Approved</option>
+                          <option value="rejected" className="bg-slate-900 text-white">Rejected</option>
                         </select>
                       </td>
 
@@ -248,6 +255,16 @@ export const RegisteredView: React.FC = () => {
                       {/* Action buttons */}
                       <td className="py-3.5 text-right pr-6">
                         <div className="flex items-center justify-end gap-1.5">
+                          {r.status !== 'approved' && (
+                            <button
+                              onClick={() => approveRegistration(r.id)}
+                              title="Approve and promote to player roster"
+                              aria-label="Approve and promote to player roster"
+                              className="px-2 py-1 text-xs font-bold bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-lg transition-colors shadow"
+                            >
+                              Approve
+                            </button>
+                          )}
                           {r.status === 'pending' && (
                             <button
                               onClick={() => handleWhatsAppReminder(r)}

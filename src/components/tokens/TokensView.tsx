@@ -126,10 +126,11 @@ export const TokensView: React.FC = () => {
       return;
     }
 
-    // Random formation
+    // Random formation - strictly from current eligible players only
+    const validPlayerIds = new Set(eligiblePlayers.map((p) => p.id));
     const allIds = [...eligiblePlayers.map((p) => p.id)];
-    // Ensure captains are distinct
-    const captainsToUse = selectedCaptains.filter(Boolean);
+    // Ensure captains are distinct and strictly exist in current player pool
+    const captainsToUse = selectedCaptains.filter((id) => validPlayerIds.has(id));
     const nonCaptains = allIds.filter((id) => !captainsToUse.includes(id));
     // Shuffle non-captains
     for (let i = nonCaptains.length - 1; i > 0; i--) {
@@ -139,7 +140,7 @@ export const TokensView: React.FC = () => {
 
     const createdTeams: Team[] = [];
 
-    // Ensure we have enough captains or pick remaining randomly
+    // Ensure we have enough captains or pick remaining randomly from non-captains
     const finalCaptains = [...captainsToUse];
     while (finalCaptains.length < numTeams && nonCaptains.length > 0) {
       finalCaptains.push(nonCaptains.shift()!);
@@ -147,7 +148,7 @@ export const TokensView: React.FC = () => {
 
     for (let i = 0; i < numTeams; i++) {
       const capId = finalCaptains[i];
-      const capPlayer = state.players.find((p) => p.id === capId);
+      const capPlayer = eligiblePlayers.find((p) => p.id === capId);
       const teamPlayers = capId ? [capId] : [];
 
       while (teamPlayers.length < playersPerTeam && nonCaptains.length > 0) {

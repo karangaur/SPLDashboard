@@ -351,7 +351,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectTab }) => 
               onClick={() => onSelectTab('registration')}
               className="text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 px-4 py-2 rounded-xl transition-all shadow-md active:scale-95"
             >
-              Register a Player →
+              Player Registration Hub →
             </button>
           </div>
         </div>

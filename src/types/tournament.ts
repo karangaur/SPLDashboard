@@ -68,20 +68,123 @@ export interface KnockoutData {
   matches: KnockoutMatch[];
 }
 
+export type FormFieldType =
+  | 'text'
+  | 'textarea'
+  | 'mobile'
+  | 'email'
+  | 'number'
+  | 'dropdown'
+  | 'radio'
+  | 'checkbox'
+  | 'date'
+  | 'photo';
+
+export interface RegistrationFormField {
+  id: string;
+  label: string;
+  type: FormFieldType;
+  placeholder?: string;
+  helpText?: string;
+  required: boolean;
+  enabled: boolean;
+  options?: string[]; // for dropdown, radio, checkbox
+  defaultValue?: any;
+  isSystem?: boolean; // core fields like name & mobile
+  order: number;
+}
+
+export interface FormAppearance {
+  formTitle: string;
+  formDescription: string;
+  welcomeMessage?: string;
+  logoUrl?: string;
+  bannerUrl?: string;
+  accentColor: string; // e.g. '#10b981', '#f59e0b', etc.
+  accentName: string;
+  submitButtonText: string;
+  successTitle: string;
+  successMessage: string;
+}
+
+export interface RegistrationFormConfig {
+  seasonSlug: string;
+  tournamentName: string;
+  seasonTitle: string;
+  deadline?: string;
+  maxSlots?: number;
+  entryFee?: number;
+  venue?: string;
+  date?: string;
+  enabled: boolean;
+  closedNotice?: string;
+  isPublished: boolean;
+  publishedAt?: number;
+  lastUpdatedAt?: number;
+  appearance: FormAppearance;
+  fields: RegistrationFormField[];
+}
+
+export interface RegistrationTokenRecord {
+  id: string;
+  token: string;
+  seasonSlug: string;
+  label?: string;
+  createdAt: number;
+  isActive: boolean;
+  revokedAt?: number;
+  submissionsCount?: number;
+}
+
+export interface RegistrationFieldConfig {
+  visible: boolean;
+  required: boolean;
+}
+
+export interface RegistrationSettings {
+  enabled: boolean;
+  seasonSlug: string;
+  seasonTitle: string;
+  maxSlots: number;
+  deadline?: string;
+  closedNotice?: string;
+  fields: {
+    whatsapp: RegistrationFieldConfig;
+    gender: RegistrationFieldConfig;
+    age: RegistrationFieldConfig;
+    experience: RegistrationFieldConfig;
+    category: RegistrationFieldConfig;
+    style: RegistrationFieldConfig;
+    city: RegistrationFieldConfig;
+    notes: RegistrationFieldConfig;
+  };
+}
+
 export interface Registration {
   id: string;
-  playerId: string;
+  playerId?: string;
   regId: string;
   name: string;
   mobile: string;
+  whatsapp?: string;
   age?: number;
   gender: 'M' | 'F' | 'Other';
+  experience?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro';
+  category?: 'Singles' | 'Doubles' | 'Mixed Doubles' | 'Both';
+  style?: 'Attacking' | 'Defensive' | 'All-Rounder' | 'Net Play';
+  city?: string;
+  notes?: string;
   fee: number;
-  status: 'paid' | 'pending' | 'complimentary';
-  method?: 'cash' | 'upi' | 'bank';
+  status: 'pending' | 'approved' | 'rejected' | 'paid' | 'complimentary';
+  method?: 'cash' | 'upi' | 'bank' | 'complimentary';
   txnId?: string;
+  season?: string;
   createdAt: number;
   paidAt?: number;
+  approvedAt?: number;
+  answers?: Record<string, any>;
+  photoUrl?: string;
+  tokenUsed?: string;
 }
 
 export interface PaymentSettings {
@@ -112,6 +215,7 @@ export interface StandingsRecord {
 
 export interface TournamentState {
   settings: TournamentSettings;
+  registrationSettings: RegistrationSettings;
   players: Player[];
   teams: Team[];
   matches: Match[];
@@ -121,3 +225,4 @@ export interface TournamentState {
   predefinedTeams: PredefinedTeam[];
   teamFormationMode: 'random' | 'predefined' | 'mixed';
 }
+

@@ -128,7 +128,18 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab }) => {
                 : 'text-slate-300 hover:text-white hover:bg-white/5'
             }`}
           >
-            Teams & Players
+            Teams
+          </button>
+
+          <button
+            onClick={() => handleNav('registration')}
+            className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+              currentTab === 'registration'
+                ? 'bg-amber-400 text-slate-950 font-bold shadow'
+                : 'text-slate-300 hover:text-white hover:bg-white/5'
+            }`}
+          >
+            <span>Player Registration</span>
           </button>
 
           {/* More Dropdown for Secondary Portals */}
@@ -152,6 +163,13 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab }) => {
                   onClick={() => setMoreDropdownOpen(false)}
                 />
                 <div className="absolute right-0 mt-2 w-56 rounded-xl glass-dropdown p-1.5 z-40 text-sm animate-fade-in">
+                  <button
+                    onClick={() => handleNav('players')}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white flex items-center gap-2.5"
+                  >
+                    <Users2 className="w-4 h-4 text-amber-400" />
+                    <span>Players Directory</span>
+                  </button>
                   <button
                     onClick={() => handleNav('tokens')}
                     className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white flex items-center gap-2.5"

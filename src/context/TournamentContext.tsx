@@ -6,13 +6,20 @@ import {
   Match,
   KnockoutMatch,
   Registration,
+  RegistrationSettings,
   TournamentSettings,
   PaymentSettings,
   PredefinedTeam,
+  RegistrationFormField,
+  RegistrationFormConfig,
+  FormAppearance,
+  RegistrationTokenRecord,
 } from '../types/tournament';
 import {
   STORAGE_KEY,
   DEFAULT_STATE,
+  DEFAULT_REGISTRATION_SETTINGS,
+  createDefaultFormConfig,
   generateRoundRobinFixtures,
   progressKnockoutMatches,
   calculateStandings,
@@ -26,21 +33,25 @@ interface TournamentContextType {
   // Settings
   updateSettings: (settings: Partial<TournamentSettings>) => void;
   updatePaymentSettings: (payment: Partial<PaymentSettings>) => void;
+  updateRegistrationSettings: (settings: Partial<RegistrationSettings>) => void;
   
   // Players
   addPlayer: (name: string, details?: Partial<Player>) => Player;
   bulkAddPlayers: (names: string[]) => void;
   updatePlayer: (id: string, updates: Partial<Player>) => void;
   deletePlayer: (id: string) => void;
+  deletePlayersBulk: (playerIds: string[]) => void;
   clearPlayers: () => void;
   
   // Teams
   addTeam: (name: string, players?: string[], captainId?: string) => Team;
   updateTeam: (id: string, updates: Partial<Team>) => void;
   deleteTeam: (id: string) => void;
+  deleteTeamsBulk: (teamIds: string[]) => void;
   renameTeam: (id: string, newName: string) => void;
   toggleTeamLock: (id: string) => void;
   setTeamCaptain: (teamId: string, captainId: string) => void;
+  setCaptainsBulk: (assignments: { teamId: string; captainId: string }[]) => void;
   setTeamPlayer: (teamId: string, playerIndex: number, newPlayerId: string) => void;
   setTeams: (teams: Team[]) => void;
   clearTeams: () => void;
@@ -65,10 +76,25 @@ interface TournamentContextType {
   updateKnockoutMatch: (id: string, updates: Partial<KnockoutMatch>) => void;
   clearKnockout: () => void;
   
-  // Registrations
-  addRegistration: (reg: Omit<Registration, 'id' | 'playerId' | 'regId' | 'createdAt'>) => Registration;
+  // Form Builder & Links / Tokens
+  formConfig: RegistrationFormConfig;
+  tokens: RegistrationTokenRecord[];
+  activeToken: RegistrationTokenRecord | null;
+  fetchFormConfig: (seasonSlug?: string) => Promise<RegistrationFormConfig>;
+  saveFormConfig: (config: RegistrationFormConfig, publish?: boolean) => Promise<{ success: boolean; config?: RegistrationFormConfig; error?: string }>;
+  fetchTokens: (seasonSlug?: string) => Promise<{ tokens: RegistrationTokenRecord[]; activeToken: RegistrationTokenRecord | null }>;
+  regenerateToken: (seasonSlug: string, invalidatePrevious: boolean, label?: string) => Promise<{ success: boolean; tokenRecord?: RegistrationTokenRecord; error?: string }>;
+  toggleTokenStatus: (tokenId: string) => Promise<{ success: boolean; token?: RegistrationTokenRecord }>;
+
+  // Registrations (Applicants & Management)
+  submitPublicRegistration: (formData: any) => Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean }>;
+  addRegistration: (reg: Partial<Registration> & { name: string; mobile: string }) => Registration;
   updateRegistration: (id: string, updates: Partial<Registration>) => void;
+  approveRegistration: (id: string) => void;
+  rejectRegistration: (id: string, reason?: string) => void;
   deleteRegistration: (id: string) => void;
+  deleteRegistrationsBulk: (ids: string[]) => void;
+  bulkApproveRegistrations: (ids: string[]) => void;
   
   // Global actions
   resetToDefault: () => void;
@@ -123,15 +149,83 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [state, setState] = useState<TournamentState>(() => {
     if (typeof window === 'undefined') return DEFAULT_STATE;
     try {
+      // Clear legacy storage keys that had seeded/demo data
+      [
+        'smash-premier-league-v1',
+        'smash-premier-league-v2',
+        'smash-premier-league-v3',
+        'smash-premier-league-v4',
+        'smash-premier-league-v5',
+        'smash-premier-league-v6',
+      ].forEach((k) => {
+        try { localStorage.removeItem(k); } catch {}
+      });
+
       const stored = localStorage.getItem(STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
+
+        // Filter out any predefined/seeded demo IDs (e.g. 'p-1', 'team-1', 'm-1', 'reg-1')
+        const isDemoId = (id?: string) => Boolean(id && /^(p|team|m|reg|ko)-\d+$/i.test(id));
+
+        if (Array.isArray(parsed.players)) {
+          parsed.players = parsed.players.filter((p: any) => p && p.id && !isDemoId(p.id));
+        } else {
+          parsed.players = [];
+        }
+
+        if (Array.isArray(parsed.teams)) {
+          parsed.teams = parsed.teams
+            .filter((t: any) => t && t.id && !isDemoId(t.id))
+            .map((t: any) => ({
+              ...t,
+              players: Array.isArray(t.players) ? t.players.filter((pid: string) => !isDemoId(pid)) : [],
+              captainId: t.captainId && !isDemoId(t.captainId) ? t.captainId : undefined,
+            }));
+        } else {
+          parsed.teams = [];
+        }
+
+        if (Array.isArray(parsed.matches)) {
+          parsed.matches = parsed.matches.filter(
+            (m: any) => m && m.id && !isDemoId(m.id) && !isDemoId(m.teamA) && !isDemoId(m.teamB)
+          );
+        } else {
+          parsed.matches = [];
+        }
+
+        if (Array.isArray(parsed.registrations)) {
+          parsed.registrations = parsed.registrations.filter(
+            (r: any) => r && r.id && !isDemoId(r.id) && !isDemoId(r.playerId)
+          );
+        } else {
+          parsed.registrations = [];
+        }
+
+        if (parsed.knockout && Array.isArray(parsed.knockout.matches)) {
+          parsed.knockout.matches = parsed.knockout.matches.filter((k: any) => k && k.id && !isDemoId(k.id));
+        }
+
+        if (Array.isArray(parsed.predefinedTeams)) {
+          parsed.predefinedTeams = parsed.predefinedTeams.filter(
+            (pt: any) => pt && Array.isArray(pt.players) && !pt.players.some((pid: string) => isDemoId(pid))
+          );
+        }
+
         return {
           ...DEFAULT_STATE,
           ...parsed,
           settings: { ...DEFAULT_STATE.settings, ...parsed.settings },
+          registrationSettings: {
+            ...DEFAULT_STATE.registrationSettings,
+            ...(parsed.registrationSettings || {}),
+            fields: {
+              ...DEFAULT_STATE.registrationSettings.fields,
+              ...(parsed.registrationSettings?.fields || {}),
+            },
+          },
           payment: { ...DEFAULT_STATE.payment, ...parsed.payment },
-          knockout: { ...DEFAULT_STATE.knockout, ...parsed.knockout },
+          knockout: { ...DEFAULT_STATE.knockout, ...(parsed.knockout || {}) },
         };
       }
     } catch (e) {
@@ -139,6 +233,71 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     return DEFAULT_STATE;
   });
+
+  const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() =>
+    createDefaultFormConfig()
+  );
+  const [tokens, setTokens] = useState<RegistrationTokenRecord[]>([]);
+  const [activeToken, setActiveToken] = useState<RegistrationTokenRecord | null>(null);
+
+  // Sync with persistent backend on startup
+  useEffect(() => {
+    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+
+    // 1. Fetch server registrations
+    fetch('/api/registrations')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((serverRegs) => {
+        if (Array.isArray(serverRegs) && serverRegs.length > 0) {
+          setState((prev) => ({
+            ...prev,
+            registrations: serverRegs,
+          }));
+        }
+      })
+      .catch(() => {});
+
+    // 2. Fetch server registration settings
+    fetch('/api/registration-settings')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((serverSettings) => {
+        if (serverSettings && typeof serverSettings === 'object') {
+          setState((prev) => ({
+            ...prev,
+            registrationSettings: {
+              ...prev.registrationSettings,
+              ...serverSettings,
+              fields: {
+                ...prev.registrationSettings.fields,
+                ...(serverSettings.fields || {}),
+              },
+            },
+          }));
+        }
+      })
+      .catch(() => {});
+
+    // 3. Fetch server form config
+    fetch(`/api/forms/${seasonSlug}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((cfg) => {
+        if (cfg && cfg.fields) {
+          setFormConfig(cfg);
+        }
+      })
+      .catch(() => {});
+
+    // 4. Fetch server tokens
+    fetch(`/api/tokens/${seasonSlug}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.tokens)) {
+          setTokens(data.tokens);
+          setActiveToken(data.activeToken || null);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Save to LocalStorage on changes
   useEffect(() => {
@@ -194,6 +353,31 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       payment: { ...prev.payment, ...paymentUpdate },
     }));
+  };
+
+  const updateRegistrationSettings = (settingsUpdate: Partial<RegistrationSettings>) => {
+    setState((prev) => {
+      const nextSettings = {
+        ...prev.registrationSettings,
+        ...settingsUpdate,
+        fields: {
+          ...prev.registrationSettings.fields,
+          ...(settingsUpdate.fields || {}),
+        },
+      };
+
+      // Asynchronously sync with backend
+      fetch('/api/registration-settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(nextSettings),
+      }).catch(() => {});
+
+      return {
+        ...prev,
+        registrationSettings: nextSettings,
+      };
+    });
   };
 
   // Players
@@ -254,6 +438,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
   };
 
+  const deletePlayersBulk = (playerIds: string[]) => {
+    if (!playerIds || playerIds.length === 0) return;
+    const idSet = new Set(playerIds);
+    setState((prev) => ({
+      ...prev,
+      players: prev.players.filter((p) => !idSet.has(p.id)),
+      registrations: prev.registrations.filter((r) => !idSet.has(r.playerId || '')),
+      teams: prev.teams.map((t) => ({
+        ...t,
+        players: t.players.filter((pid) => !idSet.has(pid)),
+        captainId: idSet.has(t.captainId || '') ? undefined : t.captainId,
+      })),
+      predefinedTeams: prev.predefinedTeams.filter((pt) => !pt.players.some((pid) => idSet.has(pid))),
+    }));
+  };
+
   const clearPlayers = () => {
     setState((prev) => ({
       ...prev,
@@ -296,6 +496,26 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       teams: prev.teams.filter((t) => t.id !== id),
       matches: prev.matches.filter((m) => m.teamA !== id && m.teamB !== id),
+      knockout: {
+        ...prev.knockout,
+        matches: prev.knockout.matches.filter((m) => m.teamA !== id && m.teamB !== id),
+      },
+    }));
+  };
+
+  const deleteTeamsBulk = (teamIds: string[]) => {
+    if (!teamIds || teamIds.length === 0) return;
+    const idSet = new Set(teamIds);
+    setState((prev) => ({
+      ...prev,
+      teams: prev.teams.filter((t) => !idSet.has(t.id)),
+      matches: prev.matches.filter((m) => !idSet.has(m.teamA) && !idSet.has(m.teamB)),
+      knockout: {
+        ...prev.knockout,
+        matches: prev.knockout.matches.filter(
+          (m) => !idSet.has(m.teamA || '') && !idSet.has(m.teamB || '')
+        ),
+      },
     }));
   };
 
@@ -316,7 +536,29 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const setTeamCaptain = (teamId: string, captainId: string) => {
     setState((prev) => ({
       ...prev,
-      teams: prev.teams.map((t) => (t.id === teamId ? { ...t, captainId } : t)),
+      teams: prev.teams.map((t) => {
+        if (t.id !== teamId) return t;
+        const updatedPlayers =
+          captainId && !t.players.includes(captainId) ? [...t.players, captainId] : t.players;
+        return { ...t, captainId, players: updatedPlayers };
+      }),
+    }));
+  };
+
+  const setCaptainsBulk = (assignments: { teamId: string; captainId: string }[]) => {
+    if (!assignments || assignments.length === 0) return;
+    const map = new Map(assignments.map((a) => [a.teamId, a.captainId]));
+    setState((prev) => ({
+      ...prev,
+      teams: prev.teams.map((t) => {
+        if (map.has(t.id)) {
+          const newCap = map.get(t.id);
+          const updatedPlayers =
+            newCap && !t.players.includes(newCap) ? [...t.players, newCap] : t.players;
+          return { ...t, captainId: newCap, players: updatedPlayers };
+        }
+        return t;
+      }),
     }));
   };
 
@@ -563,35 +805,224 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
   };
 
-  // Registrations
+  // Form Customizer & Token Link Handlers
+  const fetchFormConfig = async (seasonSlug?: string): Promise<RegistrationFormConfig> => {
+    const slug = seasonSlug || state.registrationSettings.seasonSlug || 'season-4';
+    try {
+      const res = await fetch(`/api/forms/${slug}`);
+      if (res.ok) {
+        const data = await res.json();
+        setFormConfig(data);
+        return data;
+      }
+    } catch (e) {
+      console.warn('Failed to fetch form config from server:', e);
+    }
+    return formConfig;
+  };
+
+  const saveFormConfig = async (
+    config: RegistrationFormConfig,
+    publish = false
+  ): Promise<{ success: boolean; config?: RegistrationFormConfig; error?: string }> => {
+    try {
+      const payload = {
+        ...config,
+        isPublished: publish ? true : config.isPublished,
+      };
+      const res = await fetch(`/api/forms/${config.seasonSlug || 'season-4'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        setFormConfig(saved);
+        if (publish) {
+          triggerCelebration();
+        }
+        return { success: true, config: saved };
+      }
+      return { success: false, error: 'Server returned error saving form configuration' };
+    } catch (e: any) {
+      setFormConfig(config);
+      return { success: true, config };
+    }
+  };
+
+  const fetchTokens = async (
+    seasonSlug?: string
+  ): Promise<{ tokens: RegistrationTokenRecord[]; activeToken: RegistrationTokenRecord | null }> => {
+    const slug = seasonSlug || state.registrationSettings.seasonSlug || 'season-4';
+    try {
+      const res = await fetch(`/api/tokens/${slug}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.tokens)) {
+          setTokens(data.tokens);
+          setActiveToken(data.activeToken || null);
+          return { tokens: data.tokens, activeToken: data.activeToken || null };
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to fetch tokens from server:', e);
+    }
+    return { tokens, activeToken };
+  };
+
+  const regenerateToken = async (
+    seasonSlug: string,
+    invalidatePrevious: boolean,
+    label?: string
+  ): Promise<{ success: boolean; tokenRecord?: RegistrationTokenRecord; error?: string }> => {
+    try {
+      const res = await fetch('/api/tokens/regenerate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ seasonSlug, invalidatePrevious, label }),
+      });
+      const data = await res.json();
+      if (res.ok && data.tokenRecord) {
+        setActiveToken(data.tokenRecord);
+        setTokens(data.tokens || []);
+        triggerCelebration();
+        return { success: true, tokenRecord: data.tokenRecord };
+      }
+      return { success: false, error: data.error || 'Failed to regenerate token' };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Network error while regenerating link' };
+    }
+  };
+
+  const toggleTokenStatus = async (
+    tokenId: string
+  ): Promise<{ success: boolean; token?: RegistrationTokenRecord }> => {
+    try {
+      const res = await fetch(`/api/tokens/${tokenId}/toggle-status`, {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (res.ok && data.token) {
+        setTokens((prev) => prev.map((t) => (t.id === tokenId ? data.token : t)));
+        if (activeToken && activeToken.id === tokenId) {
+          setActiveToken(data.token);
+        }
+        return { success: true, token: data.token };
+      }
+    } catch (e) {}
+    return { success: false };
+  };
+
+  // Registrations (Public submissions & Admin vetting)
+  const submitPublicRegistration = async (
+    formData: any
+  ): Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean }> => {
+    try {
+      const res = await fetch('/api/registrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(formData),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        return {
+          success: false,
+          error: data.error || 'Failed to submit registration',
+          linkRevoked: Boolean(data.linkRevoked),
+        };
+      }
+      if (data.registration) {
+        setState((prev) => ({
+          ...prev,
+          registrations: [
+            ...prev.registrations.filter((r) => r.id !== data.registration.id),
+            data.registration,
+          ],
+        }));
+      }
+      return { success: true, registration: data.registration };
+    } catch (err: any) {
+      console.warn('Backend API unavailable, using resilient local storage:', err);
+      // Local fallback
+      const cleanMobile = formData.mobile ? formData.mobile.replace(/\D/g, '') : '';
+      const isDup = state.registrations.some(
+        (r) => r.mobile.replace(/\D/g, '') === cleanMobile && r.status !== 'rejected'
+      );
+      if (isDup) {
+        return {
+          success: false,
+          error: `A registration with mobile number ${cleanMobile} already exists for this season.`,
+        };
+      }
+      const regId = `SPL-2026-${String(state.registrations.length + 1).padStart(3, '0')}`;
+      const newReg: Registration = {
+        id: crypto.randomUUID(),
+        regId,
+        name: formData.name.trim(),
+        mobile: cleanMobile,
+        whatsapp: formData.whatsapp,
+        age: formData.age ? Number(formData.age) : undefined,
+        gender: formData.gender || 'M',
+        experience: formData.experience,
+        category: formData.category,
+        style: formData.style,
+        city: formData.city,
+        notes: formData.notes,
+        fee: formData.fee || state.settings.entryFee || 500,
+        status: 'pending',
+        method: formData.method || 'upi',
+        txnId: formData.txnId,
+        season: formData.season || state.registrationSettings.seasonSlug,
+        createdAt: Date.now(),
+        answers: formData.answers || {},
+        photoUrl: formData.photoUrl || undefined,
+        tokenUsed: formData.tokenUsed || undefined,
+      };
+      setState((prev) => ({
+        ...prev,
+        registrations: [...prev.registrations, newReg],
+      }));
+      return { success: true, registration: newReg };
+    }
+  };
+
   const addRegistration = (
-    data: Omit<Registration, 'id' | 'playerId' | 'regId' | 'createdAt'>
+    data: Partial<Registration> & { name: string; mobile: string }
   ): Registration => {
-    const pId = crypto.randomUUID();
-    const regId = `SPL-${new Date().getFullYear()}-${String(state.registrations.length + 1).padStart(3, '0')}`;
+    const regId = `SPL-2026-${String(state.registrations.length + 1).padStart(3, '0')}`;
     const newReg: Registration = {
-      ...data,
       id: crypto.randomUUID(),
-      playerId: pId,
       regId,
+      name: data.name.trim(),
+      mobile: data.mobile.replace(/\D/g, ''),
+      whatsapp: data.whatsapp,
+      age: data.age,
+      gender: data.gender || 'M',
+      experience: data.experience,
+      category: data.category,
+      style: data.style,
+      city: data.city,
+      notes: data.notes,
+      fee: data.fee || state.settings.entryFee || 500,
+      status: (data.status as any) || 'pending',
+      method: data.method || 'upi',
+      txnId: data.txnId,
+      season: data.season || state.registrationSettings.seasonSlug,
       createdAt: Date.now(),
       paidAt: data.status === 'paid' ? Date.now() : undefined,
-    };
-
-    const newPlayer: Player = {
-      id: pId,
-      name: data.name,
-      mobile: data.mobile,
-      age: data.age,
-      gender: data.gender,
-      skillLevel: 'Advanced',
     };
 
     setState((prev) => ({
       ...prev,
       registrations: [...prev.registrations, newReg],
-      players: [...prev.players, newPlayer],
     }));
+
+    // Post to backend
+    fetch('/api/registrations', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newReg),
+    }).catch(() => {});
 
     return newReg;
   };
@@ -613,17 +1044,164 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return target && target.playerId === p.id && updates.name ? { ...p, name: updates.name } : p;
       }),
     }));
+
+    fetch(`/api/registrations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updates),
+    }).catch(() => {});
+  };
+
+  const approveRegistration = (id: string) => {
+    triggerCelebration();
+    setState((prev) => {
+      const reg = prev.registrations.find((r) => r.id === id);
+      if (!reg) return prev;
+
+      const cleanMobile = reg.mobile ? reg.mobile.replace(/\D/g, '') : '';
+      const existingPlayer = prev.players.find(
+        (p) =>
+          (cleanMobile && p.mobile && p.mobile.replace(/\D/g, '') === cleanMobile) ||
+          p.name.trim().toLowerCase() === reg.name.trim().toLowerCase()
+      );
+
+      const playerId = existingPlayer ? existingPlayer.id : (reg.playerId || crypto.randomUUID());
+      let updatedPlayers = prev.players;
+
+      if (!existingPlayer) {
+        const newPlayer: Player = {
+          id: playerId,
+          name: reg.name.trim(),
+          mobile: reg.mobile,
+          age: reg.age,
+          gender: reg.gender || 'M',
+          skillLevel: (reg.experience === 'Pro' ? 'Pro' : reg.experience === 'Intermediate' ? 'Intermediate' : 'Advanced') as any,
+        };
+        updatedPlayers = [...prev.players, newPlayer];
+      }
+
+      const updatedRegistrations = prev.registrations.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'approved' as const,
+              approvedAt: Date.now(),
+              playerId,
+            }
+          : r
+      );
+
+      return {
+        ...prev,
+        players: updatedPlayers,
+        registrations: updatedRegistrations,
+      };
+    });
+
+    fetch(`/api/registrations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'approved', approvedAt: Date.now() }),
+    }).catch(() => {});
+  };
+
+  const rejectRegistration = (id: string, reason?: string) => {
+    setState((prev) => ({
+      ...prev,
+      registrations: prev.registrations.map((r) =>
+        r.id === id
+          ? {
+              ...r,
+              status: 'rejected' as const,
+              notes: reason ? `${r.notes || ''} [Rejected: ${reason}]`.trim() : r.notes,
+            }
+          : r
+      ),
+    }));
+
+    fetch(`/api/registrations/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'rejected' }),
+    }).catch(() => {});
   };
 
   const deleteRegistration = (id: string) => {
+    setState((prev) => ({
+      ...prev,
+      registrations: prev.registrations.filter((r) => r.id !== id),
+    }));
+
+    fetch(`/api/registrations/${id}`, {
+      method: 'DELETE',
+    }).catch(() => {});
+  };
+
+  const deleteRegistrationsBulk = (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
+    const idSet = new Set(ids);
+    setState((prev) => ({
+      ...prev,
+      registrations: prev.registrations.filter((r) => !idSet.has(r.id)),
+    }));
+
+    fetch('/api/registrations/bulk-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }).catch(() => {});
+  };
+
+  const bulkApproveRegistrations = (ids: string[]) => {
+    if (!ids || ids.length === 0) return;
+    triggerCelebration();
+    const idSet = new Set(ids);
+
     setState((prev) => {
-      const reg = prev.registrations.find((r) => r.id === id);
+      const newPlayers = [...prev.players];
+      const updatedRegistrations = prev.registrations.map((r) => {
+        if (!idSet.has(r.id)) return r;
+
+        const cleanMobile = r.mobile ? r.mobile.replace(/\D/g, '') : '';
+        const existingPlayer = newPlayers.find(
+          (p) =>
+            (cleanMobile && p.mobile && p.mobile.replace(/\D/g, '') === cleanMobile) ||
+            p.name.trim().toLowerCase() === r.name.trim().toLowerCase()
+        );
+
+        const playerId = existingPlayer ? existingPlayer.id : (r.playerId || crypto.randomUUID());
+
+        if (!existingPlayer) {
+          newPlayers.push({
+            id: playerId,
+            name: r.name.trim(),
+            mobile: r.mobile,
+            age: r.age,
+            gender: r.gender || 'M',
+            skillLevel: (r.experience === 'Pro' ? 'Pro' : r.experience === 'Intermediate' ? 'Intermediate' : 'Advanced') as any,
+          });
+        }
+
+        return {
+          ...r,
+          status: 'approved' as const,
+          approvedAt: Date.now(),
+          playerId,
+        };
+      });
+
       return {
         ...prev,
-        registrations: prev.registrations.filter((r) => r.id !== id),
-        players: reg ? prev.players.filter((p) => p.id !== reg.playerId) : prev.players,
+        players: newPlayers,
+        registrations: updatedRegistrations,
       };
     });
+
+    fetch('/api/registrations/bulk-approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    }).catch(() => {});
   };
 
   // Global resets & export
@@ -674,17 +1252,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         standings,
         updateSettings,
         updatePaymentSettings,
+        updateRegistrationSettings,
         addPlayer,
         bulkAddPlayers,
         updatePlayer,
         deletePlayer,
+        deletePlayersBulk,
         clearPlayers,
         addTeam,
         updateTeam,
         deleteTeam,
+        deleteTeamsBulk,
         renameTeam,
         toggleTeamLock,
         setTeamCaptain,
+        setCaptainsBulk,
         setTeamPlayer,
         setTeams,
         clearTeams,
@@ -702,9 +1284,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         generateKnockoutBracket,
         updateKnockoutMatch,
         clearKnockout,
+        formConfig,
+        tokens,
+        activeToken,
+        fetchFormConfig,
+        saveFormConfig,
+        fetchTokens,
+        regenerateToken,
+        toggleTokenStatus,
+        submitPublicRegistration,
         addRegistration,
         updateRegistration,
+        approveRegistration,
+        rejectRegistration,
         deleteRegistration,
+        deleteRegistrationsBulk,
+        bulkApproveRegistrations,
         resetToDefault,
         clearTournamentData,
         exportStateJSON,

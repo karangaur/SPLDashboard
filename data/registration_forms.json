@@ -1,0 +1,182 @@
+{
+  "season-4": {
+    "seasonSlug": "season-4",
+    "tournamentName": "Smash Premier League",
+    "seasonTitle": "Season IV (Championship Edition)",
+    "deadline": "2026-11-15T23:59",
+    "maxSlots": 32,
+    "entryFee": 500,
+    "venue": "Maharajganj Indoor Badminton Stadium, Court 1 & 2",
+    "date": "2026-10-25",
+    "enabled": true,
+    "closedNotice": "Registrations for this tournament are currently closed. Please contact the tournament organizer for spot entry inquiries.",
+    "isPublished": true,
+    "publishedAt": 1792927202685,
+    "lastUpdatedAt": 1792927202685,
+    "appearance": {
+      "formTitle": "Player Entry & Registration Form",
+      "formDescription": "Register as an official athlete for the upcoming Smash Premier League championship.",
+      "welcomeMessage": "Welcome athletes! Please fill in your details accurately to register for the tournament draft.",
+      "accentColor": "#10b981",
+      "accentName": "Electric Emerald",
+      "submitButtonText": "Submit Registration & Confirm Entry",
+      "successTitle": "Registration Submitted Successfully!",
+      "successMessage": "Thank you for registering for Smash Premier League. Your details have been received by the tournament committee. Please save your Registration ID."
+    },
+    "fields": [
+      {
+        "id": "name",
+        "label": "Full Name",
+        "type": "text",
+        "placeholder": "Enter athlete full legal name",
+        "helpText": "As it will appear on tournament draw sheets and certificates",
+        "required": true,
+        "enabled": true,
+        "isSystem": true,
+        "order": 1
+      },
+      {
+        "id": "mobile",
+        "label": "Mobile Number",
+        "type": "mobile",
+        "placeholder": "9876543210",
+        "helpText": "10-digit Indian mobile number for tournament SMS updates",
+        "required": true,
+        "enabled": true,
+        "isSystem": true,
+        "order": 2
+      },
+      {
+        "id": "whatsapp",
+        "label": "WhatsApp Number",
+        "type": "mobile",
+        "placeholder": "Same as mobile or provide alternate",
+        "helpText": "For fixture schedules and captain notifications",
+        "required": false,
+        "enabled": true,
+        "order": 3
+      },
+      {
+        "id": "gender",
+        "label": "Gender",
+        "type": "radio",
+        "options": [
+          "Male",
+          "Female",
+          "Other"
+        ],
+        "required": true,
+        "enabled": true,
+        "order": 4
+      },
+      {
+        "id": "age",
+        "label": "Age",
+        "type": "number",
+        "placeholder": "e.g. 24",
+        "helpText": "Used for seeding and veteran category classification",
+        "required": false,
+        "enabled": true,
+        "order": 5
+      },
+      {
+        "id": "experience",
+        "label": "Playing Experience",
+        "type": "dropdown",
+        "options": [
+          "Beginner",
+          "Intermediate",
+          "Advanced",
+          "Pro"
+        ],
+        "helpText": "Helps ensure fair team balance in captain drafts",
+        "required": false,
+        "enabled": true,
+        "order": 6
+      },
+      {
+        "id": "category",
+        "label": "Preferred Playing Category",
+        "type": "dropdown",
+        "options": [
+          "Singles",
+          "Doubles",
+          "Mixed Doubles",
+          "Both"
+        ],
+        "required": false,
+        "enabled": true,
+        "order": 7
+      },
+      {
+        "id": "style",
+        "label": "Playing Style",
+        "type": "dropdown",
+        "options": [
+          "Attacking",
+          "Defensive",
+          "All-Rounder",
+          "Net Play"
+        ],
+        "required": false,
+        "enabled": true,
+        "order": 8
+      },
+      {
+        "id": "city",
+        "label": "City / Locality",
+        "type": "text",
+        "placeholder": "e.g. Maharajganj, Gorakhpur",
+        "required": false,
+        "enabled": true,
+        "order": 9
+      },
+      {
+        "id": "ownRacket",
+        "label": "Do you have your own tournament racket?",
+        "type": "radio",
+        "options": [
+          "Yes, I will bring my own racket",
+          "No, require club loaner racket"
+        ],
+        "required": false,
+        "enabled": true,
+        "order": 10
+      },
+      {
+        "id": "tshirtSize",
+        "label": "Tournament Jersey Size",
+        "type": "dropdown",
+        "options": [
+          "S (36)",
+          "M (38)",
+          "L (40)",
+          "XL (42)",
+          "XXL (44)"
+        ],
+        "helpText": "Official S.P.L. dri-fit tournament jersey",
+        "required": false,
+        "enabled": true,
+        "order": 11
+      },
+      {
+        "id": "photo",
+        "label": "Athlete Profile Photo",
+        "type": "photo",
+        "helpText": "Upload a clear headshot for your athlete player badge",
+        "required": false,
+        "enabled": true,
+        "order": 12
+      },
+      {
+        "id": "notes",
+        "label": "Additional Information / Notes",
+        "type": "textarea",
+        "placeholder": "Any special requests, partner preferences, or medical notes",
+        "required": false,
+        "enabled": true,
+        "order": 13
+      }
+    ]
+  }
+}

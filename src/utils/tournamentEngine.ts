@@ -6,9 +6,212 @@ import {
   StandingsRecord,
   Registration,
   PaymentSettings,
+  RegistrationFormField,
+  RegistrationFormConfig,
+  FormAppearance,
+  RegistrationTokenRecord,
+  FormFieldType,
 } from '../types/tournament';
 
-export const STORAGE_KEY = 'smash-premier-league-v2';
+export const STORAGE_KEY = 'smash-premier-league-v8';
+
+export const DEFAULT_REGISTRATION_SETTINGS = {
+  enabled: true,
+  seasonSlug: 'season-4',
+  seasonTitle: 'Smash Premier League — Season IV (Championship Edition)',
+  maxSlots: 32,
+  deadline: '2026-11-15T23:59',
+  closedNotice: 'Registrations for Season IV are currently closed. Please contact the tournament organizer or follow the official channel for spot entries.',
+  fields: {
+    whatsapp: { visible: true, required: false },
+    gender: { visible: true, required: true },
+    age: { visible: true, required: false },
+    experience: { visible: true, required: false },
+    category: { visible: true, required: false },
+    style: { visible: true, required: false },
+    city: { visible: true, required: false },
+    notes: { visible: true, required: false },
+  },
+};
+
+export const COLOR_PRESETS = [
+  { name: 'Electric Emerald', color: '#10b981', ring: 'ring-emerald-500', bg: 'bg-emerald-500' },
+  { name: 'Championship Gold', color: '#f59e0b', ring: 'ring-amber-500', bg: 'bg-amber-500' },
+  { name: 'Neon Cyan', color: '#06b6d4', ring: 'ring-cyan-500', bg: 'bg-cyan-500' },
+  { name: 'Blaze Orange', color: '#f97316', ring: 'ring-orange-500', bg: 'bg-orange-500' },
+  { name: 'Crimson Rose', color: '#f43f5e', ring: 'ring-rose-500', bg: 'bg-rose-500' },
+  { name: 'Imperial Violet', color: '#8b5cf6', ring: 'ring-violet-500', bg: 'bg-violet-500' },
+];
+
+export const DEFAULT_FORM_FIELDS: RegistrationFormField[] = [
+  {
+    id: 'name',
+    label: 'Full Name',
+    type: 'text',
+    placeholder: 'Enter athlete full legal name',
+    helpText: 'As it will appear on tournament draw sheets and certificates',
+    required: true,
+    enabled: true,
+    isSystem: true,
+    order: 1,
+  },
+  {
+    id: 'mobile',
+    label: 'Mobile Number',
+    type: 'mobile',
+    placeholder: '9876543210',
+    helpText: '10-digit Indian mobile number for tournament SMS updates',
+    required: true,
+    enabled: true,
+    isSystem: true,
+    order: 2,
+  },
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp Number',
+    type: 'mobile',
+    placeholder: 'Same as mobile or provide alternate',
+    helpText: 'For fixture schedules and captain notifications',
+    required: false,
+    enabled: true,
+    order: 3,
+  },
+  {
+    id: 'gender',
+    label: 'Gender',
+    type: 'radio',
+    options: ['Male', 'Female', 'Other'],
+    required: true,
+    enabled: true,
+    order: 4,
+  },
+  {
+    id: 'age',
+    label: 'Age',
+    type: 'number',
+    placeholder: 'e.g. 24',
+    helpText: 'Used for seeding and veteran category classification',
+    required: false,
+    enabled: true,
+    order: 5,
+  },
+  {
+    id: 'experience',
+    label: 'Playing Experience',
+    type: 'dropdown',
+    options: ['Beginner', 'Intermediate', 'Advanced', 'Pro'],
+    helpText: 'Helps ensure fair team balance in captain drafts',
+    required: false,
+    enabled: true,
+    order: 6,
+  },
+  {
+    id: 'category',
+    label: 'Preferred Playing Category',
+    type: 'dropdown',
+    options: ['Singles', 'Doubles', 'Mixed Doubles', 'Both'],
+    required: false,
+    enabled: true,
+    order: 7,
+  },
+  {
+    id: 'style',
+    label: 'Playing Style',
+    type: 'dropdown',
+    options: ['Attacking', 'Defensive', 'All-Rounder', 'Net Play'],
+    required: false,
+    enabled: true,
+    order: 8,
+  },
+  {
+    id: 'city',
+    label: 'City / Locality',
+    type: 'text',
+    placeholder: 'e.g. Maharajganj, Gorakhpur',
+    required: false,
+    enabled: true,
+    order: 9,
+  },
+  {
+    id: 'ownRacket',
+    label: 'Do you have your own tournament racket?',
+    type: 'radio',
+    options: ['Yes, I will bring my own racket', 'No, require club loaner racket'],
+    required: false,
+    enabled: true,
+    order: 10,
+  },
+  {
+    id: 'tshirtSize',
+    label: 'Tournament Jersey Size',
+    type: 'dropdown',
+    options: ['S (36)', 'M (38)', 'L (40)', 'XL (42)', 'XXL (44)'],
+    helpText: 'Official S.P.L. dri-fit tournament jersey',
+    required: false,
+    enabled: true,
+    order: 11,
+  },
+  {
+    id: 'photo',
+    label: 'Athlete Profile Photo',
+    type: 'photo',
+    helpText: 'Upload a clear headshot for your athlete player badge',
+    required: false,
+    enabled: true,
+    order: 12,
+  },
+  {
+    id: 'notes',
+    label: 'Additional Information / Notes',
+    type: 'textarea',
+    placeholder: 'Any special requests, partner preferences, or medical notes',
+    required: false,
+    enabled: true,
+    order: 13,
+  },
+];
+
+export function createDefaultFormConfig(
+  seasonSlug = 'season-4',
+  tournamentName = 'Smash Premier League',
+  seasonTitle = 'Season IV (Championship Edition)'
+): RegistrationFormConfig {
+  return {
+    seasonSlug,
+    tournamentName,
+    seasonTitle,
+    deadline: '2026-11-15T23:59',
+    maxSlots: 32,
+    entryFee: 500,
+    venue: 'Maharajganj Indoor Badminton Stadium, Court 1 & 2',
+    date: '2026-10-25',
+    enabled: true,
+    closedNotice: 'Registrations for this tournament are currently closed. Please contact the tournament organizer for spot entry inquiries.',
+    isPublished: true,
+    publishedAt: Date.now(),
+    lastUpdatedAt: Date.now(),
+    appearance: {
+      formTitle: 'Player Entry & Registration Form',
+      formDescription: 'Register as an official athlete for the upcoming Smash Premier League championship.',
+      welcomeMessage: 'Welcome athletes! Please fill in your details accurately to register for the tournament draft.',
+      accentColor: '#10b981',
+      accentName: 'Electric Emerald',
+      submitButtonText: 'Submit Registration & Confirm Entry',
+      successTitle: 'Registration Submitted Successfully!',
+      successMessage: 'Thank you for registering for Smash Premier League. Your details have been received by the tournament committee. Please save your Registration ID.',
+    },
+    fields: [...DEFAULT_FORM_FIELDS],
+  };
+}
+
+export function generateRegistrationToken(prefix = 'SPL'): string {
+  const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+  let rand = '';
+  for (let i = 0; i < 6; i++) {
+    rand += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return `${prefix}-${Date.now().toString(36).slice(-3).toUpperCase()}-${rand}`;
+}
 
 export const DEFAULT_STATE: TournamentState = {
   settings: {
@@ -23,297 +226,15 @@ export const DEFAULT_STATE: TournamentState = {
     season: 'Season IV (Championship Edition)',
     announcement: 'Grand Finale on Court 1! Live scoring active.',
   },
-  players: [
-    { id: 'p-1', name: 'Vikramaditya Rao', mobile: '9876543210', age: 24, gender: 'M', skillLevel: 'Pro' },
-    { id: 'p-2', name: 'Rohan Deshmukh', mobile: '9876543211', age: 26, gender: 'M', skillLevel: 'Advanced' },
-    { id: 'p-3', name: 'Ananya Sharma', mobile: '9876543212', age: 22, gender: 'F', skillLevel: 'Pro' },
-    { id: 'p-4', name: 'Kabir Patel', mobile: '9876543213', age: 28, gender: 'M', skillLevel: 'Advanced' },
-    { id: 'p-5', name: 'Aditya Singhania', mobile: '9876543214', age: 25, gender: 'M', skillLevel: 'Pro' },
-    { id: 'p-6', name: 'Pooja Venkatesh', mobile: '9876543215', age: 23, gender: 'F', skillLevel: 'Advanced' },
-    { id: 'p-7', name: 'Sameer Joshi', mobile: '9876543216', age: 27, gender: 'M', skillLevel: 'Intermediate' },
-    { id: 'p-8', name: 'Farhan Akhtar', mobile: '9876543217', age: 29, gender: 'M', skillLevel: 'Advanced' },
-    { id: 'p-9', name: 'Kavita Nair', mobile: '9876543218', age: 21, gender: 'F', skillLevel: 'Pro' },
-    { id: 'p-10', name: 'Aryan Mehta', mobile: '9876543219', age: 24, gender: 'M', skillLevel: 'Advanced' },
-    { id: 'p-11', name: 'Gaurav Kulkarni', mobile: '9876543220', age: 30, gender: 'M', skillLevel: 'Intermediate' },
-    { id: 'p-12', name: 'Devendra Sen', mobile: '9876543221', age: 26, gender: 'M', skillLevel: 'Advanced' },
-  ],
-  teams: [
-    {
-      id: 'team-1',
-      name: 'Falcon Smasherz',
-      players: ['p-1', 'p-2'],
-      captainId: 'p-1',
-      locked: true,
-      avatarColor: 'from-amber-500 to-orange-600',
-      badge: '🦅',
-    },
-    {
-      id: 'team-2',
-      name: 'Royal Shuttlers',
-      players: ['p-3', 'p-4'],
-      captainId: 'p-3',
-      locked: true,
-      avatarColor: 'from-blue-600 to-indigo-700',
-      badge: '👑',
-    },
-    {
-      id: 'team-3',
-      name: 'Thunder Bolts',
-      players: ['p-5', 'p-6'],
-      captainId: 'p-5',
-      locked: true,
-      avatarColor: 'from-emerald-500 to-teal-700',
-      badge: '⚡',
-    },
-    {
-      id: 'team-4',
-      name: 'Court Titans',
-      players: ['p-7', 'p-8'],
-      captainId: 'p-8',
-      locked: true,
-      avatarColor: 'from-rose-500 to-pink-700',
-      badge: '🛡️',
-    },
-    {
-      id: 'team-5',
-      name: 'Aero Aces',
-      players: ['p-9', 'p-10'],
-      captainId: 'p-9',
-      locked: false,
-      avatarColor: 'from-violet-500 to-purple-800',
-      badge: '🎯',
-    },
-    {
-      id: 'team-6',
-      name: 'Net Ninjas',
-      players: ['p-11', 'p-12'],
-      captainId: 'p-12',
-      locked: false,
-      avatarColor: 'from-cyan-500 to-blue-700',
-      badge: '🥷',
-    },
-  ],
-  matches: [
-    {
-      id: 'm-1',
-      round: 1,
-      court: 1,
-      teamA: 'team-1',
-      teamB: 'team-2',
-      scoreA: 21,
-      scoreB: 18,
-      status: 'completed',
-      winner: 'team-1',
-      time: '09:00 AM',
-      sets: [{ scoreA: 21, scoreB: 18 }],
-    },
-    {
-      id: 'm-2',
-      round: 1,
-      court: 2,
-      teamA: 'team-3',
-      teamB: 'team-4',
-      scoreA: 21,
-      scoreB: 14,
-      status: 'completed',
-      winner: 'team-3',
-      time: '09:30 AM',
-      sets: [{ scoreA: 21, scoreB: 14 }],
-    },
-    {
-      id: 'm-3',
-      round: 2,
-      court: 1,
-      teamA: 'team-5',
-      teamB: 'team-6',
-      scoreA: 22,
-      scoreB: 20,
-      status: 'completed',
-      winner: 'team-5',
-      time: '10:00 AM',
-      sets: [{ scoreA: 22, scoreB: 20 }],
-    },
-    {
-      id: 'm-4',
-      round: 2,
-      court: 2,
-      teamA: 'team-1',
-      teamB: 'team-3',
-      scoreA: 21,
-      scoreB: 19,
-      status: 'completed',
-      winner: 'team-1',
-      time: '10:30 AM',
-      sets: [{ scoreA: 21, scoreB: 19 }],
-    },
-    {
-      id: 'm-5',
-      round: 3,
-      court: 1,
-      teamA: 'team-2',
-      teamB: 'team-5',
-      scoreA: 19,
-      scoreB: 17,
-      status: 'live',
-      time: '11:15 AM',
-      sets: [{ scoreA: 19, scoreB: 17 }],
-    },
-    {
-      id: 'm-6',
-      round: 3,
-      court: 2,
-      teamA: 'team-4',
-      teamB: 'team-6',
-      status: 'upcoming',
-      time: '12:00 PM',
-    },
-    {
-      id: 'm-7',
-      round: 4,
-      court: 1,
-      teamA: 'team-1',
-      teamB: 'team-5',
-      status: 'upcoming',
-      time: '01:00 PM',
-    },
-    {
-      id: 'm-8',
-      round: 4,
-      court: 2,
-      teamA: 'team-2',
-      teamB: 'team-4',
-      status: 'upcoming',
-      time: '01:45 PM',
-    },
-  ],
+  registrationSettings: DEFAULT_REGISTRATION_SETTINGS,
+  players: [],
+  teams: [],
+  matches: [],
   knockout: {
     format: 'top4',
-    matches: [
-      {
-        id: 'ko-1',
-        stage: 'SF',
-        slot: 1,
-        teamA: 'team-1',
-        teamB: 'team-4',
-        status: 'upcoming',
-      },
-      {
-        id: 'ko-2',
-        stage: 'SF',
-        slot: 2,
-        teamA: 'team-3',
-        teamB: 'team-2',
-        status: 'upcoming',
-      },
-      {
-        id: 'ko-3',
-        stage: 'F',
-        slot: 1,
-        status: 'upcoming',
-      },
-    ],
+    matches: [],
   },
-  registrations: [
-    {
-      id: 'reg-1',
-      playerId: 'p-1',
-      regId: 'SPL-2026-001',
-      name: 'Vikramaditya Rao',
-      mobile: '9876543210',
-      age: 24,
-      gender: 'M',
-      fee: 500,
-      status: 'paid',
-      method: 'upi',
-      txnId: 'UPI-9823487192',
-      createdAt: 1774300000000,
-      paidAt: 1774300500000,
-    },
-    {
-      id: 'reg-2',
-      playerId: 'p-2',
-      regId: 'SPL-2026-002',
-      name: 'Rohan Deshmukh',
-      mobile: '9876543211',
-      age: 26,
-      gender: 'M',
-      fee: 500,
-      status: 'paid',
-      method: 'cash',
-      createdAt: 1774301000000,
-      paidAt: 1774301000000,
-    },
-    {
-      id: 'reg-3',
-      playerId: 'p-3',
-      regId: 'SPL-2026-003',
-      name: 'Ananya Sharma',
-      mobile: '9876543212',
-      age: 22,
-      gender: 'F',
-      fee: 500,
-      status: 'paid',
-      method: 'upi',
-      txnId: 'UPI-7712398412',
-      createdAt: 1774302000000,
-      paidAt: 1774302200000,
-    },
-    {
-      id: 'reg-4',
-      playerId: 'p-4',
-      regId: 'SPL-2026-004',
-      name: 'Kabir Patel',
-      mobile: '9876543213',
-      age: 28,
-      gender: 'M',
-      fee: 500,
-      status: 'paid',
-      method: 'bank',
-      txnId: 'IMPS-2894719283',
-      createdAt: 1774303000000,
-      paidAt: 1774303100000,
-    },
-    {
-      id: 'reg-5',
-      playerId: 'p-5',
-      regId: 'SPL-2026-005',
-      name: 'Aditya Singhania',
-      mobile: '9876543214',
-      age: 25,
-      gender: 'M',
-      fee: 500,
-      status: 'paid',
-      method: 'upi',
-      txnId: 'UPI-3312984712',
-      createdAt: 1774304000000,
-      paidAt: 1774304100000,
-    },
-    {
-      id: 'reg-6',
-      playerId: 'p-6',
-      regId: 'SPL-2026-006',
-      name: 'Pooja Venkatesh',
-      mobile: '9876543215',
-      age: 23,
-      gender: 'F',
-      fee: 500,
-      status: 'complimentary',
-      createdAt: 1774305000000,
-      paidAt: 1774305000000,
-    },
-    {
-      id: 'reg-7',
-      playerId: 'p-7',
-      regId: 'SPL-2026-007',
-      name: 'Sameer Joshi',
-      mobile: '9876543216',
-      age: 27,
-      gender: 'M',
-      fee: 500,
-      status: 'pending',
-      createdAt: 1774306000000,
-    },
-  ],
+  registrations: [],
   payment: {
     enabled: true,
     qrImage: '',
@@ -481,23 +402,48 @@ export function progressKnockoutMatches(matches: KnockoutMatch[], format: 'top2'
   return updated;
 }
 
+// Indian Mobile Validator
+export function validateIndianMobile(raw: string): { isValid: boolean; cleanMobile: string; error?: string } {
+  if (!raw || typeof raw !== 'string') {
+    return { isValid: false, cleanMobile: '', error: 'Mobile number is required' };
+  }
+  // Remove non-digit characters (+91, spaces, hyphens)
+  let clean = raw.replace(/\D/g, '');
+  if (clean.startsWith('91') && clean.length === 12) {
+    clean = clean.slice(2);
+  } else if (clean.startsWith('0') && clean.length === 11) {
+    clean = clean.slice(1);
+  }
+
+  if (clean.length !== 10) {
+    return { isValid: false, cleanMobile: clean, error: 'Mobile number must be exactly 10 digits' };
+  }
+  if (!/^[6-9]/.test(clean)) {
+    return { isValid: false, cleanMobile: clean, error: 'Indian mobile numbers must start with 6, 7, 8, or 9' };
+  }
+  return { isValid: true, cleanMobile: clean };
+}
+
 // Registration Summary Analytics
 export function calculateRegistrationStats(registrations: Registration[]) {
-  const paid = registrations.filter((r) => r.status === 'paid');
+  const approved = registrations.filter((r) => r.status === 'approved' || r.status === 'paid');
   const pending = registrations.filter((r) => r.status === 'pending');
+  const rejected = registrations.filter((r) => r.status === 'rejected');
   const comp = registrations.filter((r) => r.status === 'complimentary');
 
-  const collected = paid.reduce((sum, r) => sum + (r.fee || 0), 0);
+  const collected = approved.reduce((sum, r) => sum + (r.fee || 0), 0);
   const pendingAmount = pending.reduce((sum, r) => sum + (r.fee || 0), 0);
 
-  const byUpi = paid.filter((r) => r.method === 'upi').reduce((sum, r) => sum + r.fee, 0);
-  const byCash = paid.filter((r) => r.method === 'cash').reduce((sum, r) => sum + r.fee, 0);
-  const byBank = paid.filter((r) => r.method === 'bank').reduce((sum, r) => sum + r.fee, 0);
+  const byUpi = approved.filter((r) => r.method === 'upi').reduce((sum, r) => sum + r.fee, 0);
+  const byCash = approved.filter((r) => r.method === 'cash').reduce((sum, r) => sum + r.fee, 0);
+  const byBank = approved.filter((r) => r.method === 'bank').reduce((sum, r) => sum + r.fee, 0);
 
   return {
     total: registrations.length,
-    paidCount: paid.length,
+    approvedCount: approved.length,
+    paidCount: approved.length,
     pendingCount: pending.length,
+    rejectedCount: rejected.length,
     compCount: comp.length,
     collected,
     pendingAmount,
@@ -535,13 +481,19 @@ export function exportRegistrationsToCSV(registrations: Registration[]): string 
     'Registration ID',
     'Player Name',
     'Mobile',
+    'WhatsApp',
     'Age',
     'Gender',
+    'Experience Level',
+    'Category',
+    'Playing Style',
+    'City',
+    'Status',
     'Entry Fee',
-    'Payment Status',
     'Payment Method',
-    'Transaction ID',
-    'Date Registered',
+    'Transaction Ref',
+    'Season',
+    'Date Submitted',
   ];
 
   const escapeCSV = (s: any) => `"${String(s ?? '').replace(/"/g, '""')}"`;
@@ -550,13 +502,19 @@ export function exportRegistrationsToCSV(registrations: Registration[]): string 
     escapeCSV(r.regId),
     escapeCSV(r.name),
     escapeCSV(r.mobile),
+    escapeCSV(r.whatsapp ?? ''),
     escapeCSV(r.age ?? ''),
     escapeCSV(r.gender),
-    escapeCSV(r.fee),
+    escapeCSV(r.experience ?? ''),
+    escapeCSV(r.category ?? ''),
+    escapeCSV(r.style ?? ''),
+    escapeCSV(r.city ?? ''),
     escapeCSV(r.status),
+    escapeCSV(r.fee),
     escapeCSV(r.method ?? ''),
     escapeCSV(r.txnId ?? ''),
-    escapeCSV(new Date(r.createdAt).toLocaleString()),
+    escapeCSV(r.season ?? ''),
+    escapeCSV(new Date(r.createdAt).toLocaleString('en-IN')),
   ]);
 
   return [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');

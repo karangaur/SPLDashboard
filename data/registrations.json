@@ -1,0 +1,37 @@
+[
+  {
+    "id": "bcc8e0da-a2e4-4ba3-a73f-c5a789349e2e",
+    "regId": "SPL-2026-001",
+    "name": "Karan Gaur",
+    "mobile": "9876543210",
+    "age": 24,
+    "gender": "M",
+    "experience": "Advanced",
+    "category": "Doubles",
+    "fee": 500,
+    "status": "pending",
+    "method": "upi",
+    "season": "season-4",
+    "createdAt": 1792925382616
+  },
+  {
+    "id": "5ba1fa75-8a91-41ba-bc74-8c2a89704c94",
+    "regId": "SPL-2026-002",
+    "name": "Vikram Verma",
+    "mobile": "9822334455",
+    "gender": "M",
+    "fee": 500,
+    "status": "pending",
+    "method": "upi",
+    "season": "season-4",
+    "createdAt": 1792927256595,
+    "answers": {
+      "name": "Vikram Verma",
+      "mobile": "9822334455",
+      "gender": "Male",
+      "ownRacket": "Yes, I will bring my own racket",
+      "tshirtSize": "L (40)"
+    },
+    "tokenUsed": "SPL-SEASON4-CZB7ZK"
+  }
+]
