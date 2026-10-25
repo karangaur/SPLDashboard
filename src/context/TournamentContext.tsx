@@ -353,6 +353,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       payment: { ...prev.payment, ...paymentUpdate },
     }));
+    setFormConfig((prev) => ({
+      ...prev,
+      payment: {
+        enabled: paymentUpdate.enabled ?? prev.payment?.enabled ?? true,
+        upiId: paymentUpdate.upiId ?? prev.payment?.upiId ?? 'smashleague@icici',
+        accountName: paymentUpdate.accountName ?? prev.payment?.accountName ?? 'Smash Premier League Tournament',
+        note: paymentUpdate.note ?? prev.payment?.note ?? 'SPL Tournament Entry Fee',
+      },
+    }));
   };
 
   const updateRegistrationSettings = (settingsUpdate: Partial<RegistrationSettings>) => {
@@ -830,6 +839,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ...config,
         isPublished: publish ? true : config.isPublished,
       };
+
+      // Synchronize state.payment and state.settings.entryFee
+      if (config.payment) {
+        setState((prev) => ({
+          ...prev,
+          settings: {
+            ...prev.settings,
+            entryFee: config.entryFee != null ? config.entryFee : prev.settings.entryFee,
+          },
+          payment: {
+            ...prev.payment,
+            enabled: config.payment?.enabled ?? prev.payment.enabled,
+            upiId: config.payment?.upiId || prev.payment.upiId,
+            accountName: config.payment?.accountName || prev.payment.accountName,
+            note: config.payment?.note || prev.payment.note,
+          },
+        }));
+      }
+
       const res = await fetch(`/api/forms/${config.seasonSlug || 'season-4'}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

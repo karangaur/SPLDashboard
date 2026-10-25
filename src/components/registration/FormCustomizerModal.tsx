@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   Plus,
@@ -20,6 +20,11 @@ import {
   Calendar,
   Layers,
   Lock,
+  CreditCard,
+  QrCode,
+  ExternalLink,
+  ArrowRight,
+  Copy,
 } from 'lucide-react';
 import {
   RegistrationFormField,
@@ -27,7 +32,12 @@ import {
   FormFieldType,
   FormAppearance,
 } from '../../types/tournament';
-import { COLOR_PRESETS } from '../../utils/tournamentEngine';
+import {
+  COLOR_PRESETS,
+  buildUPIPaymentUri,
+  generateUPIQRCode,
+  formatINR,
+} from '../../utils/tournamentEngine';
 
 interface FormCustomizerModalProps {
   initialConfig: RegistrationFormConfig;
@@ -58,17 +68,47 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
   // Working draft state
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() => ({
     ...initialConfig,
+    payment: initialConfig.payment || {
+      enabled: true,
+      upiId: 'smashleague@icici',
+      accountName: 'Smash Premier League Tournament',
+      note: 'SPL Tournament Entry Fee',
+    },
     appearance: {
       ...initialConfig.appearance,
     },
     fields: [...initialConfig.fields],
   }));
 
-  const [activeTab, setActiveTab] = useState<'details' | 'fields' | 'appearance'>('fields');
+  const [activeTab, setActiveTab] = useState<'details' | 'fields' | 'payment' | 'appearance'>('fields');
   const [isPreviewMode, setIsPreviewMode] = useState(false);
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'mobile'>('desktop');
   const [isSaving, setIsSaving] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [previewQrCode, setPreviewQrCode] = useState<string>('');
+
+  // Generate dynamic QR code preview based on current UPI ID and prefilled amount
+  useEffect(() => {
+    const upiUri = buildUPIPaymentUri({
+      upiId: formConfig.payment?.upiId || 'smashleague@icici',
+      accountName: formConfig.payment?.accountName || 'Smash Premier League Tournament',
+      amount: formConfig.entryFee ?? 500,
+      note: formConfig.payment?.note || 'SPL Tournament Entry Fee',
+    });
+
+    if (upiUri) {
+      generateUPIQRCode(upiUri).then((dataUrl) => {
+        setPreviewQrCode(dataUrl);
+      });
+    } else {
+      setPreviewQrCode('');
+    }
+  }, [
+    formConfig.payment?.upiId,
+    formConfig.payment?.accountName,
+    formConfig.payment?.note,
+    formConfig.entryFee,
+  ]);
 
   // New field creator popover / drawer
   const [isAddingField, setIsAddingField] = useState(false);

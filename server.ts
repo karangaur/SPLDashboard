@@ -7,7 +7,10 @@ import { createServer as createViteServer } from 'vite';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.join(__dirname, 'data');
+const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION);
+const ORIGINAL_DATA_DIR = path.join(__dirname, 'data');
+const DATA_DIR = isVercel ? path.join('/tmp', 'spl-data') : ORIGINAL_DATA_DIR;
+
 const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'registration_settings.json');
 const FORMS_FILE = path.join(DATA_DIR, 'registration_forms.json');
@@ -15,7 +18,27 @@ const TOKENS_FILE = path.join(DATA_DIR, 'registration_tokens.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (err) {
+    console.warn('Could not create data dir:', err);
+  }
+}
+
+// In Vercel serverless, copy initial seed files from read-only filesystem to /tmp
+if (isVercel && fs.existsSync(ORIGINAL_DATA_DIR)) {
+  try {
+    const files = fs.readdirSync(ORIGINAL_DATA_DIR);
+    for (const f of files) {
+      const src = path.join(ORIGINAL_DATA_DIR, f);
+      const dest = path.join(DATA_DIR, f);
+      if (!fs.existsSync(dest) && fs.statSync(src).isFile()) {
+        fs.copyFileSync(src, dest);
+      }
+    }
+  } catch (err) {
+    console.warn('Could not copy initial files to /tmp:', err);
+  }
 }
 
 function readJSON<T>(filePath: string, fallback: T): T {
@@ -237,7 +260,20 @@ async function startServer() {
   const PORT = Number(process.env.PORT) || 3000;
   const isProd = process.env.NODE_ENV === 'production';
 
-  app.use(express.json());
+  // Increase payload limit to 50MB to support athlete profile photos & rich custom forms
+  app.use(express.json({ limit: '50mb' }));
+  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+  // CORS middleware for multi-domain & Vercel deployments
+  app.use((_req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    if (_req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
 
   // 1. Get Registration Settings (legacy)
   app.get('/api/registration-settings', (_req, res) => {
@@ -638,6 +674,22 @@ async function startServer() {
 
     writeJSON(REGISTRATIONS_FILE, list);
     return res.json({ success: true, approvedCount });
+  });
+
+  // Dedicated JSON error handling middleware
+  app.use((err: any, _req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (err && (err.type === 'entity.too.large' || err.status === 413)) {
+      return res.status(413).json({
+        error: 'Uploaded data or image exceeds payload limit (50MB). Please select a smaller photo.',
+        type: 'PayloadTooLargeError',
+      });
+    }
+    if (err) {
+      return res.status(err.status || 500).json({
+        error: err.message || 'Internal Server Error',
+      });
+    }
+    next();
   });
 
   // In development, mount Vite middleware

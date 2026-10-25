@@ -1,3 +1,4 @@
+import QRCode from 'qrcode';
 import {
   TournamentState,
   Team,
@@ -11,6 +12,7 @@ import {
   FormAppearance,
   RegistrationTokenRecord,
   FormFieldType,
+  FormPaymentConfig,
 } from '../types/tournament';
 
 export const STORAGE_KEY = 'smash-premier-league-v8';
@@ -190,6 +192,12 @@ export function createDefaultFormConfig(
     isPublished: true,
     publishedAt: Date.now(),
     lastUpdatedAt: Date.now(),
+    payment: {
+      enabled: true,
+      upiId: 'smashleague@icici',
+      accountName: 'Smash Premier League Tournament',
+      note: 'SPL Tournament Entry Fee',
+    },
     appearance: {
       formTitle: 'Player Entry & Registration Form',
       formDescription: 'Register as an official athlete for the upcoming Smash Premier League championship.',
@@ -462,17 +470,96 @@ export function formatINR(val: number): string {
   }).format(val);
 }
 
-// UPI QR / Link Generator
-export function buildUPIPaymentLink(payment: PaymentSettings, amount: number, regId: string): string {
-  if (!payment.upiId) return '';
-  const params = new URLSearchParams({
-    pa: payment.upiId,
-    pn: payment.accountName || 'Smash Premier League',
-    am: String(amount),
-    cu: 'INR',
-    tn: `${payment.note || 'Tournament Entry Fee'} - ${regId}`,
-  });
-  return `upi://pay?${params.toString()}`;
+export type UPIAppType = 'generic' | 'gpay' | 'phonepe' | 'paytm';
+
+export interface UPIPaymentDetails {
+  upiId: string;
+  accountName?: string;
+  amount?: number;
+  note?: string;
+  regId?: string;
+}
+
+// Builds exact UPI intent URI for PhonePe, GPay, Paytm, and generic UPI with prefilled money
+export function buildUPIPaymentUri(
+  details: UPIPaymentDetails,
+  app: UPIAppType = 'generic'
+): string {
+  const { upiId, accountName = 'Smash Premier League', amount, note, regId } = details;
+  if (!upiId || !upiId.trim()) return '';
+
+  const cleanUpi = upiId.trim();
+  const cleanAccount = (accountName || 'Smash Premier League').trim();
+  const cleanNote = note
+    ? regId
+      ? `${note} - ${regId}`
+      : note
+    : regId
+    ? `Tournament Entry Fee - ${regId}`
+    : 'Tournament Entry Fee';
+
+  const params = new URLSearchParams();
+  params.set('pa', cleanUpi);
+  params.set('pn', cleanAccount);
+
+  if (amount != null && !isNaN(Number(amount)) && Number(amount) > 0) {
+    params.set('am', Number(amount).toFixed(2));
+  }
+  params.set('cu', 'INR');
+  if (cleanNote) {
+    params.set('tn', cleanNote.slice(0, 45));
+  }
+
+  const queryStr = params.toString();
+
+  switch (app) {
+    case 'phonepe':
+      return `phonepe://pay?${queryStr}`;
+    case 'gpay':
+      return `gpay://upi/pay?${queryStr}`;
+    case 'paytm':
+      return `paytmmp://pay?${queryStr}`;
+    case 'generic':
+    default:
+      return `upi://pay?${queryStr}`;
+  }
+}
+
+// Generates dynamic high-res QR code directly from UPI URI with prefilled amount
+export async function generateUPIQRCode(upiUri: string): Promise<string> {
+  if (!upiUri || !upiUri.trim()) return '';
+  try {
+    return await QRCode.toDataURL(upiUri, {
+      width: 360,
+      margin: 1,
+      color: {
+        dark: '#020617',
+        light: '#ffffff',
+      },
+      errorCorrectionLevel: 'M',
+    });
+  } catch (err) {
+    console.error('Failed to generate UPI QR code:', err);
+    return '';
+  }
+}
+
+// Legacy helper preserved for backward compatibility
+export function buildUPIPaymentLink(
+  payment: PaymentSettings | { upiId: string; accountName?: string; note?: string },
+  amount: number,
+  regId: string
+): string {
+  return buildUPIPaymentUri(
+    {
+      upiId: payment.upiId,
+      accountName: payment.accountName,
+      amount,
+      note: payment.note,
+      regId,
+    },
+    'generic'
+  );
 }
 
 // CSV Export Generator

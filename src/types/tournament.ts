@@ -107,6 +107,14 @@ export interface FormAppearance {
   successMessage: string;
 }
 
+export interface FormPaymentConfig {
+  enabled: boolean;
+  upiId: string;
+  accountName: string;
+  note?: string;
+  customQrDataUrl?: string;
+}
+
 export interface RegistrationFormConfig {
   seasonSlug: string;
   tournamentName: string;
@@ -121,6 +129,7 @@ export interface RegistrationFormConfig {
   isPublished: boolean;
   publishedAt?: number;
   lastUpdatedAt?: number;
+  payment?: FormPaymentConfig;
   appearance: FormAppearance;
   fields: RegistrationFormField[];
 }
