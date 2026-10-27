@@ -434,6 +434,7 @@ async function startServer() {
 
   // 3. Dynamic Form Configuration (Drafts & Published)
   app.get('/api/forms/:seasonSlug', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let seasonSlug = req.params.seasonSlug;
     if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
       seasonSlug = 'season-4';
@@ -445,21 +446,31 @@ async function startServer() {
       if (forms['season-4']) {
         targetForm = { ...forms['season-4'], seasonSlug };
       } else {
-        targetForm = createDefaultForm(seasonSlug);
-        forms[seasonSlug] = targetForm;
-        writeJSON(FORMS_FILE, forms);
+        const availableKeys = Object.keys(forms);
+        if (availableKeys.length > 0 && forms[availableKeys[0]]) {
+          targetForm = { ...forms[availableKeys[0]], seasonSlug };
+        } else {
+          targetForm = createDefaultForm(seasonSlug);
+          forms[seasonSlug] = targetForm;
+          writeJSON(FORMS_FILE, forms);
+        }
       }
+    }
+    // Ensure default submit button text matches exact requirement
+    if (targetForm && targetForm.appearance) {
+      targetForm.appearance.submitButtonText = targetForm.appearance.submitButtonText || 'Submit Registration & Confirm Entry';
     }
     res.json(targetForm);
   });
 
   app.post('/api/forms/:seasonSlug', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let seasonSlug = req.params.seasonSlug;
     if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
       seasonSlug = 'season-4';
     }
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const existing = forms[seasonSlug] || createDefaultForm(seasonSlug);
+    const existing = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
     const updated = {
       ...existing,
       ...req.body,
@@ -468,7 +479,14 @@ async function startServer() {
       lastUpdatedAt: Date.now(),
       publishedAt: req.body.isPublished ? Date.now() : (existing.publishedAt || Date.now()),
     };
+    if (updated.appearance) {
+      updated.appearance.submitButtonText = updated.appearance.submitButtonText || 'Submit Registration & Confirm Entry';
+    }
     forms[seasonSlug] = updated;
+    // Always mirror to season-4 if season-4 doesn't exist
+    if (seasonSlug !== 'season-4' && !forms['season-4']) {
+      forms['season-4'] = updated;
+    }
     writeJSON(FORMS_FILE, forms);
     res.json(updated);
   });
@@ -517,7 +535,9 @@ async function startServer() {
   });
 
   // Lightweight rapid score endpoint for live polling without heavy payloads
+  // Lightweight rapid score endpoint for live polling without heavy payloads
   app.get('/api/tournament/scores', (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
     res.json({
       matches: data.matches || [],
@@ -529,6 +549,7 @@ async function startServer() {
 
   // Real-time match score update endpoint
   app.patch('/api/tournament/matches/:id', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const matchId = req.params.id;
     const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
     let matched = false;
@@ -577,7 +598,20 @@ async function startServer() {
       }
     }
 
-    res.status(404).json({ error: 'Match not found' });
+    // Upsert match if created on client or sent with fullMatch details
+    const newMatch = req.body.fullMatch || {
+      id: matchId,
+      ...req.body,
+    };
+    if (newMatch.scoreA != null && newMatch.scoreB != null && newMatch.status === 'completed') {
+      if (newMatch.scoreA > newMatch.scoreB) newMatch.winner = newMatch.teamA;
+      else if (newMatch.scoreB > newMatch.scoreA) newMatch.winner = newMatch.teamB;
+    }
+    current.matches = current.matches || [];
+    current.matches.push(newMatch);
+    current.lastUpdated = now;
+    writeJSON(TOURNAMENT_FILE, current);
+    res.json({ success: true, lastUpdated: now, match: newMatch });
   });
 
   // Bulk captain assignment persistent endpoint

@@ -43,15 +43,45 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   onBackToApp,
   seasonParam,
 }) => {
-  const { state, submitPublicRegistration } = useTournament();
+  const { state, submitPublicRegistration, formConfig: contextFormConfig } = useTournament();
 
   const activeSeasonSlug = seasonParam || state.registrationSettings.seasonSlug || 'season-4';
 
-  // Form configuration loaded from server
-  const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() =>
-    createDefaultFormConfig(activeSeasonSlug)
-  );
-  const [loadingConfig, setLoadingConfig] = useState(true);
+  // Form configuration loaded from server, context, or cache
+  const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() => {
+    // 1. Check if context has customized form config
+    if (contextFormConfig && Array.isArray(contextFormConfig.fields) && contextFormConfig.fields.length > 0) {
+      return contextFormConfig;
+    }
+    // 2. Check localStorage cache
+    if (typeof window !== 'undefined') {
+      try {
+        const cached =
+          localStorage.getItem(`spl_forms_cache_${activeSeasonSlug}`) ||
+          localStorage.getItem('spl_forms_cache_season-4');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (parsed && Array.isArray(parsed.fields) && parsed.fields.length > 0) {
+            return parsed;
+          }
+        }
+      } catch {}
+    }
+    return createDefaultFormConfig(activeSeasonSlug);
+  });
+
+  const [loadingConfig, setLoadingConfig] = useState<boolean>(() => {
+    if (contextFormConfig && Array.isArray(contextFormConfig.fields) && contextFormConfig.fields.length > 0) return false;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached =
+          localStorage.getItem(`spl_forms_cache_${activeSeasonSlug}`) ||
+          localStorage.getItem('spl_forms_cache_season-4');
+        if (cached) return false;
+      } catch {}
+    }
+    return true;
+  });
 
   // Link token status
   const [tokenParam, setTokenParam] = useState<string | null>(null);
@@ -71,7 +101,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   const [successReg, setSuccessReg] = useState<Registration | null>(null);
   const [copiedId, setCopiedId] = useState(false);
 
-  // Fetch form configuration and validate token on load
+  // Fetch form configuration and validate token on load + real-time listeners
   useEffect(() => {
     let isMounted = true;
 
@@ -87,13 +117,16 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     }
     setTokenParam(foundToken);
 
-    // 2. Fetch form config from persistent backend
+    // 2. Fetch form config from persistent backend with cache-busting
     const targetSlug = activeSeasonSlug && activeSeasonSlug !== 'undefined' ? activeSeasonSlug : 'season-4';
-    fetch(`/api/forms/${encodeURIComponent(targetSlug)}`)
+    fetch(`/api/forms/${encodeURIComponent(targetSlug)}?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
         if (isMounted && data && Array.isArray(data.fields) && data.fields.length > 0) {
           setFormConfig(data);
+          try {
+            localStorage.setItem(`spl_forms_cache_${targetSlug}`, JSON.stringify(data));
+          } catch {}
         }
       })
       .catch(() => {})
@@ -101,9 +134,45 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
         if (isMounted) setLoadingConfig(false);
       });
 
-    // 3. Validate token if present
+    // 3. Listen for published changes across tabs in real-time
+    let formChannel: BroadcastChannel | null = null;
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      formChannel = new BroadcastChannel('spl_form_config_channel');
+      formChannel.onmessage = (event) => {
+        if (event.data?.type === 'FORM_PUBLISHED' && event.data.config) {
+          if (isMounted) {
+            setFormConfig(event.data.config);
+            setLoadingConfig(false);
+          }
+        }
+      };
+    }
+
+    const handleFormEvent = (e: any) => {
+      if (e.detail && isMounted) {
+        setFormConfig(e.detail);
+        setLoadingConfig(false);
+      }
+    };
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key && e.key.startsWith('spl_forms_cache_') && e.newValue && isMounted) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && Array.isArray(parsed.fields)) {
+            setFormConfig(parsed);
+            setLoadingConfig(false);
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('spl-form-published', handleFormEvent);
+    window.addEventListener('storage', handleStorageChange);
+
+    // 4. Validate token if present
     if (foundToken) {
-      fetch(`/api/validate-token/${encodeURIComponent(foundToken)}`)
+      fetch(`/api/validate-token/${encodeURIComponent(foundToken)}?t=${Date.now()}`, { cache: 'no-store' })
         .then((res) => (res.ok ? res.json() : null))
         .then((tokData) => {
           if (isMounted && tokData) {
@@ -122,6 +191,9 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
     return () => {
       isMounted = false;
+      window.removeEventListener('spl-form-published', handleFormEvent);
+      window.removeEventListener('storage', handleStorageChange);
+      formChannel?.close();
     };
   }, [activeSeasonSlug]);
 

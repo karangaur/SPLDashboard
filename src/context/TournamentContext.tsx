@@ -329,10 +329,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       })
       .catch(() => {});
 
-    // 5. Automated Live Score Synchronization Poller (every 2.5s)
+    // 5. Automated Live Score Synchronization Poller (fast 1200ms polling with cache-busting)
     // Ensures Hero Homepage and visitor screens update match scores automatically without refresh
     const scorePollInterval = setInterval(() => {
-      fetch('/api/tournament/scores')
+      fetch(`/api/tournament/scores?t=${Date.now()}`, { cache: 'no-store' })
         .then((res) => (res.ok ? res.json() : null))
         .then((scoreData) => {
           if (!scoreData || !scoreData.lastUpdated) return;
@@ -353,11 +353,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         })
         .catch(() => {});
-    }, 2500);
+    }, 1200);
 
-    // 6. Registrations Poller (every 5s) for live admin applicant updates across browsers
+    // 6. Registrations Poller (every 4s) for live admin applicant updates across browsers
     const regPollInterval = setInterval(() => {
-      fetch('/api/registrations')
+      fetch(`/api/registrations?t=${Date.now()}`, { cache: 'no-store' })
         .then((res) => (res.ok ? res.json() : null))
         .then((serverRegs) => {
           if (Array.isArray(serverRegs)) {
@@ -371,11 +371,68 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         })
         .catch(() => {});
-    }, 5000);
+    }, 4000);
+
+    // 7. Multi-Tab Real-Time Listeners (BroadcastChannel + Window Storage Event)
+    let liveChannel: BroadcastChannel | null = null;
+    let formChannel: BroadcastChannel | null = null;
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      liveChannel = new BroadcastChannel('spl_live_scores_channel');
+      formChannel = new BroadcastChannel('spl_form_config_channel');
+
+      liveChannel.onmessage = (event) => {
+        if (event.data?.type === 'SCORE_UPDATE') {
+          const { matches, teams, knockout, lastUpdated } = event.data;
+          if (lastUpdated) lastServerScoreTime.current = lastUpdated;
+          setState((prev) => ({
+            ...prev,
+            matches: Array.isArray(matches) ? matches : prev.matches,
+            teams: Array.isArray(teams) && teams.length > 0 ? teams : prev.teams,
+            knockout: knockout || prev.knockout,
+          }));
+        }
+      };
+
+      formChannel.onmessage = (event) => {
+        if (event.data?.type === 'FORM_PUBLISHED' && event.data.config) {
+          setFormConfig(event.data.config);
+        }
+      };
+    }
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_KEY && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && Array.isArray(parsed.matches)) {
+            setState((prev) => ({
+              ...prev,
+              matches: parsed.matches,
+              teams: Array.isArray(parsed.teams) ? parsed.teams : prev.teams,
+              knockout: parsed.knockout || prev.knockout,
+              settings: parsed.settings ? { ...prev.settings, ...parsed.settings } : prev.settings,
+            }));
+          }
+        } catch {}
+      } else if (e.key && e.key.startsWith('spl_forms_cache_') && e.newValue) {
+        try {
+          const parsedForm = JSON.parse(e.newValue);
+          if (parsedForm && Array.isArray(parsedForm.fields)) {
+            setFormConfig(parsedForm);
+          }
+        } catch {}
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
 
     return () => {
       clearInterval(scorePollInterval);
       clearInterval(regPollInterval);
+      window.removeEventListener('storage', handleStorageChange);
+      liveChannel?.close();
+      formChannel?.close();
     };
   }, []);
 
@@ -937,7 +994,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const updateKnockoutMatch = (id: string, updates: Partial<KnockoutMatch>) => {
     sportsAudio.playScorePing();
+    const now = Date.now();
+    lastServerScoreTime.current = now;
     setState((prev) => {
+      let updatedKoMatch: KnockoutMatch | undefined;
       const updatedMatches = prev.knockout.matches.map((m) => {
         if (m.id !== id) return m;
         const current = { ...m, ...updates };
@@ -945,16 +1005,43 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (current.scoreA > current.scoreB) current.winner = current.teamA;
           else if (current.scoreB > current.scoreA) current.winner = current.teamB;
         }
+        updatedKoMatch = current;
         return current;
       });
 
       const progressed = progressKnockoutMatches(updatedMatches, prev.knockout.format);
+      const nextKnockout = {
+        ...prev.knockout,
+        matches: progressed,
+      };
+
+      // Broadcast to other tabs
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const ch = new BroadcastChannel('spl_live_scores_channel');
+          ch.postMessage({
+            type: 'SCORE_UPDATE',
+            matchId: id,
+            match: updatedKoMatch,
+            matches: prev.matches,
+            teams: prev.teams,
+            knockout: nextKnockout,
+            lastUpdated: now,
+          });
+          ch.close();
+        } catch {}
+      }
+
+      // Sync to server
+      fetch(`/api/tournament/matches/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...updates, fullMatch: updatedKoMatch }),
+      }).catch(() => {});
+
       return {
         ...prev,
-        knockout: {
-          ...prev.knockout,
-          matches: progressed,
-        },
+        knockout: nextKnockout,
       };
     });
   };
@@ -1052,7 +1139,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       // Save locally first so UI is instantly updated
       try {
         localStorage.setItem(`${FORMS_CACHE_PREFIX}${slug}`, JSON.stringify(payload));
+        localStorage.setItem('spl_forms_cache_season-4', JSON.stringify(payload));
       } catch {}
+
+      // Broadcast form configuration immediately across all open tabs
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const fch = new BroadcastChannel('spl_form_config_channel');
+          fch.postMessage({ type: 'FORM_PUBLISHED', config: payload, seasonSlug: slug });
+          fch.close();
+        } catch {}
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('spl-form-published', { detail: payload }));
+      }
 
       const res = await safeFetchJson<RegistrationFormConfig>(`/api/forms/${slug}`, {
         method: 'POST',
