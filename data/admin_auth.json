@@ -1,0 +1,22 @@
+{
+  "accounts": [
+    {
+      "id": "admin-spl-master-01",
+      "username": "admin",
+      "email": "admin@spl.com",
+      "name": "Tournament Director",
+      "role": "super_admin",
+      "passwords": [
+        "smash2026",
+        "admin123",
+        "spladmin2026"
+      ]
+    }
+  ],
+  "activeTokens": {
+    "spl_sess_515753f0a2234361a3700b147e173562": {
+      "userId": "admin-spl-master-01",
+      "expiresAt": 1795670973902
+    }
+  }
+}

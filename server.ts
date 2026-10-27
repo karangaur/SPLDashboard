@@ -15,6 +15,7 @@ const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'registration_settings.json');
 const FORMS_FILE = path.join(DATA_DIR, 'registration_forms.json');
 const TOKENS_FILE = path.join(DATA_DIR, 'registration_tokens.json');
+const AUTH_FILE = path.join(DATA_DIR, 'admin_auth.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -273,6 +274,124 @@ async function startServer() {
       return res.sendStatus(200);
     }
     next();
+  });
+
+  // 0. Administrator Authentication Endpoints
+  const DEFAULT_ADMIN_CONFIG = {
+    accounts: [
+      {
+        id: 'admin-spl-master-01',
+        username: 'admin',
+        email: 'admin@spl.com',
+        name: 'Tournament Director',
+        role: 'super_admin',
+        // In production apps, passwords or hashes are verified; here we accept master admin passwords
+        passwords: ['smash2026', 'admin123', 'spladmin2026'],
+      },
+    ],
+    activeTokens: {} as Record<string, { userId: string; expiresAt: number }>,
+  };
+
+  app.post('/api/auth/login', (req, res) => {
+    const { identifier, password, rememberMe } = req.body;
+    if (!identifier || !password) {
+      return res.status(400).json({ success: false, error: 'Identifier and password are required' });
+    }
+
+    const cleanId = String(identifier).trim().toLowerCase();
+    const cleanPass = String(password).trim();
+    const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
+
+    const account = authConfig.accounts.find(
+      (acc: any) =>
+        acc.username.toLowerCase() === cleanId ||
+        acc.email.toLowerCase() === cleanId ||
+        (cleanId === 'organizer' && acc.role === 'super_admin') ||
+        (cleanId === 'director' && acc.role === 'super_admin')
+    );
+
+    if (!account) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid username or email. Please check your credentials or contact the lead organizer.',
+      });
+    }
+
+    const isMatch = account.passwords.includes(cleanPass);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        error: 'Incorrect password. Passwords are case-sensitive.',
+      });
+    }
+
+    const token = `spl_sess_${crypto.randomUUID().replace(/-/g, '')}`;
+    const expiresAt = rememberMe ? Date.now() + 30 * 24 * 60 * 60 * 1000 : Date.now() + 8 * 60 * 60 * 1000;
+
+    authConfig.activeTokens = authConfig.activeTokens || {};
+    authConfig.activeTokens[token] = { userId: account.id, expiresAt };
+    writeJSON(AUTH_FILE, authConfig);
+
+    const user = {
+      id: account.id,
+      username: account.username,
+      email: account.email,
+      name: account.name,
+      role: account.role,
+      lastLogin: Date.now(),
+    };
+
+    res.json({
+      success: true,
+      token,
+      user,
+    });
+  });
+
+  app.post('/api/auth/verify', (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = req.body?.token || (authHeader ? authHeader.replace(/^Bearer\s+/i, '') : '');
+
+    if (!token) {
+      return res.status(401).json({ valid: false, error: 'No token provided' });
+    }
+
+    const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
+    const session = authConfig.activeTokens?.[token];
+
+    if (!session || Date.now() > session.expiresAt) {
+      return res.status(401).json({ valid: false, error: 'Session expired or invalid' });
+    }
+
+    const account = authConfig.accounts.find((a: any) => a.id === session.userId);
+    if (!account) {
+      return res.status(401).json({ valid: false, error: 'User not found' });
+    }
+
+    res.json({
+      valid: true,
+      user: {
+        id: account.id,
+        username: account.username,
+        email: account.email,
+        name: account.name,
+        role: account.role,
+      },
+    });
+  });
+
+  app.post('/api/auth/logout', (req, res) => {
+    const authHeader = req.headers.authorization;
+    const token = req.body?.token || (authHeader ? authHeader.replace(/^Bearer\s+/i, '') : '');
+
+    if (token) {
+      const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
+      if (authConfig.activeTokens && authConfig.activeTokens[token]) {
+        delete authConfig.activeTokens[token];
+        writeJSON(AUTH_FILE, authConfig);
+      }
+    }
+    res.json({ success: true });
   });
 
   // 1. Get Registration Settings (legacy)

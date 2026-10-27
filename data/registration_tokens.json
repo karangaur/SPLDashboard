@@ -15,7 +15,17 @@
     "seasonSlug": "season-4",
     "label": "WhatsApp VIP Blast",
     "createdAt": 1792927219261,
+    "isActive": false,
+    "submissionsCount": 1,
+    "revokedAt": 1793078990442
+  },
+  {
+    "id": "cd55c183-dbb0-4d60-a1cc-bd579d8ec315",
+    "token": "SPL-SEASON4-ZABMQ3",
+    "seasonSlug": "season-4",
+    "label": "Generated 27/10/2026",
+    "createdAt": 1793078990442,
     "isActive": true,
-    "submissionsCount": 1
+    "submissionsCount": 0
   }
 ]

@@ -15,6 +15,8 @@ import { StatisticsView } from './components/statistics/StatisticsView';
 import { ChampionView } from './components/champion/ChampionView';
 import { SettingsView } from './components/settings/SettingsView';
 import { PublicRegistrationPage } from './components/registration/PublicRegistrationPage';
+import { AdminLoginPage } from './components/auth/AdminLoginPage';
+import { AuthService } from './services/authService';
 import {
   LayoutDashboard,
   Swords,
@@ -26,6 +28,7 @@ import {
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => AuthService.isAuthenticated());
 
   // Check if current route is public registration link
   const [isPublicMode, setIsPublicMode] = useState<boolean>(() => {
@@ -90,6 +93,11 @@ export default function App() {
     } catch {}
   };
 
+  const handleLogout = () => {
+    AuthService.logout();
+    setIsAuthenticated(false);
+  };
+
   const renderActiveView = () => {
     switch (currentTab) {
       case 'dashboard':
@@ -134,11 +142,21 @@ export default function App() {
           seasonParam={publicSeason}
           onBackToApp={handleBackToDashboard}
         />
+      ) : !isAuthenticated ? (
+        /* Modern Badminton-Sporty Admin Login Page */
+        <AdminLoginPage
+          onLoginSuccess={() => setIsAuthenticated(true)}
+          onGoToPublicRegister={() => handleOpenPublicForm()}
+        />
       ) : (
         /* Admin Tournament Dashboard Shell */
         <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans">
-          {/* Main Header with 3-Zone Contract */}
-          <Header currentTab={currentTab} onSelectTab={setCurrentTab} />
+          {/* Main Header with 3-Zone Contract & Logout */}
+          <Header
+            currentTab={currentTab}
+            onSelectTab={setCurrentTab}
+            onLogout={handleLogout}
+          />
 
           {/* Viewport Content Area */}
           <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">

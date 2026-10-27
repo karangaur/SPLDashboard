@@ -9,6 +9,8 @@ import {
   Sliders,
   Users2,
   CheckCircle2,
+  LogOut,
+  Shield,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 
@@ -29,9 +31,10 @@ export type NavTab =
 interface HeaderProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
+  onLogout?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab }) => {
+export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogout }) => {
   const { state } = useTournament();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
@@ -212,7 +215,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab }) => {
           </div>
         </nav>
 
-        {/* Zone 3: 1 Primary Action (Register Player) + Mobile Toggle */}
+        {/* Zone 3: 1 Primary Action (Register Player) + Admin Logout + Mobile Toggle */}
         <div className="flex items-center gap-2.5 shrink-0">
           <button
             onClick={() => handleNav('registration')}
@@ -222,6 +225,18 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab }) => {
             <span className="hidden sm:inline">Register Player</span>
             <span className="sm:hidden">Register</span>
           </button>
+
+          {/* Admin Indicator & Logout */}
+          {onLogout && (
+            <button
+              onClick={onLogout}
+              title="Sign Out of Admin Portal"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 border border-white/10 hover:border-rose-500/30 rounded-xl transition-all"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Logout</span>
+            </button>
+          )}
 
           {/* Mobile hamburger menu toggle */}
           <button
@@ -324,6 +339,18 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab }) => {
               <span>Settings & Data Backup</span>
               <Sliders className="w-4 h-4 text-slate-400" />
             </button>
+            {onLogout && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onLogout();
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-sm border border-rose-500/30 mt-2 transition-colors"
+              >
+                <span>Logout Administrator</span>
+                <LogOut className="w-4 h-4 text-rose-400" />
+              </button>
+            )}
           </div>
         </div>
       )}
