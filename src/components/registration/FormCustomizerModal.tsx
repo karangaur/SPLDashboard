@@ -104,6 +104,36 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
   const [validationError, setValidationError] = useState<string | null>(null);
   const [previewQrCode, setPreviewQrCode] = useState<string>('');
 
+  // Re-sync formConfig whenever modal is opened or initialConfig updates
+  useEffect(() => {
+    if (isOpen) {
+      setFormConfig({
+        ...initialConfig,
+        payment: {
+          enabled: initialConfig.payment?.enabled ?? true,
+          isMandatory: initialConfig.payment?.isMandatory ?? true,
+          upiId: initialConfig.payment?.upiId || 'karan-hdfc@ybl',
+          accountName: initialConfig.payment?.accountName || 'Smash Premier League (Karan Gaur)',
+          note: initialConfig.payment?.note || 'SPL Maharajganj Player Entry Fee',
+          instructions: initialConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+          buttonText: initialConfig.payment?.buttonText || 'Pay Registration Fee',
+          baseFee: initialConfig.payment?.baseFee ?? (initialConfig.entryFee ?? 500),
+          categoryFees: initialConfig.payment?.categoryFees || {
+            Singles: 300,
+            Doubles: 500,
+            'Mixed Doubles': 500,
+            Both: 800,
+          },
+          customQrDataUrl: initialConfig.payment?.customQrDataUrl,
+        },
+        appearance: {
+          ...initialConfig.appearance,
+        },
+        fields: [...initialConfig.fields],
+      });
+    }
+  }, [isOpen, initialConfig]);
+
   // Generate dynamic QR code preview based on current UPI ID and prefilled amount
   useEffect(() => {
     const upiUri = buildUPIPaymentUri({
@@ -1799,9 +1829,10 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
               disabled={isSaving}
               style={{ backgroundColor: accentColor }}
               className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-black text-slate-950 hover:opacity-95 transition-all shadow-lg disabled:opacity-50"
+              title="Save all form customizations to the persistent database and update the live registration link"
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>{isSaving ? 'Publishing...' : 'Publish Changes'}</span>
+              <span>{isSaving ? 'Publishing...' : 'Publish / Generate Link'}</span>
             </button>
           </div>
         </div>

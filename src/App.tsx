@@ -37,10 +37,14 @@ export default function App() {
     const path = window.location.pathname;
     const search = window.location.search;
     const hash = window.location.hash;
+    const searchParams = new URLSearchParams(search);
     if (
       path.startsWith('/register') ||
-      new URLSearchParams(search).has('register') ||
-      hash.startsWith('#/register')
+      searchParams.has('register') ||
+      searchParams.has('token') ||
+      searchParams.has('tok') ||
+      hash.startsWith('#/register') ||
+      hash.includes('token=')
     ) {
       return 'register';
     }
@@ -64,15 +68,18 @@ export default function App() {
       const path = window.location.pathname;
       const search = window.location.search;
       const hash = window.location.hash;
+      const searchParams = new URLSearchParams(search);
       const shouldBeRegister =
         path.startsWith('/register') ||
-        new URLSearchParams(search).has('register') ||
-        hash.startsWith('#/register');
+        searchParams.has('register') ||
+        searchParams.has('token') ||
+        searchParams.has('tok') ||
+        hash.startsWith('#/register') ||
+        hash.includes('token=');
 
       if (shouldBeRegister) {
         setViewMode('register');
-        const params = new URLSearchParams(search);
-        if (params.has('register')) setPublicSeason(params.get('register') || undefined);
+        if (searchParams.has('register')) setPublicSeason(searchParams.get('register') || undefined);
       }
     };
 

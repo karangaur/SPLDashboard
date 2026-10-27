@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
 import {
   TournamentState,
   Player,
@@ -241,10 +241,39 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
   const [tokens, setTokens] = useState<RegistrationTokenRecord[]>([]);
   const [activeToken, setActiveToken] = useState<RegistrationTokenRecord | null>(null);
+  const lastServerScoreTime = useRef<number>(0);
 
-  // Sync with persistent backend on startup
+  // Sync with persistent backend on startup and setup automated live score synchronization
   useEffect(() => {
     const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+
+    // 0. Fetch persistent tournament state (matches, teams, players, knockout)
+    fetch('/api/tournament/state')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((serverState) => {
+        if (serverState) {
+          if (serverState.lastUpdated) {
+            lastServerScoreTime.current = serverState.lastUpdated;
+          }
+          setState((prev) => {
+            const hasServerMatches = Array.isArray(serverState.matches) && serverState.matches.length > 0;
+            const hasServerTeams = Array.isArray(serverState.teams) && serverState.teams.length > 0;
+            const hasServerPlayers = Array.isArray(serverState.players) && serverState.players.length > 0;
+            
+            return {
+              ...prev,
+              settings: serverState.settings ? { ...prev.settings, ...serverState.settings } : prev.settings,
+              players: hasServerPlayers ? serverState.players : prev.players,
+              teams: hasServerTeams ? serverState.teams : prev.teams,
+              matches: hasServerMatches ? serverState.matches : prev.matches,
+              knockout: serverState.knockout || prev.knockout,
+              predefinedTeams: Array.isArray(serverState.predefinedTeams) ? serverState.predefinedTeams : prev.predefinedTeams,
+              teamFormationMode: serverState.teamFormationMode || prev.teamFormationMode,
+            };
+          });
+        }
+      })
+      .catch(() => {});
 
     // 1. Fetch server registrations
     fetch('/api/registrations')
@@ -299,6 +328,55 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       })
       .catch(() => {});
+
+    // 5. Automated Live Score Synchronization Poller (every 2.5s)
+    // Ensures Hero Homepage and visitor screens update match scores automatically without refresh
+    const scorePollInterval = setInterval(() => {
+      fetch('/api/tournament/scores')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((scoreData) => {
+          if (!scoreData || !scoreData.lastUpdated) return;
+          if (scoreData.lastUpdated > lastServerScoreTime.current) {
+            lastServerScoreTime.current = scoreData.lastUpdated;
+            setState((prev) => {
+              const matchesChanged = JSON.stringify(prev.matches) !== JSON.stringify(scoreData.matches);
+              const teamsChanged = scoreData.teams && JSON.stringify(prev.teams) !== JSON.stringify(scoreData.teams);
+              const koChanged = scoreData.knockout && JSON.stringify(prev.knockout) !== JSON.stringify(scoreData.knockout);
+              if (!matchesChanged && !teamsChanged && !koChanged) return prev;
+              return {
+                ...prev,
+                matches: Array.isArray(scoreData.matches) ? scoreData.matches : prev.matches,
+                teams: Array.isArray(scoreData.teams) && scoreData.teams.length > 0 ? scoreData.teams : prev.teams,
+                knockout: scoreData.knockout || prev.knockout,
+              };
+            });
+          }
+        })
+        .catch(() => {});
+    }, 2500);
+
+    // 6. Registrations Poller (every 5s) for live admin applicant updates across browsers
+    const regPollInterval = setInterval(() => {
+      fetch('/api/registrations')
+        .then((res) => (res.ok ? res.json() : null))
+        .then((serverRegs) => {
+          if (Array.isArray(serverRegs)) {
+            setState((prev) => {
+              if (JSON.stringify(prev.registrations) === JSON.stringify(serverRegs)) return prev;
+              return {
+                ...prev,
+                registrations: serverRegs,
+              };
+            });
+          }
+        })
+        .catch(() => {});
+    }, 5000);
+
+    return () => {
+      clearInterval(scorePollInterval);
+      clearInterval(regPollInterval);
+    };
   }, []);
 
   // Save to LocalStorage on changes
@@ -548,32 +626,44 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setTeamCaptain = (teamId: string, captainId: string) => {
-    setState((prev) => ({
-      ...prev,
-      teams: prev.teams.map((t) => {
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      const nextTeams = prev.teams.map((t) => {
         if (t.id !== teamId) return t;
         const updatedPlayers =
-          captainId && !t.players.includes(captainId) ? [...t.players, captainId] : t.players;
+          captainId && !t.players.includes(captainId) ? [captainId, ...t.players] : t.players;
         return { ...t, captainId, players: updatedPlayers };
-      }),
-    }));
+      });
+      fetch('/api/tournament/captains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments: [{ teamId, captainId }] }),
+      }).catch(() => {});
+      return { ...prev, teams: nextTeams };
+    });
   };
 
   const setCaptainsBulk = (assignments: { teamId: string; captainId: string }[]) => {
     if (!assignments || assignments.length === 0) return;
     const map = new Map(assignments.map((a) => [a.teamId, a.captainId]));
-    setState((prev) => ({
-      ...prev,
-      teams: prev.teams.map((t) => {
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      const nextTeams = prev.teams.map((t) => {
         if (map.has(t.id)) {
           const newCap = map.get(t.id);
           const updatedPlayers =
-            newCap && !t.players.includes(newCap) ? [...t.players, newCap] : t.players;
+            newCap && !t.players.includes(newCap) ? [newCap, ...t.players] : t.players;
           return { ...t, captainId: newCap, players: updatedPlayers };
         }
         return t;
-      }),
-    }));
+      });
+      fetch('/api/tournament/captains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assignments }),
+      }).catch(() => {});
+      return { ...prev, teams: nextTeams };
+    });
   };
 
   const setTeamPlayer = (teamId: string, playerIndex: number, newPlayerId: string) => {
@@ -595,16 +685,37 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       currentTeam.players[playerIndex] = newPlayerId;
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teams }),
+      }).catch(() => {});
       return { ...prev, teams };
     });
   };
 
   const setTeams = (teams: Team[]) => {
-    setState((prev) => ({ ...prev, teams }));
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teams }),
+      }).catch(() => {});
+      return { ...prev, teams };
+    });
   };
 
   const clearTeams = () => {
-    setState((prev) => ({ ...prev, teams: [] }));
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teams: [] }),
+      }).catch(() => {});
+      return { ...prev, teams: [] };
+    });
   };
 
   // Pre-decided teams
@@ -613,17 +724,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const addPredefinedTeam = (name: string, p1: string, p2: string) => {
-    setState((prev) => ({
-      ...prev,
-      predefinedTeams: [
+    setState((prev) => {
+      const updated = [
         ...prev.predefinedTeams,
         {
           id: crypto.randomUUID(),
           name: name.trim() || `Pair ${prev.predefinedTeams.length + 1}`,
-          players: [p1, p2],
+          players: [p1, p2] as [string, string],
         },
-      ],
-    }));
+      ];
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ predefinedTeams: updated }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        predefinedTeams: updated,
+      };
+    });
   };
 
   const updatePredefinedTeam = (id: string, updates: Partial<PredefinedTeam>) => {
@@ -647,9 +766,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Matches
   const updateMatch = (id: string, updates: Partial<Match>) => {
     sportsAudio.playScorePing();
-    setState((prev) => ({
-      ...prev,
-      matches: prev.matches.map((m) => {
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      const nextMatches = prev.matches.map((m) => {
         if (m.id !== id) return m;
         const updated = { ...m, ...updates };
         if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
@@ -657,21 +776,49 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
         }
         return updated;
-      }),
-    }));
+      });
+
+      // Dispatch score update to server so hero homepage immediately syncs
+      fetch(`/api/tournament/matches/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      }).catch(() => {});
+
+      return {
+        ...prev,
+        matches: nextMatches,
+      };
+    });
   };
 
   const setMatches = (matches: Match[]) => {
-    setState((prev) => ({ ...prev, matches }));
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matches }),
+      }).catch(() => {});
+      return { ...prev, matches };
+    });
   };
 
   const generateFixtures = () => {
     if (state.teams.length < 2) return;
     const fixtures = generateRoundRobinFixtures(state.teams, state.settings.courts);
-    setState((prev) => ({
-      ...prev,
-      matches: fixtures,
-    }));
+    lastServerScoreTime.current = Date.now();
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matches: fixtures }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        matches: fixtures,
+      };
+    });
   };
 
   const clearResults = () => {

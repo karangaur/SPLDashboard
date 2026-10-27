@@ -17,8 +17,9 @@ import {
   CheckCircle,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
-import { Team } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { RandomCaptainsModal } from '../common/RandomCaptainsModal';
+import { Team } from '../../types/tournament';
 
 const TOKEN_LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
 const GRADIENT_PALETTES = [
@@ -41,6 +42,7 @@ export const TokensView: React.FC = () => {
     addPredefinedTeam,
     deletePredefinedTeam,
     toggleTeamLock,
+    setCaptainsBulk,
     generateFixtures,
     triggerCelebration,
   } = useTournament();
@@ -57,22 +59,30 @@ export const TokensView: React.FC = () => {
   const [pairP1, setPairP1] = useState('');
   const [pairP2, setPairP2] = useState('');
 
-  // Captain slots
+  // Captain slots & selection modal
   const [selectedCaptains, setSelectedCaptains] = useState<string[]>([]);
+  const [isCaptainModalOpen, setIsCaptainModalOpen] = useState(false);
 
   const eligiblePlayers = state.players;
   const maxPossibleTeams = Math.max(2, Math.floor(eligiblePlayers.length / playersPerTeam));
 
-  // Pick random captains
+  // Open interactive Random Captains Modal with preview, draw again, and edit controls
   const handleRandomCaptains = () => {
     if (eligiblePlayers.length < numTeams) {
-      alert(`Need at least ${numTeams} players for captains.`);
+      alert(`Need at least ${numTeams} registered players to draw captains, but only ${eligiblePlayers.length} are available.`);
       return;
     }
-    const shuffled = [...eligiblePlayers].sort(() => Math.random() - 0.5);
-    const captains = shuffled.slice(0, numTeams).map((p) => p.id);
-    setSelectedCaptains(captains);
-    if (soundEnabled) sportsAudio.playScorePing();
+    setIsCaptainModalOpen(true);
+  };
+
+  const handleConfirmCaptainsFromModal = (assignments: { teamId: string; captainId: string }[]) => {
+    // If teams already exist in state, update captains directly
+    if (state.teams.length > 0) {
+      setCaptainsBulk(assignments);
+    }
+    // Also save captain IDs so future token generations honor these selected captains
+    setSelectedCaptains(assignments.map((a) => a.captainId));
+    setIsCaptainModalOpen(false);
   };
 
   // Run lottery draw animation
@@ -126,28 +136,67 @@ export const TokensView: React.FC = () => {
       return;
     }
 
-    // Random formation - strictly from current eligible players only
-    const validPlayerIds = new Set(eligiblePlayers.map((p) => p.id));
-    const allIds = [...eligiblePlayers.map((p) => p.id)];
-    // Ensure captains are distinct and strictly exist in current player pool
-    const captainsToUse = selectedCaptains.filter((id) => validPlayerIds.has(id));
-    const nonCaptains = allIds.filter((id) => !captainsToUse.includes(id));
-    // Shuffle non-captains
+    // CRITICAL: Keep locked / pre-decided teams and their captains/players completely UNTOUCHED
+    const lockedTeams = state.teams.filter((t) => t.locked);
+    const lockedPlayerIds = new Set<string>();
+    lockedTeams.forEach((t) => {
+      t.players.forEach((pid) => lockedPlayerIds.add(pid));
+      if (t.captainId) lockedPlayerIds.add(t.captainId);
+    });
+
+    // In mixed mode, also preserve any predefined teams that haven't been turned into teams yet
+    const predefinedLockedTeams: Team[] = [];
+    if (state.teamFormationMode === 'mixed') {
+      state.predefinedTeams.forEach((pt, idx) => {
+        const teamPlayers = pt.players.filter((pid) => !lockedPlayerIds.has(pid));
+        if (teamPlayers.length > 0) {
+          teamPlayers.forEach((pid) => lockedPlayerIds.add(pid));
+          predefinedLockedTeams.push({
+            id: crypto.randomUUID(),
+            name: pt.name || `Team ${TOKEN_LETTERS[lockedTeams.length + idx]}`,
+            players: teamPlayers,
+            captainId: teamPlayers[0],
+            locked: true,
+            badge: '🏸',
+            avatarColor: GRADIENT_PALETTES[(lockedTeams.length + idx) % GRADIENT_PALETTES.length],
+          });
+        }
+      });
+    }
+
+    const preservedTeams = [...lockedTeams, ...predefinedLockedTeams];
+
+    // Filter unassigned eligible players (strictly excluding any player locked into preserved teams)
+    const availablePlayers = eligiblePlayers.filter((p) => !lockedPlayerIds.has(p.id));
+    const availablePlayerIds = availablePlayers.map((p) => p.id);
+
+    // Number of new random teams needed
+    const remainingTeamsNeeded = Math.max(0, numTeams - preservedTeams.length);
+
+    if (remainingTeamsNeeded === 0) {
+      setTeams(preservedTeams);
+      triggerCelebration();
+      return;
+    }
+
+    // Select captains for the new teams from selectedCaptains or unassigned players
+    const availableCaptains = selectedCaptains.filter((cid) => availablePlayerIds.includes(cid));
+    const nonCaptains = availablePlayerIds.filter((id) => !availableCaptains.includes(id));
+
+    // Fisher-Yates unbiased shuffle of non-captains
     for (let i = nonCaptains.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [nonCaptains[i], nonCaptains[j]] = [nonCaptains[j], nonCaptains[i]];
     }
 
-    const createdTeams: Team[] = [];
-
-    // Ensure we have enough captains or pick remaining randomly from non-captains
-    const finalCaptains = [...captainsToUse];
-    while (finalCaptains.length < numTeams && nonCaptains.length > 0) {
-      finalCaptains.push(nonCaptains.shift()!);
+    const finalCaptainsForNew = [...availableCaptains];
+    while (finalCaptainsForNew.length < remainingTeamsNeeded && nonCaptains.length > 0) {
+      finalCaptainsForNew.push(nonCaptains.shift()!);
     }
 
-    for (let i = 0; i < numTeams; i++) {
-      const capId = finalCaptains[i];
+    const createdNewTeams: Team[] = [];
+    for (let i = 0; i < remainingTeamsNeeded; i++) {
+      const capId = finalCaptainsForNew[i];
       const capPlayer = eligiblePlayers.find((p) => p.id === capId);
       const teamPlayers = capId ? [capId] : [];
 
@@ -155,18 +204,21 @@ export const TokensView: React.FC = () => {
         teamPlayers.push(nonCaptains.shift()!);
       }
 
-      createdTeams.push({
+      const teamIndex = preservedTeams.length + i;
+      createdNewTeams.push({
         id: crypto.randomUUID(),
-        name: capPlayer ? `Team ${capPlayer.name.split(' ')[0]}` : `Team ${TOKEN_LETTERS[i]}`,
+        name: capPlayer ? `Team ${capPlayer.name.split(' ')[0]}` : `Team ${TOKEN_LETTERS[teamIndex] || teamIndex + 1}`,
         players: teamPlayers,
         captainId: capId,
         locked: false,
         badge: '🏸',
-        avatarColor: GRADIENT_PALETTES[i % GRADIENT_PALETTES.length],
+        avatarColor: GRADIENT_PALETTES[teamIndex % GRADIENT_PALETTES.length],
       });
     }
 
-    setTeams(createdTeams);
+    // Preserve pre-decided / locked teams untouched, append newly generated teams
+    const finalAllTeams = [...preservedTeams, ...createdNewTeams];
+    setTeams(finalAllTeams);
     triggerCelebration();
   };
 
@@ -646,6 +698,16 @@ export const TokensView: React.FC = () => {
           setShowClearConfirm(false);
         }}
         onCancel={() => setShowClearConfirm(false)}
+      />
+
+      {/* Random Captains Modal */}
+      <RandomCaptainsModal
+        isOpen={isCaptainModalOpen}
+        onClose={() => setIsCaptainModalOpen(false)}
+        teams={state.teams}
+        players={eligiblePlayers}
+        numTeamsFallback={numTeams}
+        onConfirmCaptains={handleConfirmCaptainsFromModal}
       />
     </div>
   );

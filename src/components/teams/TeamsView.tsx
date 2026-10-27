@@ -19,8 +19,9 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
-import { Team } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { RandomCaptainsModal } from '../common/RandomCaptainsModal';
+import { Team } from '../../types/tournament';
 
 interface CaptainAssignment {
   teamId: string;
@@ -33,6 +34,7 @@ export const TeamsView: React.FC = () => {
     standings,
     addTeam,
     updateTeam,
+    setTeams,
     deleteTeam,
     deleteTeamsBulk,
     renameTeam,
@@ -125,20 +127,22 @@ export const TeamsView: React.FC = () => {
 
   // --- Random Captain Workflow ---
   const handleOpenRandomCaptainModal = () => {
-    if (state.teams.length === 0) {
-      showNotification('Please create or add teams first before assigning captains.', 'error');
-      return;
-    }
     if (state.players.length === 0) {
-      showNotification('No players found in directory. Please add players first.', 'error');
+      showNotification('No players found in directory. Please register or add players first.', 'error');
       return;
     }
 
-    // Default to all teams or teams without captains
-    const targetTeams = state.teams.map((t) => t.id);
-    setCaptainTargetTeamIds(new Set(targetTeams));
-    setOverrideExistingCaptains(true);
-    setRandomCaptainStep('configure');
+    if (state.teams.length === 0) {
+      // If no teams exist yet, initialize 4 standard tournament teams
+      const defaultTeams = [
+        { id: crypto.randomUUID(), name: 'Thunder Smashers', players: [] as string[], badge: '⚡', locked: false, avatarColor: 'from-amber-500 to-orange-600' },
+        { id: crypto.randomUUID(), name: 'Falcon Strikers', players: [] as string[], badge: '🦅', locked: false, avatarColor: 'from-sky-500 to-blue-600' },
+        { id: crypto.randomUUID(), name: 'Royal Shuttlers', players: [] as string[], badge: '👑', locked: false, avatarColor: 'from-emerald-500 to-green-600' },
+        { id: crypto.randomUUID(), name: 'Lightning Aces', players: [] as string[], badge: '🔥', locked: false, avatarColor: 'from-rose-500 to-pink-600' },
+      ];
+      setTeams(defaultTeams);
+    }
+
     setRandomCaptainModalOpen(true);
   };
 
@@ -299,7 +303,7 @@ export const TeamsView: React.FC = () => {
             title="Randomly draw unique captains for teams"
           >
             <Crown className="w-4 h-4 text-amber-400" />
-            <span>Select Captains Randomly</span>
+            <span>Draw Random Captains</span>
           </button>
 
           <button
@@ -1049,6 +1053,21 @@ export const TeamsView: React.FC = () => {
         variant="danger"
         onConfirm={handleConfirmBulkDeleteTeams}
         onCancel={() => setBulkDeleteModalOpen(false)}
+      />
+
+      {/* Interactive Random Captain Selection Modal */}
+      <RandomCaptainsModal
+        isOpen={randomCaptainModalOpen}
+        onClose={() => setRandomCaptainModalOpen(false)}
+        teams={state.teams}
+        players={state.players}
+        onConfirmCaptains={(assignments) => {
+          setCaptainsBulk(assignments);
+          triggerCelebration();
+          showNotification(
+            `Successfully assigned unique captains to ${assignments.length} teams!`
+          );
+        }}
       />
     </div>
   );

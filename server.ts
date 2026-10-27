@@ -16,6 +16,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, 'registration_settings.json');
 const FORMS_FILE = path.join(DATA_DIR, 'registration_forms.json');
 const TOKENS_FILE = path.join(DATA_DIR, 'registration_tokens.json');
 const AUTH_FILE = path.join(DATA_DIR, 'admin_auth.json');
+const TOURNAMENT_FILE = path.join(DATA_DIR, 'tournament_state.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -433,29 +434,180 @@ async function startServer() {
 
   // 3. Dynamic Form Configuration (Drafts & Published)
   app.get('/api/forms/:seasonSlug', (req, res) => {
-    const seasonSlug = req.params.seasonSlug || 'season-4';
-    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    if (!forms[seasonSlug]) {
-      forms[seasonSlug] = createDefaultForm(seasonSlug);
-      writeJSON(FORMS_FILE, forms);
+    let seasonSlug = req.params.seasonSlug;
+    if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
+      seasonSlug = 'season-4';
     }
-    res.json(forms[seasonSlug]);
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    let targetForm = forms[seasonSlug];
+    if (!targetForm) {
+      // Fallback to season-4 or the first available form if customized
+      if (forms['season-4']) {
+        targetForm = { ...forms['season-4'], seasonSlug };
+      } else {
+        targetForm = createDefaultForm(seasonSlug);
+        forms[seasonSlug] = targetForm;
+        writeJSON(FORMS_FILE, forms);
+      }
+    }
+    res.json(targetForm);
   });
 
   app.post('/api/forms/:seasonSlug', (req, res) => {
-    const seasonSlug = req.params.seasonSlug || 'season-4';
+    let seasonSlug = req.params.seasonSlug;
+    if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
+      seasonSlug = 'season-4';
+    }
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
     const existing = forms[seasonSlug] || createDefaultForm(seasonSlug);
     const updated = {
       ...existing,
       ...req.body,
       seasonSlug,
+      isPublished: req.body.isPublished !== undefined ? req.body.isPublished : true,
       lastUpdatedAt: Date.now(),
-      publishedAt: req.body.isPublished ? Date.now() : existing.publishedAt,
+      publishedAt: req.body.isPublished ? Date.now() : (existing.publishedAt || Date.now()),
     };
     forms[seasonSlug] = updated;
     writeJSON(FORMS_FILE, forms);
     res.json(updated);
+  });
+
+  // 3.5. Persistent Tournament State & Automatic Live Score Synchronization
+  const DEFAULT_TOURNAMENT_PAYLOAD = {
+    settings: {
+      name: 'Smash Premier League',
+      date: '2026-10-25',
+      venue: 'Maharajganj Indoor Badminton Stadium, Court 1 & 2',
+      organizer: 'SPL Tournament Committee',
+      courts: 2,
+      format: '21',
+      entryFee: 500,
+      slotLimit: 32,
+      season: 'Season IV (Championship Edition)',
+      announcement: 'Grand Finale on Court 1! Live scoring active.',
+    },
+    players: [] as any[],
+    teams: [] as any[],
+    matches: [] as any[],
+    knockout: {
+      format: 'top4',
+      matches: [] as any[],
+    },
+    predefinedTeams: [] as any[],
+    teamFormationMode: 'random',
+    lastUpdated: Date.now(),
+  };
+
+  app.get('/api/tournament/state', (_req, res) => {
+    const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    res.json(data);
+  });
+
+  app.post('/api/tournament/state', (req, res) => {
+    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const now = Date.now();
+    const updated = {
+      ...current,
+      ...req.body,
+      lastUpdated: now,
+    };
+    writeJSON(TOURNAMENT_FILE, updated);
+    res.json({ success: true, lastUpdated: now, state: updated });
+  });
+
+  // Lightweight rapid score endpoint for live polling without heavy payloads
+  app.get('/api/tournament/scores', (_req, res) => {
+    const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    res.json({
+      matches: data.matches || [],
+      teams: data.teams || [],
+      knockout: data.knockout || { format: 'top4', matches: [] },
+      lastUpdated: data.lastUpdated || Date.now(),
+    });
+  });
+
+  // Real-time match score update endpoint
+  app.patch('/api/tournament/matches/:id', (req, res) => {
+    const matchId = req.params.id;
+    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    let matched = false;
+    const now = Date.now();
+
+    const updatedMatches = (current.matches || []).map((m: any) => {
+      if (m.id === matchId) {
+        matched = true;
+        const updated = { ...m, ...req.body };
+        if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
+          if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
+          else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
+        }
+        return updated;
+      }
+      return m;
+    });
+
+    if (matched) {
+      current.matches = updatedMatches;
+      current.lastUpdated = now;
+      writeJSON(TOURNAMENT_FILE, current);
+      return res.json({ success: true, lastUpdated: now, match: updatedMatches.find((m: any) => m.id === matchId) });
+    }
+
+    // Check knockout matches
+    if (current.knockout && Array.isArray(current.knockout.matches)) {
+      const updatedKnockout = current.knockout.matches.map((k: any) => {
+        if (k.id === matchId) {
+          matched = true;
+          const updated = { ...k, ...req.body };
+          if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
+            if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
+            else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
+          }
+          return updated;
+        }
+        return k;
+      });
+
+      if (matched) {
+        current.knockout.matches = updatedKnockout;
+        current.lastUpdated = now;
+        writeJSON(TOURNAMENT_FILE, current);
+        return res.json({ success: true, lastUpdated: now, match: updatedKnockout.find((k: any) => k.id === matchId) });
+      }
+    }
+
+    res.status(404).json({ error: 'Match not found' });
+  });
+
+  // Bulk captain assignment persistent endpoint
+  app.post('/api/tournament/captains', (req, res) => {
+    const { assignments } = req.body; // array of { teamId, captainId }
+    if (!Array.isArray(assignments)) {
+      return res.status(400).json({ error: 'assignments must be an array' });
+    }
+    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const map = new Map(assignments.map((a: any) => [a.teamId, a.captainId]));
+
+    current.teams = (current.teams || []).map((t: any) => {
+      if (map.has(t.id)) {
+        const newCap = map.get(t.id);
+        const players = Array.isArray(t.players) ? [...t.players] : [];
+        if (newCap && !players.includes(newCap)) {
+          players.unshift(newCap);
+        }
+        return {
+          ...t,
+          captainId: newCap,
+          players,
+        };
+      }
+      return t;
+    });
+
+    current.lastUpdated = Date.now();
+    writeJSON(TOURNAMENT_FILE, current);
+    res.json({ success: true, teams: current.teams, lastUpdated: current.lastUpdated });
   });
 
   // 4. Registration Token / Link Management

@@ -975,11 +975,21 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
 
               <div className="flex flex-wrap items-center gap-2 shrink-0">
                 <button
-                  onClick={() => setIsFormCustomizerOpen(true)}
-                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-all shadow-lg shadow-emerald-500/20"
+                  onClick={async () => {
+                    await saveFormConfig({ ...formConfig, isPublished: true }, true);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-black bg-amber-400 hover:bg-amber-300 text-slate-950 transition-all shadow-lg shadow-amber-400/20"
+                  title="Save customizations to persistent database and update active registration link"
                 >
-                  <Sliders className="w-4 h-4" />
-                  <span>Launch Visual Drag & Drop Builder</span>
+                  <Sparkles className="w-4 h-4" />
+                  <span>Publish / Generate Link</span>
+                </button>
+                <button
+                  onClick={() => setIsFormCustomizerOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/40 transition-all shadow-sm"
+                >
+                  <Sliders className="w-4 h-4 text-emerald-400" />
+                  <span>Launch Visual Builder</span>
                 </button>
                 <button
                   onClick={() => onOpenPublicForm && onOpenPublicForm(currentSeasonSlug)}

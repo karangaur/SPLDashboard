@@ -87,11 +87,12 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     }
     setTokenParam(foundToken);
 
-    // 2. Fetch form config
-    fetch(`/api/forms/${activeSeasonSlug}`)
+    // 2. Fetch form config from persistent backend
+    const targetSlug = activeSeasonSlug && activeSeasonSlug !== 'undefined' ? activeSeasonSlug : 'season-4';
+    fetch(`/api/forms/${encodeURIComponent(targetSlug)}`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
-        if (isMounted && data && data.fields) {
+        if (isMounted && data && Array.isArray(data.fields) && data.fields.length > 0) {
           setFormConfig(data);
         }
       })
@@ -339,12 +340,11 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       {/* Top Header Bar */}
       <header className="max-w-3xl w-full mx-auto flex items-center justify-between pb-6 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-lg"
-            style={{ backgroundColor: accentColor }}
-          >
-            <span className="text-2xl leading-none text-slate-950">🏸</span>
-          </div>
+          <img
+            src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
+            alt="Smash Premier League Logo"
+            className="h-10 sm:h-12 w-auto object-contain drop-shadow"
+          />
           <div>
             <span className="block font-display text-base sm:text-lg font-black tracking-tight text-white leading-tight">
               {formConfig.tournamentName || 'Smash Premier League'}
@@ -367,8 +367,22 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
       {/* Main Form Content Container */}
       <main className="max-w-2xl w-full mx-auto my-6">
-        {/* State 1: Invalidated / Revoked Link Notice */}
-        {isTokenRevoked ? (
+        {loadingConfig ? (
+          /* Loading State: Clean Sports Skeleton */
+          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-10 sm:p-14 text-center space-y-5 shadow-2xl animate-fade-in relative overflow-hidden">
+            <div className="flex flex-col items-center justify-center space-y-4">
+              <img
+                src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
+                alt="Smash Premier League Official 3D Logo"
+                className="max-w-[240px] sm:max-w-[280px] h-auto object-contain mx-auto filter drop-shadow-[0_10px_25px_rgba(59,130,246,0.35)] animate-pulse"
+              />
+              <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Loading official tournament entry form...</span>
+              </div>
+            </div>
+          </div>
+        ) : isTokenRevoked ? (
           <div className="rounded-3xl bg-[#0b1120] p-8 border border-rose-500/30 text-center space-y-5 shadow-2xl animate-fade-in">
             <div className="w-16 h-16 mx-auto rounded-3xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400">
               <ShieldAlert className="w-8 h-8" />
@@ -506,9 +520,21 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
               style={{ backgroundColor: accentColor }}
             />
 
-            {/* Form Headline */}
-            <div className="space-y-3 pb-6 border-b border-white/10 relative">
-              <div className="flex items-center gap-2">
+            {/* Form Headline with Centered Official 3D Logo */}
+            <div className="space-y-4 pb-6 border-b border-white/10 relative text-center">
+              {/* Prominent Official 3D Tournament Logo Centered Above Form */}
+              <div className="flex flex-col items-center justify-center pt-2 pb-2">
+                <div className="relative group">
+                  <div className="absolute -inset-4 bg-gradient-to-r from-blue-600/30 via-amber-500/20 to-blue-400/30 rounded-full blur-2xl opacity-75 group-hover:opacity-100 transition-opacity pointer-events-none" />
+                  <img
+                    src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
+                    alt="Smash Premier League Official 3D Logo"
+                    className="relative max-w-[260px] sm:max-w-[340px] max-h-36 sm:max-h-48 w-auto h-auto object-contain mx-auto filter drop-shadow-[0_12px_28px_rgba(37,99,235,0.45)] transition-transform duration-300 hover:scale-[1.02]"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-2">
                 <span
                   className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider text-slate-950"
                   style={{ backgroundColor: accentColor }}
