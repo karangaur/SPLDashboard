@@ -16,6 +16,7 @@ import { ChampionView } from './components/champion/ChampionView';
 import { SettingsView } from './components/settings/SettingsView';
 import { PublicRegistrationPage } from './components/registration/PublicRegistrationPage';
 import { AdminLoginPage } from './components/auth/AdminLoginPage';
+import { HeroHomePage } from './components/home/HeroHomePage';
 import { AuthService } from './services/authService';
 import {
   LayoutDashboard,
@@ -30,17 +31,20 @@ export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => AuthService.isAuthenticated());
 
-  // Check if current route is public registration link
-  const [isPublicMode, setIsPublicMode] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false;
+  // Determine initial view from URL
+  const [viewMode, setViewMode] = useState<'home' | 'admin' | 'login' | 'register'>(() => {
+    if (typeof window === 'undefined') return 'home';
     const path = window.location.pathname;
     const search = window.location.search;
     const hash = window.location.hash;
-    return (
+    if (
       path.startsWith('/register') ||
       new URLSearchParams(search).has('register') ||
       hash.startsWith('#/register')
-    );
+    ) {
+      return 'register';
+    }
+    return 'home';
   });
 
   const [publicSeason, setPublicSeason] = useState<string | undefined>(() => {
@@ -60,13 +64,13 @@ export default function App() {
       const path = window.location.pathname;
       const search = window.location.search;
       const hash = window.location.hash;
-      const shouldBePublic =
+      const shouldBeRegister =
         path.startsWith('/register') ||
         new URLSearchParams(search).has('register') ||
         hash.startsWith('#/register');
 
-      setIsPublicMode(shouldBePublic);
-      if (shouldBePublic) {
+      if (shouldBeRegister) {
+        setViewMode('register');
         const params = new URLSearchParams(search);
         if (params.has('register')) setPublicSeason(params.get('register') || undefined);
       }
@@ -78,11 +82,11 @@ export default function App() {
 
   const handleOpenPublicForm = (season?: string) => {
     setPublicSeason(season);
-    setIsPublicMode(true);
+    setViewMode('register');
   };
 
   const handleBackToDashboard = () => {
-    setIsPublicMode(false);
+    setViewMode('home');
     // Clean URL query without reload
     try {
       if (window.location.search.includes('register')) {
@@ -96,6 +100,7 @@ export default function App() {
   const handleLogout = () => {
     AuthService.logout();
     setIsAuthenticated(false);
+    setViewMode('home');
   };
 
   const renderActiveView = () => {
@@ -136,89 +141,118 @@ export default function App() {
 
   return (
     <TournamentProvider>
-      {isPublicMode ? (
+      {viewMode === 'register' ? (
         /* Standalone Public Player Registration Form */
         <PublicRegistrationPage
           seasonParam={publicSeason}
           onBackToApp={handleBackToDashboard}
         />
-      ) : !isAuthenticated ? (
+      ) : viewMode === 'login' ? (
         /* Modern Badminton-Sporty Admin Login Page */
         <AdminLoginPage
-          onLoginSuccess={() => setIsAuthenticated(true)}
+          onLoginSuccess={() => {
+            setIsAuthenticated(true);
+            setViewMode('admin');
+          }}
           onGoToPublicRegister={() => handleOpenPublicForm()}
+          onBackToHome={() => setViewMode('home')}
         />
-      ) : (
-        /* Admin Tournament Dashboard Shell */
-        <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans">
-          {/* Main Header with 3-Zone Contract & Logout */}
-          <Header
-            currentTab={currentTab}
-            onSelectTab={setCurrentTab}
-            onLogout={handleLogout}
+      ) : viewMode === 'admin' ? (
+        !isAuthenticated ? (
+          <AdminLoginPage
+            onLoginSuccess={() => {
+              setIsAuthenticated(true);
+              setViewMode('admin');
+            }}
+            onGoToPublicRegister={() => handleOpenPublicForm()}
+            onBackToHome={() => setViewMode('home')}
           />
+        ) : (
+          /* Admin Tournament Dashboard Shell */
+          <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans">
+            {/* Main Header with 3-Zone Contract, View Public Site & Logout */}
+            <Header
+              currentTab={currentTab}
+              onSelectTab={setCurrentTab}
+              onLogout={handleLogout}
+              onViewPublicHome={() => setViewMode('home')}
+            />
 
-          {/* Viewport Content Area */}
-          <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
-            {renderActiveView()}
-          </main>
+            {/* Viewport Content Area */}
+            <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+              {renderActiveView()}
+            </main>
 
-          {/* Global Footer with Persistence info */}
-          <Footer onSelectTab={setCurrentTab} />
+            {/* Global Footer with Persistence info */}
+            <Footer onSelectTab={setCurrentTab} />
 
-          {/* Mobile Fixed Bottom Navigation Bar (≤ 15% Mobile Sticky Cap) */}
-          <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-lg border-t border-white/10 px-2 py-1.5 flex items-center justify-around shadow-2xl">
-            <button
-              onClick={() => setCurrentTab('dashboard')}
-              className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                currentTab === 'dashboard' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span className="text-[10px] mt-0.5">Live</span>
-            </button>
+            {/* Mobile Fixed Bottom Navigation Bar */}
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-lg border-t border-white/10 px-2 py-1.5 flex items-center justify-around shadow-2xl">
+              <button
+                onClick={() => setCurrentTab('dashboard')}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
+                  currentTab === 'dashboard' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <LayoutDashboard className="w-4 h-4" />
+                <span className="text-[10px] mt-0.5">Live</span>
+              </button>
 
-            <button
-              onClick={() => setCurrentTab('fixtures')}
-              className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                currentTab === 'fixtures' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Swords className="w-4 h-4" />
-              <span className="text-[10px] mt-0.5">Matches</span>
-            </button>
+              <button
+                onClick={() => setCurrentTab('fixtures')}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
+                  currentTab === 'fixtures' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Swords className="w-4 h-4" />
+                <span className="text-[10px] mt-0.5">Matches</span>
+              </button>
 
-            <button
-              onClick={() => setCurrentTab('standings')}
-              className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                currentTab === 'standings' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <TrendingUp className="w-4 h-4" />
-              <span className="text-[10px] mt-0.5">Table</span>
-            </button>
+              <button
+                onClick={() => setCurrentTab('standings')}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
+                  currentTab === 'standings' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <TrendingUp className="w-4 h-4" />
+                <span className="text-[10px] mt-0.5">Table</span>
+              </button>
 
-            <button
-              onClick={() => setCurrentTab('registration')}
-              className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                currentTab === 'registration' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <UserPlus className="w-4 h-4" />
-              <span className="text-[10px] mt-0.5">Register</span>
-            </button>
+              <button
+                onClick={() => setCurrentTab('registration')}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
+                  currentTab === 'registration' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <UserPlus className="w-4 h-4" />
+                <span className="text-[10px] mt-0.5">Register</span>
+              </button>
 
-            <button
-              onClick={() => setCurrentTab('tokens')}
-              className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                currentTab === 'tokens' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
-              }`}
-            >
-              <Dices className="w-4 h-4" />
-              <span className="text-[10px] mt-0.5">Tokens</span>
-            </button>
+              <button
+                onClick={() => setCurrentTab('tokens')}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
+                  currentTab === 'tokens' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Dices className="w-4 h-4" />
+                <span className="text-[10px] mt-0.5">Tokens</span>
+              </button>
+            </div>
           </div>
-        </div>
+        )
+      ) : (
+        /* Premium Badminton Tournament Hero Homepage */
+        <HeroHomePage
+          onOpenLogin={() => {
+            if (isAuthenticated) {
+              setViewMode('admin');
+            } else {
+              setViewMode('login');
+            }
+          }}
+          onOpenPublicRegister={() => handleOpenPublicForm()}
+          onGoToAdmin={() => setViewMode('admin')}
+        />
       )}
     </TournamentProvider>
   );

@@ -20,11 +20,13 @@ import { AuthService, AdminUser } from '../../services/authService';
 interface AdminLoginPageProps {
   onLoginSuccess: (user: AdminUser) => void;
   onGoToPublicRegister?: () => void;
+  onBackToHome?: () => void;
 }
 
 export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   onLoginSuccess,
   onGoToPublicRegister,
+  onBackToHome,
 }) => {
   const [identifier, setIdentifier] = useState('admin');
   const [password, setPassword] = useState('');
@@ -113,16 +115,27 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
           </div>
         </div>
 
-        {/* Quick action: Link to athlete registration form */}
-        {onGoToPublicRegister && (
-          <button
-            onClick={onGoToPublicRegister}
-            className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
-          >
-            <span>Public Registration</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
-        )}
+        <div className="flex items-center gap-2">
+          {onBackToHome && (
+            <button
+              onClick={onBackToHome}
+              className="px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
+            >
+              ← Tournament Home
+            </button>
+          )}
+
+          {/* Quick action: Link to athlete registration form */}
+          {onGoToPublicRegister && (
+            <button
+              onClick={onGoToPublicRegister}
+              className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
+            >
+              <span>Public Registration</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Main Content: Split-Screen on Desktop */}

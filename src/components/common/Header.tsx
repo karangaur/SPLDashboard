@@ -11,6 +11,7 @@ import {
   CheckCircle2,
   LogOut,
   Shield,
+  ExternalLink,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 
@@ -32,9 +33,10 @@ interface HeaderProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   onLogout?: () => void;
+  onViewPublicHome?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogout }) => {
+export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogout, onViewPublicHome }) => {
   const { state } = useTournament();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
@@ -226,6 +228,18 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
             <span className="sm:hidden">Register</span>
           </button>
 
+          {/* Switch to Public Tournament Homepage */}
+          {onViewPublicHome && (
+            <button
+              onClick={onViewPublicHome}
+              title="View Public Tournament Home"
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-lime-400 hover:text-lime-300 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              <span>Public Site</span>
+            </button>
+          )}
+
           {/* Admin Indicator & Logout */}
           {onLogout && (
             <button
@@ -339,6 +353,18 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               <span>Settings & Data Backup</span>
               <Sliders className="w-4 h-4 text-slate-400" />
             </button>
+            {onViewPublicHome && (
+              <button
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  onViewPublicHome();
+                }}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 text-sm border border-lime-400/30 mt-2 transition-colors font-bold"
+              >
+                <span>View Public Tournament Home</span>
+                <ExternalLink className="w-4 h-4 text-lime-400" />
+              </button>
+            )}
             {onLogout && (
               <button
                 onClick={() => {
