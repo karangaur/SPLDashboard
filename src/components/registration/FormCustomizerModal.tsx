@@ -47,15 +47,21 @@ interface FormCustomizerModalProps {
 }
 
 const FIELD_TYPE_OPTIONS: { type: FormFieldType; label: string; icon: string; desc: string }[] = [
-  { type: 'text', label: 'Short Text', icon: '📝', desc: 'Single-line text (e.g. Locality, Club Name)' },
+  { type: 'text', label: 'Short Text', icon: '📝', desc: 'Single-line text (e.g. Club Name, Locality)' },
   { type: 'textarea', label: 'Long Text', icon: '📄', desc: 'Multi-line notes, requests or medical history' },
-  { type: 'mobile', label: 'Mobile Number', icon: '📱', desc: '10-digit Indian phone or emergency contact' },
+  { type: 'number', label: 'Number', icon: '🔢', desc: 'Numeric ranking, seed or numeric input' },
+  { type: 'mobile', label: 'Phone Number', icon: '📱', desc: '10-digit Indian mobile number' },
   { type: 'email', label: 'Email Address', icon: '✉️', desc: 'Electronic mail confirmation' },
-  { type: 'number', label: 'Number', icon: '🔢', desc: 'Age, years of experience, or ranking' },
-  { type: 'dropdown', label: 'Dropdown', icon: '▾', desc: 'Single selection from a dropdown list' },
+  { type: 'dropdown', label: 'Dropdown / Select', icon: '▾', desc: 'Single selection from a dropdown list' },
   { type: 'radio', label: 'Radio Buttons', icon: '🔘', desc: 'Single choice displayed as radio options' },
   { type: 'checkbox', label: 'Checkboxes', icon: '☑️', desc: 'Multiple selectable options' },
-  { type: 'date', label: 'Date', icon: '📅', desc: 'Date of birth or availability date' },
+  { type: 'date', label: 'Date Picker', icon: '📅', desc: 'Date of birth or tournament availability' },
+  { type: 'gender', label: 'Gender Selection', icon: '⚧', desc: 'Preset choices: Male, Female, Other' },
+  { type: 'city', label: 'City / Locality', icon: '📍', desc: 'Athlete city or local region' },
+  { type: 'age', label: 'Athlete Age', icon: '🎂', desc: 'Age in years for tournament seeding' },
+  { type: 'yes_no', label: 'Yes / No Toggle', icon: '⚖️', desc: 'Binary decision (Yes or No)' },
+  { type: 'terms', label: 'Terms & Conditions', icon: '📜', desc: 'Athlete declaration and rules agreement' },
+  { type: 'section_heading', label: 'Section Heading / Info', icon: '🏷️', desc: 'Visual divider or informational text' },
   { type: 'photo', label: 'Profile Photo Upload', icon: '📷', desc: 'Athlete headshot upload with instant preview' },
 ];
 
@@ -68,11 +74,22 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
   // Working draft state
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() => ({
     ...initialConfig,
-    payment: initialConfig.payment || {
-      enabled: true,
-      upiId: 'smashleague@icici',
-      accountName: 'Smash Premier League Tournament',
-      note: 'SPL Tournament Entry Fee',
+    payment: {
+      enabled: initialConfig.payment?.enabled ?? true,
+      isMandatory: initialConfig.payment?.isMandatory ?? true,
+      upiId: initialConfig.payment?.upiId || 'karan-hdfc@ybl',
+      accountName: initialConfig.payment?.accountName || 'Smash Premier League (Karan Gaur)',
+      note: initialConfig.payment?.note || 'SPL Maharajganj Player Entry Fee',
+      instructions: initialConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+      buttonText: initialConfig.payment?.buttonText || 'Pay Registration Fee',
+      baseFee: initialConfig.payment?.baseFee ?? (initialConfig.entryFee ?? 500),
+      categoryFees: initialConfig.payment?.categoryFees || {
+        Singles: 300,
+        Doubles: 500,
+        'Mixed Doubles': 500,
+        Both: 800,
+      },
+      customQrDataUrl: initialConfig.payment?.customQrDataUrl,
     },
     appearance: {
       ...initialConfig.appearance,
@@ -185,18 +202,38 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
     }
 
     const fieldId = `custom_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    const defaultOptions =
-      newFieldType === 'dropdown' || newFieldType === 'radio' || newFieldType === 'checkbox'
-        ? ['Option 1', 'Option 2']
-        : undefined;
+    let defaultOptions: string[] | undefined = undefined;
+    let defaultContent: string | undefined = undefined;
+    let defaultTermsText: string | undefined = undefined;
+    let defaultMin: number | undefined = undefined;
+    let defaultMax: number | undefined = undefined;
+
+    if (newFieldType === 'dropdown' || newFieldType === 'select' || newFieldType === 'radio' || newFieldType === 'checkbox' || newFieldType === 'checkboxes') {
+      defaultOptions = ['Option 1', 'Option 2'];
+    } else if (newFieldType === 'gender') {
+      defaultOptions = ['Male', 'Female', 'Other'];
+    } else if (newFieldType === 'yes_no') {
+      defaultOptions = ['Yes', 'No'];
+    } else if (newFieldType === 'terms') {
+      defaultTermsText = 'I hereby declare that all information submitted is true, and I agree to abide by all official tournament regulations and code of conduct for Smash Premier League Maharajganj.';
+    } else if (newFieldType === 'section_heading') {
+      defaultContent = 'Important guidelines and athlete conduct instructions for this championship edition.';
+    } else if (newFieldType === 'age') {
+      defaultMin = 10;
+      defaultMax = 75;
+    }
 
     const newField: RegistrationFormField = {
       id: fieldId,
       label: newFieldLabel.trim(),
       type: newFieldType,
-      required: newFieldRequired,
+      required: newFieldType === 'section_heading' ? false : newFieldRequired,
       enabled: true,
       options: defaultOptions,
+      content: defaultContent,
+      termsText: defaultTermsText,
+      min: defaultMin,
+      max: defaultMax,
       order: formConfig.fields.length + 1,
     };
 
@@ -453,27 +490,41 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                       )}
 
                       {/* Render simulated input by type */}
-                      {field.type === 'text' && (
+                      {field.type === 'section_heading' && (
+                        <div className="pt-2 pb-1">
+                          <div className="p-3.5 rounded-2xl bg-white/[0.04] border border-white/10 flex items-start gap-3">
+                            <span className="text-base">🏷️</span>
+                            <div>
+                              <h4 className="font-bold text-white text-xs">{field.label}</h4>
+                              <p className="text-[11px] text-slate-400 mt-0.5 leading-relaxed">
+                                {field.content || field.helpText || 'Official section guidance.'}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {(field.type === 'text' || field.type === 'short_text') && (
                         <input
                           type="text"
                           disabled
-                          placeholder={field.placeholder || 'Text answer'}
+                          placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
                           className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none"
                         />
                       )}
 
-                      {field.type === 'textarea' && (
+                      {(field.type === 'textarea' || field.type === 'long_text') && (
                         <textarea
                           rows={2}
                           disabled
-                          placeholder={field.placeholder || 'Detailed notes...'}
+                          placeholder={field.placeholder || 'Detailed notes or information...'}
                           className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-slate-300 placeholder-slate-600 focus:outline-none resize-none"
                         />
                       )}
 
-                      {field.type === 'mobile' && (
+                      {(field.type === 'mobile' || field.type === 'phone') && (
                         <div className="relative">
-                          <span className="absolute left-3.5 top-2.5 text-xs text-slate-500 font-mono">
+                          <span className="absolute left-3.5 top-2.5 text-xs text-slate-500 font-mono font-bold">
                             +91
                           </span>
                           <input
@@ -503,6 +554,34 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                         />
                       )}
 
+                      {field.type === 'age' && (
+                        <div className="space-y-1">
+                          <input
+                            type="number"
+                            disabled
+                            placeholder="e.g. 24"
+                            className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none font-mono"
+                          />
+                          {(field.min != null || field.max != null) && (
+                            <span className="text-[10px] text-slate-500 block">
+                              Allowed age: {field.min ?? 10} to {field.max ?? 75} years
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {field.type === 'city' && (
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-2.5 text-xs text-slate-500">📍</span>
+                          <input
+                            type="text"
+                            disabled
+                            placeholder="e.g. Maharajganj, Gorakhpur"
+                            className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-300 placeholder-slate-600 focus:outline-none"
+                          />
+                        </div>
+                      )}
+
                       {field.type === 'date' && (
                         <input
                           type="date"
@@ -511,7 +590,7 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                         />
                       )}
 
-                      {field.type === 'dropdown' && (
+                      {(field.type === 'dropdown' || field.type === 'select') && (
                         <select
                           disabled
                           className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 focus:outline-none"
@@ -549,7 +628,34 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                         </div>
                       )}
 
-                      {field.type === 'checkbox' && (
+                      {field.type === 'gender' && (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          {['Male', 'Female', 'Other'].map((g, i) => (
+                            <div
+                              key={g}
+                              className="flex items-center justify-center gap-1.5 p-2 rounded-xl bg-slate-900 border border-white/10 text-xs text-slate-300 font-semibold"
+                            >
+                              <span>{g === 'Male' ? '♂️' : g === 'Female' ? '♀️' : '⚧'}</span>
+                              <span>{g}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {field.type === 'yes_no' && (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          {['Yes', 'No'].map((opt, i) => (
+                            <div
+                              key={opt}
+                              className="flex items-center justify-center gap-2 p-2.5 rounded-xl bg-slate-900 border border-white/10 text-xs text-slate-300 font-bold"
+                            >
+                              <span>{opt === 'Yes' ? '✅ Yes' : '❌ No'}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {(field.type === 'checkbox' || field.type === 'checkboxes') && (
                         <div className="grid grid-cols-2 gap-2 pt-1">
                           {field.options?.map((opt, i) => (
                             <div
@@ -568,6 +674,17 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                         </div>
                       )}
 
+                      {field.type === 'terms' && (
+                        <div className="p-3 bg-white/[0.03] border border-white/10 rounded-2xl text-xs space-y-2">
+                          <div className="flex items-start gap-2.5">
+                            <input type="checkbox" disabled checked className="mt-0.5 rounded accent-emerald-400" />
+                            <p className="text-[11px] text-slate-300 leading-relaxed">
+                              {field.termsText || 'I agree to tournament terms, safety rules and match regulations.'}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       {field.type === 'photo' && (
                         <div className="p-4 border-2 border-dashed border-white/15 rounded-2xl flex flex-col items-center justify-center text-center bg-slate-900/50">
                           <Upload className="w-5 h-5 text-slate-400 mb-1" />
@@ -581,6 +698,46 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                       )}
                     </div>
                   ))}
+
+                {/* Simulated Payment Section in Live Preview */}
+                {formConfig.payment?.enabled && (
+                  <div className="p-4 rounded-2xl bg-slate-900 border border-emerald-500/30 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-white/10">
+                      <div className="flex items-center gap-2">
+                        <CreditCard className="w-4 h-4 text-emerald-400" />
+                        <span className="text-xs font-bold text-white uppercase tracking-wider">
+                          Tournament Fee & UPI Payment
+                        </span>
+                      </div>
+                      <span className="font-mono text-xs font-black text-emerald-400">
+                        {formConfig.payment.baseFee > 0 ? formatINR(formConfig.payment.baseFee) : 'FREE (₹0)'}
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-300">
+                      {formConfig.payment.instructions || 'Pay directly to official tournament account via UPI.'}
+                    </p>
+
+                    <div className="flex flex-col sm:flex-row items-center gap-3 p-2.5 bg-black/40 rounded-xl border border-white/5">
+                      {previewQrCode ? (
+                        <img src={previewQrCode} alt="UPI QR" className="w-20 h-20 rounded-lg bg-white p-1" />
+                      ) : (
+                        <div className="w-20 h-20 bg-white/10 rounded-lg flex items-center justify-center text-xs text-slate-400">
+                          QR Code
+                        </div>
+                      )}
+                      <div className="text-xs space-y-1 text-center sm:text-left flex-1 min-w-0">
+                        <span className="text-[10px] text-slate-400 block">Recipient UPI ID:</span>
+                        <span className="font-mono font-bold text-emerald-400 block truncate">
+                          {formConfig.payment.upiId || 'karan-hdfc@ybl'}
+                        </span>
+                        <span className="text-[10px] text-slate-400 block truncate">
+                          {formConfig.payment.accountName || 'Smash Premier League (Karan Gaur)'}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
 
                 {/* Simulated Submit Button with Accent Color */}
                 <div className="pt-4">
@@ -624,6 +781,18 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
               >
                 <FileText className="w-4 h-4" />
                 <span>Tournament Details</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('payment')}
+                className={`flex items-center gap-2 py-3 px-4 border-b-2 font-bold text-xs transition-colors ${
+                  activeTab === 'payment'
+                    ? 'border-emerald-400 text-emerald-400'
+                    : 'border-transparent text-slate-400 hover:text-white'
+                }`}
+              >
+                <CreditCard className="w-4 h-4" />
+                <span>Payment & UPI Settings</span>
               </button>
 
               <button
@@ -1217,6 +1386,380 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                       }
                       className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
                     />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 4: Payment & UPI Settings */}
+            {activeTab === 'payment' && (
+              <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-emerald-400" />
+                    <span>Tournament Payment & Direct UPI Configuration</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Configure online UPI payment collection, QR codes, category-specific pricing, and mandatory/optional enforcement.
+                  </p>
+                </div>
+
+                {/* Primary Enablement & Mode Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Enable / Disable */}
+                  <div className="p-4 rounded-2xl bg-slate-900 border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white">Payment Collection</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              enabled: !formConfig.payment?.enabled,
+                            },
+                          })
+                        }
+                        className={`text-xs px-3 py-1 rounded-xl font-bold transition-all ${
+                          formConfig.payment?.enabled
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        }`}
+                      >
+                        {formConfig.payment?.enabled ? 'Active / Enabled' : 'Disabled'}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      When enabled, payment instructions, QR code, and UPI intent links are presented to applicants.
+                    </p>
+                  </div>
+
+                  {/* Mandatory vs Optional */}
+                  <div className="p-4 rounded-2xl bg-slate-900 border border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-white">Payment Enforcement</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              isMandatory: !formConfig.payment?.isMandatory,
+                            },
+                          })
+                        }
+                        className={`text-xs px-3 py-1 rounded-xl font-bold transition-all ${
+                          formConfig.payment?.isMandatory
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
+                        }`}
+                      >
+                        {formConfig.payment?.isMandatory ? 'Mandatory' : 'Optional (Pay Later)'}
+                      </button>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      {formConfig.payment?.isMandatory
+                        ? 'Mandatory: Applicants must submit payment reference or initiation before registering.'
+                        : 'Optional: Players can submit entry and pay later or offline at tournament desk.'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Base Fee & Recipient Info */}
+                <div className="p-5 rounded-2xl bg-slate-900 border border-white/10 space-y-4">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Official Recipient UPI Account</span>
+                  </h4>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Recipient UPI ID (VPA) *
+                      </label>
+                      <input
+                        type="text"
+                        value={formConfig.payment?.upiId || 'karan-hdfc@ybl'}
+                        onChange={(e) =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              upiId: e.target.value.trim(),
+                            },
+                          })
+                        }
+                        placeholder="e.g. karan-hdfc@ybl"
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
+                      />
+                      <span className="text-[10px] text-slate-500 mt-1 block">
+                        Default: <span className="font-mono text-slate-400">karan-hdfc@ybl</span>
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Recipient Account Name
+                      </label>
+                      <input
+                        type="text"
+                        value={formConfig.payment?.accountName || 'Smash Premier League (Karan Gaur)'}
+                        onChange={(e) =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              accountName: e.target.value,
+                            },
+                          })
+                        }
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Base Entry Fee (INR ₹)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={formConfig.payment?.baseFee ?? 500}
+                        onChange={(e) => {
+                          const val = Math.max(0, Number(e.target.value) || 0);
+                          setFormConfig({
+                            ...formConfig,
+                            entryFee: val,
+                            payment: {
+                              ...formConfig.payment!,
+                              baseFee: val,
+                            },
+                          });
+                        }}
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white font-mono focus:border-emerald-500 focus:outline-none"
+                      />
+                      <span className="text-[10px] text-slate-500 mt-1 block">
+                        Set ₹0 for 100% Free Registration
+                      </span>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Transaction Reference Note
+                      </label>
+                      <input
+                        type="text"
+                        value={formConfig.payment?.note || 'SPL Maharajganj Player Entry Fee'}
+                        onChange={(e) =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              note: e.target.value,
+                            },
+                          })
+                        }
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:border-emerald-500 focus:outline-none"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category-Specific Pricing Matrix */}
+                <div className="p-5 rounded-2xl bg-slate-900 border border-white/10 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                        Category-Specific Entry Fees
+                      </h4>
+                      <p className="text-[11px] text-slate-400">
+                        Automatically adjust amount based on player category selection.
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const newCat = prompt('Enter new category name (e.g. Mixed Doubles, Veteran 40+):');
+                        if (newCat && newCat.trim()) {
+                          const currentFees = formConfig.payment?.categoryFees || {};
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              categoryFees: {
+                                ...currentFees,
+                                [newCat.trim()]: 500,
+                              },
+                            },
+                          });
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 transition-colors"
+                    >
+                      + Add Category Fee
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                    {Object.entries(formConfig.payment?.categoryFees || {
+                      Singles: 300,
+                      Doubles: 500,
+                      'Mixed Doubles': 500,
+                      Both: 800,
+                    }).map(([catName, catFee]) => (
+                      <div
+                        key={catName}
+                        className="flex items-center justify-between gap-3 p-3 rounded-xl bg-slate-950 border border-white/10 text-xs"
+                      >
+                        <span className="font-bold text-white truncate">{catName}</span>
+                        <div className="flex items-center gap-2">
+                          <span className="text-slate-400 font-mono">₹</span>
+                          <input
+                            type="number"
+                            min={0}
+                            value={catFee}
+                            onChange={(e) => {
+                              const newFee = Math.max(0, Number(e.target.value) || 0);
+                              setFormConfig({
+                                ...formConfig,
+                                payment: {
+                                  ...formConfig.payment!,
+                                  categoryFees: {
+                                    ...(formConfig.payment?.categoryFees || {}),
+                                    [catName]: newFee,
+                                  },
+                                },
+                              });
+                            }}
+                            className="w-20 bg-slate-900 border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white font-mono focus:outline-none focus:border-emerald-500 text-right"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const copy = { ...(formConfig.payment?.categoryFees || {}) };
+                              delete copy[catName];
+                              setFormConfig({
+                                ...formConfig,
+                                payment: {
+                                  ...formConfig.payment!,
+                                  categoryFees: copy,
+                                },
+                              });
+                            }}
+                            className="text-slate-500 hover:text-rose-400 p-1"
+                            title="Remove category fee"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Instructions & Button Label */}
+                <div className="p-5 rounded-2xl bg-slate-900 border border-white/10 space-y-4">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                    Instructions & Button Text
+                  </h4>
+
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Payment Instructions (Shown to player)
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={formConfig.payment?.instructions || ''}
+                        onChange={(e) =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              instructions: e.target.value,
+                            },
+                          })
+                        }
+                        placeholder="e.g. Scan QR code or tap UPI button to pay via Google Pay, PhonePe, or Paytm..."
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl p-3 text-xs text-white focus:outline-none focus:border-emerald-500 resize-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-300 mb-1">
+                        Payment Button Label
+                      </label>
+                      <input
+                        type="text"
+                        value={formConfig.payment?.buttonText || 'Pay Registration Fee'}
+                        onChange={(e) =>
+                          setFormConfig({
+                            ...formConfig,
+                            payment: {
+                              ...formConfig.payment!,
+                              buttonText: e.target.value,
+                            },
+                          })
+                        }
+                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-emerald-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Live Payment Preview Card with QR */}
+                <div className="p-5 rounded-2xl bg-gradient-to-br from-emerald-500/10 via-slate-900 to-slate-950 border border-emerald-500/30 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <QrCode className="w-4 h-4" />
+                      <span>Live UPI Intent Preview</span>
+                    </span>
+                    <span className="text-[10px] font-mono text-slate-400">
+                      Amount: {formatINR(formConfig.payment?.baseFee ?? 500)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-col sm:flex-row items-center gap-5">
+                    {previewQrCode ? (
+                      <img
+                        src={previewQrCode}
+                        alt="Preview QR Code"
+                        className="w-32 h-32 rounded-2xl bg-white p-2 shadow-xl"
+                      />
+                    ) : (
+                      <div className="w-32 h-32 bg-slate-800 rounded-2xl flex items-center justify-center text-xs text-slate-400">
+                        Generating QR...
+                      </div>
+                    )}
+
+                    <div className="space-y-2 text-xs flex-1 min-w-0">
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">UPI ID:</span>
+                        <span className="font-mono font-bold text-white block select-all">
+                          {formConfig.payment?.upiId || 'karan-hdfc@ybl'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Recipient:</span>
+                        <span className="font-semibold text-slate-200 block">
+                          {formConfig.payment?.accountName || 'Smash Premier League'}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-400 block">Intent URI:</span>
+                        <span className="font-mono text-[10px] text-slate-400 truncate block bg-black/40 p-1.5 rounded-lg border border-white/5 select-all">
+                          {buildUPIPaymentUri({
+                            upiId: formConfig.payment?.upiId || 'karan-hdfc@ybl',
+                            accountName: formConfig.payment?.accountName || 'Smash Premier League',
+                            amount: formConfig.payment?.baseFee ?? 500,
+                            note: formConfig.payment?.note || 'SPL Tournament Entry Fee',
+                          })}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>

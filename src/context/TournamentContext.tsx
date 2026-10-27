@@ -14,6 +14,7 @@ import {
   RegistrationFormConfig,
   FormAppearance,
   RegistrationTokenRecord,
+  PaymentStatus,
 } from '../types/tournament';
 import {
   STORAGE_KEY,
@@ -92,6 +93,7 @@ interface TournamentContextType {
   updateRegistration: (id: string, updates: Partial<Registration>) => void;
   approveRegistration: (id: string) => void;
   rejectRegistration: (id: string, reason?: string) => void;
+  verifyPayment: (id: string, paymentStatus: PaymentStatus, note?: string, verifiedBy?: string) => Promise<{ success: boolean; registration?: Registration }>;
   deleteRegistration: (id: string) => void;
   deleteRegistrationsBulk: (ids: string[]) => void;
   bulkApproveRegistrations: (ids: string[]) => void;
@@ -356,9 +358,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setFormConfig((prev) => ({
       ...prev,
       payment: {
+        ...(prev.payment || {}),
         enabled: paymentUpdate.enabled ?? prev.payment?.enabled ?? true,
-        upiId: paymentUpdate.upiId ?? prev.payment?.upiId ?? 'smashleague@icici',
-        accountName: paymentUpdate.accountName ?? prev.payment?.accountName ?? 'Smash Premier League Tournament',
+        isMandatory: prev.payment?.isMandatory ?? true,
+        baseFee: prev.payment?.baseFee ?? 500,
+        upiId: paymentUpdate.upiId ?? prev.payment?.upiId ?? 'karan-hdfc@ybl',
+        accountName: paymentUpdate.accountName ?? prev.payment?.accountName ?? 'Smash Premier League (Karan Gaur)',
         note: paymentUpdate.note ?? prev.payment?.note ?? 'SPL Tournament Entry Fee',
       },
     }));
@@ -1311,6 +1316,74 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }).catch(() => {});
   };
 
+  const verifyPayment = async (
+    id: string,
+    paymentStatus: PaymentStatus,
+    note?: string,
+    verifiedBy = 'Tournament Director'
+  ): Promise<{ success: boolean; registration?: Registration }> => {
+    const now = Date.now();
+    try {
+      const res = await safeFetchJson<{ success: boolean; registration?: Registration }>(
+        `/api/registrations/${id}/verify-payment`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ paymentStatus, verifiedBy, note }),
+        }
+      );
+
+      if (res.ok && res.data && res.data.registration) {
+        const updated = res.data.registration;
+        setState((prev) => ({
+          ...prev,
+          registrations: prev.registrations.map((r) => (r.id === id ? updated : r)),
+        }));
+        if (paymentStatus === 'paid') {
+          triggerCelebration();
+        }
+        return { success: true, registration: updated };
+      }
+    } catch {}
+
+    // Resilient local fallback
+    let updatedReg: Registration | undefined;
+    setState((prev) => {
+      const target = prev.registrations.find((r) => r.id === id);
+      if (!target) return prev;
+
+      const prevStatus = target.paymentStatus || (target.status === 'paid' ? 'paid' : target.txnId ? 'pending_verification' : 'unpaid');
+      const auditEntry = {
+        action: 'verify_payment',
+        by: verifiedBy,
+        at: now,
+        fromStatus: prevStatus,
+        toStatus: paymentStatus,
+        note,
+      };
+
+      updatedReg = {
+        ...target,
+        paymentStatus,
+        verifiedBy,
+        verifiedAt: now,
+        paidAt: paymentStatus === 'paid' ? target.paidAt || now : target.paidAt,
+        status: paymentStatus === 'paid' && target.status === 'pending' ? 'approved' : target.status,
+        auditLog: [...(target.auditLog || []), auditEntry],
+      };
+
+      return {
+        ...prev,
+        registrations: prev.registrations.map((r) => (r.id === id ? updatedReg! : r)),
+      };
+    });
+
+    if (paymentStatus === 'paid') {
+      triggerCelebration();
+    }
+    return { success: true, registration: updatedReg };
+  };
+
   const deleteRegistration = (id: string) => {
     setState((prev) => ({
       ...prev,
@@ -1482,6 +1555,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateRegistration,
         approveRegistration,
         rejectRegistration,
+        verifyPayment,
         deleteRegistration,
         deleteRegistrationsBulk,
         bulkApproveRegistrations,

@@ -194,9 +194,19 @@ export function createDefaultFormConfig(
     lastUpdatedAt: Date.now(),
     payment: {
       enabled: true,
-      upiId: 'smashleague@icici',
-      accountName: 'Smash Premier League Tournament',
-      note: 'SPL Tournament Entry Fee',
+      isMandatory: true,
+      upiId: 'karan-hdfc@ybl',
+      accountName: 'Smash Premier League (Karan Gaur)',
+      note: 'SPL Maharajganj Player Entry Fee',
+      instructions: 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+      buttonText: 'Pay Registration Fee',
+      baseFee: 500,
+      categoryFees: {
+        Singles: 300,
+        Doubles: 500,
+        'Mixed Doubles': 500,
+        Both: 800,
+      },
     },
     appearance: {
       formTitle: 'Player Entry & Registration Form',
@@ -206,7 +216,7 @@ export function createDefaultFormConfig(
       accentName: 'Electric Emerald',
       submitButtonText: 'Submit Registration & Confirm Entry',
       successTitle: 'Registration Submitted Successfully!',
-      successMessage: 'Thank you for registering for Smash Premier League. Your details have been received by the tournament committee. Please save your Registration ID.',
+      successMessage: 'Thank you for registering for Smash Premier League. Your details and payment reference have been received by the tournament committee. Please save your Registration ID.',
     },
     fields: [...DEFAULT_FORM_FIELDS],
   };
@@ -245,10 +255,19 @@ export const DEFAULT_STATE: TournamentState = {
   registrations: [],
   payment: {
     enabled: true,
+    isMandatory: true,
     qrImage: '',
-    upiId: 'smashleague@icici',
-    accountName: 'Smash Premier League Tournament',
-    note: 'SPL Entry Fee',
+    upiId: 'karan-hdfc@ybl',
+    accountName: 'Smash Premier League (Karan Gaur)',
+    note: 'SPL Maharajganj Entry Fee',
+    instructions: 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+    buttonText: 'Pay Registration Fee',
+    categoryFees: {
+      Singles: 300,
+      Doubles: 500,
+      'Mixed Doubles': 500,
+      Both: 800,
+    },
   },
   predefinedTeams: [],
   teamFormationMode: 'random',
@@ -439,20 +458,39 @@ export function calculateRegistrationStats(registrations: Registration[]) {
   const rejected = registrations.filter((r) => r.status === 'rejected');
   const comp = registrations.filter((r) => r.status === 'complimentary');
 
-  const collected = approved.reduce((sum, r) => sum + (r.fee || 0), 0);
+  // Payment statuses
+  const paid = registrations.filter((r) => r.paymentStatus === 'paid' || r.status === 'paid');
+  const pendingVerification = registrations.filter(
+    (r) => r.paymentStatus === 'pending_verification' || (r.txnId && r.paymentStatus !== 'paid' && r.paymentStatus !== 'failed' && r.paymentStatus !== 'cancelled')
+  );
+  const unpaid = registrations.filter(
+    (r) => !r.paymentStatus || r.paymentStatus === 'unpaid' || r.paymentStatus === 'pending'
+  );
+  const failedOrCancelled = registrations.filter(
+    (r) => r.paymentStatus === 'failed' || r.paymentStatus === 'cancelled'
+  );
+
+  const totalVerifiedAmount = paid.reduce((sum, r) => sum + (r.fee || 0), 0);
+  const pendingVerificationAmount = pendingVerification.reduce((sum, r) => sum + (r.fee || 0), 0);
+  const collected = totalVerifiedAmount || approved.reduce((sum, r) => sum + (r.fee || 0), 0);
   const pendingAmount = pending.reduce((sum, r) => sum + (r.fee || 0), 0);
 
-  const byUpi = approved.filter((r) => r.method === 'upi').reduce((sum, r) => sum + r.fee, 0);
-  const byCash = approved.filter((r) => r.method === 'cash').reduce((sum, r) => sum + r.fee, 0);
-  const byBank = approved.filter((r) => r.method === 'bank').reduce((sum, r) => sum + r.fee, 0);
+  const byUpi = paid.filter((r) => r.method === 'upi').reduce((sum, r) => sum + r.fee, 0);
+  const byCash = paid.filter((r) => r.method === 'cash').reduce((sum, r) => sum + r.fee, 0);
+  const byBank = paid.filter((r) => r.method === 'bank').reduce((sum, r) => sum + r.fee, 0);
 
   return {
     total: registrations.length,
     approvedCount: approved.length,
-    paidCount: approved.length,
+    paidCount: paid.length,
+    unpaidCount: unpaid.length,
     pendingCount: pending.length,
+    pendingVerificationCount: pendingVerification.length,
+    failedCount: failedOrCancelled.length,
     rejectedCount: rejected.length,
     compCount: comp.length,
+    totalVerifiedAmount,
+    pendingVerificationAmount,
     collected,
     pendingAmount,
     byUpi,
@@ -575,10 +613,13 @@ export function exportRegistrationsToCSV(registrations: Registration[]): string 
     'Category',
     'Playing Style',
     'City',
-    'Status',
-    'Entry Fee',
+    'Application Status',
+    'Payment Status',
+    'Entry Fee (INR)',
     'Payment Method',
-    'Transaction Ref',
+    'Transaction Ref / UTR',
+    'Verified By',
+    'Verified At',
     'Season',
     'Date Submitted',
   ];
@@ -597,9 +638,12 @@ export function exportRegistrationsToCSV(registrations: Registration[]): string 
     escapeCSV(r.style ?? ''),
     escapeCSV(r.city ?? ''),
     escapeCSV(r.status),
+    escapeCSV(r.paymentStatus || (r.status === 'paid' ? 'paid' : r.txnId ? 'pending_verification' : 'unpaid')),
     escapeCSV(r.fee),
     escapeCSV(r.method ?? ''),
     escapeCSV(r.txnId ?? ''),
+    escapeCSV(r.verifiedBy ?? ''),
+    escapeCSV(r.verifiedAt ? new Date(r.verifiedAt).toLocaleString('en-IN') : ''),
     escapeCSV(r.season ?? ''),
     escapeCSV(new Date(r.createdAt).toLocaleString('en-IN')),
   ]);

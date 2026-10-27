@@ -77,6 +77,22 @@ function createDefaultForm(seasonSlug = 'season-4') {
     isPublished: true,
     publishedAt: Date.now(),
     lastUpdatedAt: Date.now(),
+    payment: {
+      enabled: true,
+      isMandatory: true,
+      upiId: 'karan-hdfc@ybl',
+      accountName: 'Smash Premier League (Karan Gaur)',
+      note: 'SPL Maharajganj Player Entry Fee',
+      instructions: 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+      buttonText: 'Pay Registration Fee',
+      baseFee: 500,
+      categoryFees: {
+        Singles: 300,
+        Doubles: 500,
+        'Mixed Doubles': 500,
+        Both: 800,
+      },
+    },
     appearance: {
       formTitle: 'Player Entry & Registration Form',
       formDescription: 'Register as an official athlete for the upcoming Smash Premier League championship.',
@@ -672,6 +688,25 @@ async function startServer() {
       }
     }
 
+    // Calculate fee dynamically from server form configuration
+    let calculatedFee = formConfig.payment?.baseFee ?? formConfig.entryFee ?? 500;
+    const cat = category || answers.category;
+    if (cat && formConfig.payment?.categoryFees && formConfig.payment.categoryFees[cat] !== undefined) {
+      calculatedFee = Number(formConfig.payment.categoryFees[cat]);
+    }
+
+    // Determine payment status - strictly unverified until admin confirmation
+    let initialPaymentStatus: 'unpaid' | 'pending' | 'pending_verification' | 'paid' = 'unpaid';
+    if (calculatedFee === 0) {
+      initialPaymentStatus = 'paid';
+    } else if (txnId && String(txnId).trim().length > 0) {
+      initialPaymentStatus = 'pending_verification';
+    } else if (formConfig.payment?.isMandatory) {
+      initialPaymentStatus = 'pending';
+    } else {
+      initialPaymentStatus = 'unpaid';
+    }
+
     const regId = `SPL-2026-${String(list.length + 1).padStart(3, '0')}`;
     const newReg = {
       id: crypto.randomUUID(),
@@ -682,16 +717,27 @@ async function startServer() {
       age: age ? Number(age) : undefined,
       gender: gender || 'M',
       experience: experience || undefined,
-      category: category || undefined,
+      category: cat || undefined,
       style: style || undefined,
       city: city ? String(city).trim() : undefined,
       notes: notes ? String(notes).trim() : undefined,
-      fee: Number(fee) || 500,
+      fee: calculatedFee,
       status: 'pending',
+      paymentStatus: initialPaymentStatus,
       method: method || 'upi',
       txnId: txnId ? String(txnId).trim() : undefined,
       season,
       createdAt: Date.now(),
+      paidAt: initialPaymentStatus === 'paid' ? Date.now() : undefined,
+      auditLog: [
+        {
+          action: 'created',
+          by: 'Player Submission',
+          at: Date.now(),
+          toStatus: initialPaymentStatus,
+          note: txnId ? `Submitted UPI Ref: ${txnId}` : undefined,
+        },
+      ],
       answers,
       photoUrl: photoUrl || answers.photo || undefined,
       tokenUsed: tokenUsed || undefined,
@@ -718,6 +764,49 @@ async function startServer() {
       registration: newReg,
       message: successMessage,
     });
+  });
+
+  // 6. Verify Payment Endpoint (Admin manual review with audit trail)
+  app.post('/api/registrations/:id/verify-payment', (req, res) => {
+    const id = req.params.id;
+    const { paymentStatus, verifiedBy = 'Tournament Director', note } = req.body;
+    const list = readJSON<any[]>(REGISTRATIONS_FILE, []);
+    const index = list.findIndex((r) => r.id === id);
+    if (index === -1) {
+      return res.status(404).json({ error: 'Registration not found' });
+    }
+
+    const existing = list[index];
+    const prevStatus = existing.paymentStatus || (existing.status === 'paid' ? 'paid' : existing.txnId ? 'pending_verification' : 'unpaid');
+    const now = Date.now();
+
+    const auditEntry = {
+      action: 'verify_payment',
+      by: verifiedBy,
+      at: now,
+      fromStatus: prevStatus,
+      toStatus: paymentStatus,
+      note: note || undefined,
+    };
+
+    const updated = {
+      ...existing,
+      paymentStatus,
+      verifiedBy,
+      verifiedAt: now,
+      paidAt: paymentStatus === 'paid' ? existing.paidAt || now : existing.paidAt,
+      auditLog: [...(existing.auditLog || []), auditEntry],
+    };
+
+    // If payment verified as paid, also auto-update application status to approved if currently pending
+    if (paymentStatus === 'paid' && existing.status === 'pending') {
+      updated.status = 'approved';
+      updated.approvedAt = existing.approvedAt || now;
+    }
+
+    list[index] = updated;
+    writeJSON(REGISTRATIONS_FILE, list);
+    return res.json({ success: true, registration: updated });
   });
 
   // 5. Update Registration (Approve / Reject / Details)

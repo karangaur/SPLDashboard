@@ -70,14 +70,25 @@ export interface KnockoutData {
 
 export type FormFieldType =
   | 'text'
+  | 'short_text'
   | 'textarea'
+  | 'long_text'
   | 'mobile'
+  | 'phone'
   | 'email'
   | 'number'
   | 'dropdown'
+  | 'select'
   | 'radio'
   | 'checkbox'
+  | 'checkboxes'
   | 'date'
+  | 'gender'
+  | 'city'
+  | 'age'
+  | 'yes_no'
+  | 'terms'
+  | 'section_heading'
   | 'photo';
 
 export interface RegistrationFormField {
@@ -92,6 +103,10 @@ export interface RegistrationFormField {
   defaultValue?: any;
   isSystem?: boolean; // core fields like name & mobile
   order: number;
+  content?: string; // for section_heading or terms descriptive body
+  termsText?: string; // custom terms link or description
+  min?: number; // min number/age
+  max?: number; // max number/age
 }
 
 export interface FormAppearance {
@@ -109,9 +124,14 @@ export interface FormAppearance {
 
 export interface FormPaymentConfig {
   enabled: boolean;
-  upiId: string;
-  accountName: string;
-  note?: string;
+  isMandatory: boolean; // if true, payment reference or initiation required
+  upiId: string; // recipient UPI ID, default: 'karan-hdfc@ybl'
+  accountName: string; // recipient name, e.g. 'Smash Premier League'
+  note?: string; // description / note
+  instructions?: string; // custom payment instructions
+  buttonText?: string; // custom button label, e.g. 'Pay Registration Fee'
+  baseFee: number; // default registration fee in INR (0 for free)
+  categoryFees?: Record<string, number>; // optional category-specific fees
   customQrDataUrl?: string;
 }
 
@@ -169,6 +189,25 @@ export interface RegistrationSettings {
   };
 }
 
+export type PaymentStatus =
+  | 'unpaid'
+  | 'pending'
+  | 'initiated'
+  | 'pending_verification'
+  | 'paid'
+  | 'failed'
+  | 'cancelled'
+  | 'refunded';
+
+export interface PaymentAuditEntry {
+  action: string;
+  by: string;
+  at: number;
+  note?: string;
+  fromStatus?: string;
+  toStatus?: string;
+}
+
 export interface Registration {
   id: string;
   playerId?: string;
@@ -178,19 +217,23 @@ export interface Registration {
   whatsapp?: string;
   age?: number;
   gender: 'M' | 'F' | 'Other';
-  experience?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro';
-  category?: 'Singles' | 'Doubles' | 'Mixed Doubles' | 'Both';
-  style?: 'Attacking' | 'Defensive' | 'All-Rounder' | 'Net Play';
+  experience?: 'Beginner' | 'Intermediate' | 'Advanced' | 'Pro' | string;
+  category?: 'Singles' | 'Doubles' | 'Mixed Doubles' | 'Both' | string;
+  style?: 'Attacking' | 'Defensive' | 'All-Rounder' | 'Net Play' | string;
   city?: string;
   notes?: string;
   fee: number;
   status: 'pending' | 'approved' | 'rejected' | 'paid' | 'complimentary';
+  paymentStatus?: PaymentStatus;
   method?: 'cash' | 'upi' | 'bank' | 'complimentary';
   txnId?: string;
   season?: string;
   createdAt: number;
   paidAt?: number;
   approvedAt?: number;
+  verifiedBy?: string;
+  verifiedAt?: number;
+  auditLog?: PaymentAuditEntry[];
   answers?: Record<string, any>;
   photoUrl?: string;
   tokenUsed?: string;
@@ -198,10 +241,14 @@ export interface Registration {
 
 export interface PaymentSettings {
   enabled: boolean;
+  isMandatory?: boolean;
   qrImage: string;
   upiId: string;
   accountName: string;
   note: string;
+  instructions?: string;
+  buttonText?: string;
+  categoryFees?: Record<string, number>;
 }
 
 export interface PredefinedTeam {

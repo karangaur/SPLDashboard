@@ -29,6 +29,8 @@ import { LiveMatchHero } from './LiveMatchHero';
 import { Match, Team, Player } from '../../types/tournament';
 import { AuthService } from '../../services/authService';
 
+const SPL_LOGO_SRC = '/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png';
+
 interface HeroHomePageProps {
   onOpenLogin: () => void;
   onOpenPublicRegister: () => void;
@@ -87,39 +89,42 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   };
 
   return (
-    <div className="min-h-screen bg-[#04060e] text-slate-100 selection:bg-lime-400 selection:text-slate-950 font-sans relative overflow-x-hidden">
+    <div className="min-h-screen bg-[#04060e] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans relative overflow-x-hidden">
       
-      {/* Dynamic Background Badminton Arena Ambience */}
+      {/* Dynamic Background Badminton Arena Ambience with Blue & Gold Accents */}
       <div className="fixed inset-0 pointer-events-none z-0">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[550px] bg-gradient-to-b from-lime-500/10 via-emerald-500/5 to-transparent blur-3xl opacity-60" />
-        <div className="absolute top-[800px] -left-40 w-[600px] h-[600px] bg-cyan-500/5 blur-3xl rounded-full" />
-        <div className="absolute top-[1600px] -right-40 w-[600px] h-[600px] bg-amber-500/5 blur-3xl rounded-full" />
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[1100px] h-[600px] bg-gradient-to-b from-blue-600/15 via-indigo-600/10 to-transparent blur-3xl opacity-75" />
+        <div className="absolute top-[300px] -right-40 w-[600px] h-[600px] bg-amber-500/10 blur-3xl rounded-full" />
+        <div className="absolute top-[800px] -left-40 w-[600px] h-[600px] bg-sky-500/8 blur-3xl rounded-full" />
+        <div className="absolute top-[1600px] -right-40 w-[600px] h-[600px] bg-amber-500/8 blur-3xl rounded-full" />
       </div>
 
       {/* 1. HEADER / NAVIGATION BAR */}
       <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-[#060813]/90 backdrop-blur-md">
         <div className="mx-auto flex h-16 sm:h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           
-          {/* Brand Wordmark & Location Badge */}
+          {/* Brand Wordmark with Official 3D Logo */}
           <div className="flex items-center gap-3">
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               className="flex items-center gap-3 text-left group"
             >
-              <div className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-lime-400 via-emerald-400 to-cyan-400 text-slate-950 font-black shadow-lg shadow-lime-400/25 group-hover:scale-105 transition-transform">
-                <span className="text-2xl leading-none">🏸</span>
-              </div>
+              <img
+                src={SPL_LOGO_SRC}
+                alt="Smash Premier League Logo"
+                className="h-10 sm:h-12 w-auto object-contain shrink-0 drop-shadow-[0_2px_10px_rgba(59,130,246,0.5)] group-hover:scale-105 transition-transform"
+              />
               <div>
                 <div className="flex items-center gap-2">
                   <span className="font-display text-base sm:text-lg font-black tracking-tight text-white uppercase">
                     Smash Premier League
                   </span>
-                  <span className="hidden sm:inline px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-lime-400 text-slate-950">
+                  <span className="hidden sm:inline px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono">
                     Maharajganj
                   </span>
                 </div>
                 <span className="block text-xs font-semibold text-slate-400 -mt-0.5">
-                  Official Badminton Tournament
+                  Official Badminton Championship
                 </span>
               </div>
             </button>
@@ -135,7 +140,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </button>
             <button
               onClick={() => scrollToSection('live-match')}
-              className="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition-colors flex items-center gap-1.5 text-lime-400 font-bold"
+              className="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition-colors flex items-center gap-1.5 text-amber-300 font-bold"
             >
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
               <span>Live Match</span>
@@ -171,7 +176,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             {/* Athlete Registration Button */}
             <button
               onClick={onOpenPublicRegister}
-              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-lime-400 to-emerald-400 hover:from-lime-300 hover:to-emerald-300 rounded-xl shadow-md shadow-lime-400/20 transition-all active:scale-95"
+              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95"
             >
               <PlusCircle className="w-3.5 h-3.5" />
               <span>Register Player</span>
@@ -192,7 +197,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 onClick={onOpenLogin}
                 className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl transition-all"
               >
-                <LogIn className="w-3.5 h-3.5 text-lime-400" />
+                <LogIn className="w-3.5 h-3.5 text-amber-400" />
                 <span>LOGIN</span>
               </button>
             )}
@@ -212,28 +217,29 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               {/* LEFT Column: Tournament Identity & CTAs */}
               <div className="lg:col-span-7 space-y-6 sm:space-y-8 text-center lg:text-left">
                 
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-lime-400/10 border border-lime-400/30 text-lime-400 text-xs font-black uppercase tracking-wider">
-                  <span className="w-2 h-2 rounded-full bg-lime-400 animate-ping" />
+                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/30 text-sky-300 text-xs font-black uppercase tracking-wider">
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
                   <span>Maharajganj Badminton Association Presents</span>
                 </div>
 
                 <div className="space-y-3">
                   <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black font-display tracking-tight text-white uppercase leading-[1.05]">
                     Smash Premier <br />
-                    <span className="bg-gradient-to-r from-lime-400 via-emerald-400 to-cyan-400 bg-clip-text text-transparent">
+                    <span className="bg-gradient-to-r from-sky-400 via-blue-400 to-amber-300 bg-clip-text text-transparent">
                       League
-                    </span>{' '}
-                    <span className="text-slate-400 text-3xl sm:text-5xl block sm:inline font-bold">
-                      Maharajganj
                     </span>
                   </h1>
 
-                  <p className="text-2xl sm:text-3xl font-black text-amber-400 tracking-tight">
-                    Where every smash counts.
+                  <p className="text-xl sm:text-3xl font-extrabold uppercase tracking-wide text-slate-200 font-display">
+                    Maharajganj Badminton Championship
                   </p>
 
-                  <p className="text-base sm:text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed">
-                    Follow the teams. Track every match. Watch the leaderboard change live. The premier local badminton championship uniting Maharajganj’s top shuttlers.
+                  <p className="text-2xl sm:text-3xl lg:text-4xl font-black text-amber-400 italic tracking-tight drop-shadow-sm">
+                    “Every Smash. Every Point. Every Victory.”
+                  </p>
+
+                  <p className="text-base sm:text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed pt-1">
+                    The premier tournament uniting Maharajganj’s top shuttlers. Follow the teams, track live court scores, and watch the championship unfold in real time.
                   </p>
                 </div>
 
@@ -244,21 +250,22 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     className="flex items-center gap-2 px-6 py-3.5 rounded-2xl font-display font-black text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-rose-500 via-rose-400 to-amber-400 hover:from-rose-400 hover:to-amber-300 shadow-xl shadow-rose-500/25 transition-all active:scale-95 cursor-pointer"
                   >
                     <span className="w-2.5 h-2.5 rounded-full bg-slate-950 animate-ping" />
-                    <span>🔴 LIVE MATCH</span>
+                    <span>View Live Matches</span>
                   </button>
 
                   <button
-                    onClick={() => scrollToSection('teams-roster')}
-                    className="flex items-center gap-2 px-6 py-3.5 rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-white bg-white/10 hover:bg-white/15 border border-white/15 transition-all"
+                    onClick={() => scrollToSection('standings-table')}
+                    className="flex items-center gap-2 px-6 py-3.5 rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-white bg-blue-600/20 hover:bg-blue-600/30 border border-blue-400/30 transition-all cursor-pointer"
                   >
-                    <span>VIEW TEAMS</span>
-                    <ArrowRight className="w-4 h-4 text-lime-400" />
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <span>Tournament Standings</span>
                   </button>
 
                   <button
                     onClick={onOpenPublicRegister}
-                    className="flex items-center gap-2 px-5 py-3.5 rounded-2xl font-display font-semibold text-xs uppercase tracking-wider text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 transition-all"
+                    className="flex items-center gap-2 px-5 py-3.5 rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 shadow-lg shadow-amber-400/20 transition-all cursor-pointer"
                   >
+                    <PlusCircle className="w-4 h-4 text-slate-950" />
                     <span>Register to Play</span>
                   </button>
                 </div>
@@ -867,9 +874,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-lime-400 text-slate-950 font-black text-xl">
-                <span>🏸</span>
-              </div>
+              <img
+                src={SPL_LOGO_SRC}
+                alt="Smash Premier League Logo"
+                className="h-10 w-auto object-contain shrink-0 drop-shadow-md"
+              />
               <div>
                 <span className="font-display font-black text-white text-base uppercase block">
                   Smash Premier League Maharajganj

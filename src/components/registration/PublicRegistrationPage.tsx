@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Trophy,
   CheckCircle2,
@@ -20,11 +20,15 @@ import {
   AlertTriangle,
   ArrowRight,
   ShieldAlert,
+  Check,
+  QrCode,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import {
   formatINR,
   validateIndianMobile,
+  buildUPIPaymentUri,
+  generateUPIQRCode,
   buildUPIPaymentLink,
   createDefaultFormConfig,
 } from '../../utils/tournamentEngine';
@@ -122,7 +126,49 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
   const appearance = formConfig.appearance;
   const accentColor = appearance?.accentColor || '#10b981';
-  const entryFee = formConfig.entryFee ?? (state.settings.entryFee || 500);
+
+  // Dynamic fee calculation based on selected category if category pricing is configured
+  const selectedCategory = answers.category || answers.preferredCategory || answers.eventCategory;
+  const effectiveFee = useMemo(() => {
+    if (formConfig.payment && !formConfig.payment.enabled) return 0;
+    if (selectedCategory && formConfig.payment?.categoryFees && formConfig.payment.categoryFees[selectedCategory] !== undefined) {
+      return Number(formConfig.payment.categoryFees[selectedCategory]);
+    }
+    return formConfig.payment?.baseFee ?? formConfig.entryFee ?? (state.settings.entryFee || 500);
+  }, [formConfig.payment, formConfig.entryFee, state.settings.entryFee, selectedCategory]);
+
+  const recipientUpiId = formConfig.payment?.upiId || state.payment.upiId || 'karan-hdfc@ybl';
+  const recipientName = formConfig.payment?.accountName || state.payment.accountName || 'Smash Premier League (Karan Gaur)';
+  const paymentInstructions = formConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay using Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below.';
+  const paymentBtnLabel = formConfig.payment?.buttonText || 'Pay Registration Fee';
+
+  const [upiQrCodeUrl, setUpiQrCodeUrl] = useState<string>('');
+  const [copiedUpi, setCopiedUpi] = useState(false);
+
+  useEffect(() => {
+    if (effectiveFee > 0 && recipientUpiId) {
+      const uri = buildUPIPaymentUri({
+        upiId: recipientUpiId,
+        accountName: recipientName,
+        amount: effectiveFee,
+        note: formConfig.payment?.note || 'SPL Maharajganj Player Entry Fee',
+      }, 'generic');
+      generateUPIQRCode(uri).then(setUpiQrCodeUrl).catch(() => {});
+    } else {
+      setUpiQrCodeUrl('');
+    }
+  }, [effectiveFee, recipientUpiId, recipientName, formConfig.payment?.note]);
+
+  const gpayUri = buildUPIPaymentUri({ upiId: recipientUpiId, accountName: recipientName, amount: effectiveFee, note: 'SPL Tournament Fee' }, 'gpay');
+  const phonepeUri = buildUPIPaymentUri({ upiId: recipientUpiId, accountName: recipientName, amount: effectiveFee, note: 'SPL Tournament Fee' }, 'phonepe');
+  const paytmUri = buildUPIPaymentUri({ upiId: recipientUpiId, accountName: recipientName, amount: effectiveFee, note: 'SPL Tournament Fee' }, 'paytm');
+  const genericUri = buildUPIPaymentUri({ upiId: recipientUpiId, accountName: recipientName, amount: effectiveFee, note: 'SPL Tournament Fee' }, 'generic');
+
+  const handleCopyUpiId = () => {
+    navigator.clipboard.writeText(recipientUpiId);
+    setCopiedUpi(true);
+    setTimeout(() => setCopiedUpi(false), 2000);
+  };
 
   // Field change handler
   const handleFieldChange = (fieldId: string, val: any) => {
@@ -175,15 +221,19 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       return;
     }
 
-    // Required field validation
+    // Required field validation (skipping informational section headings)
     for (const field of formConfig.fields) {
-      if (field.enabled && field.required) {
+      if (field.enabled && field.required && field.type !== 'section_heading') {
         const val = answers[field.id];
+        if (field.type === 'terms' && !val) {
+          setErrorMsg(`Please accept the terms and conditions: "${field.label}"`);
+          return;
+        }
         if (val === undefined || val === null || String(val).trim() === '') {
           setErrorMsg(`Please fill in the required field: "${field.label}"`);
           return;
         }
-        if (field.type === 'mobile') {
+        if (field.type === 'mobile' || field.type === 'phone') {
           const mobileCheck = validateIndianMobile(String(val));
           if (!mobileCheck.isValid) {
             setErrorMsg(mobileCheck.error || `Please enter a valid 10-digit Indian mobile number for "${field.label}".`);
@@ -207,6 +257,14 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       return;
     }
 
+    // Mandatory payment check
+    if (formConfig.payment?.enabled && formConfig.payment?.isMandatory && effectiveFee > 0) {
+      if (!txnId.trim()) {
+        setErrorMsg('Payment reference (UTR number) is required for registration. Please initiate payment via Google Pay, PhonePe, or Paytm and enter your 12-digit UPI reference number below.');
+        return;
+      }
+    }
+
     setSubmitting(true);
 
     try {
@@ -217,11 +275,11 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
         age: answers.age ? Number(answers.age) : undefined,
         gender: answers.gender || 'M',
         experience: answers.experience || undefined,
-        category: answers.category || undefined,
+        category: selectedCategory || answers.category || undefined,
         style: answers.style || undefined,
         city: answers.city ? String(answers.city).trim() : undefined,
         notes: answers.notes ? String(answers.notes).trim() : undefined,
-        fee: entryFee,
+        fee: effectiveFee,
         season: activeSeasonSlug,
         txnId: txnId.trim() || undefined,
         method: 'upi',
@@ -274,7 +332,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   };
 
   // UPI payment deep link
-  const upiLink = buildUPIPaymentLink(state.payment, entryFee, 'ENTRY');
+  const upiLink = buildUPIPaymentLink(state.payment, effectiveFee, 'ENTRY');
 
   return (
     <div className="min-h-screen bg-[#070a13] text-slate-100 selection:bg-emerald-400 selection:text-slate-950 flex flex-col justify-between py-6 px-4 sm:px-6 lg:px-8">
@@ -493,7 +551,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                 )}
                 <div className="flex items-center gap-1.5">
                   <CreditCard className="w-3.5 h-3.5 text-emerald-400" />
-                  <span className="font-bold text-white">Entry Fee: {formatINR(entryFee)}</span>
+                  <span className="font-bold text-white">Entry Fee: {formatINR(effectiveFee)}</span>
                 </div>
               </div>
             </div>
@@ -522,6 +580,25 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                 .map((field) => {
                   const currentValue = answers[field.id];
 
+                  // Type 1: Section Heading / Informational Text
+                  if (field.type === 'section_heading') {
+                    return (
+                      <div key={field.id} className="pt-3 pb-1">
+                        <div className="p-4 rounded-2xl bg-white/[0.04] border border-white/10 flex items-start gap-3">
+                          <span className="text-xl">🏷️</span>
+                          <div>
+                            <h3 className="font-display font-bold text-white text-sm sm:text-base tracking-tight">
+                              {field.label}
+                            </h3>
+                            <p className="text-xs text-slate-400 mt-0.5 leading-relaxed">
+                              {field.content || field.helpText || 'Official tournament instructions and guidelines.'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={field.id} className="space-y-1.5">
                       <div className="flex items-center justify-between">
@@ -542,8 +619,8 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         <p className="text-[11px] text-slate-400">{field.helpText}</p>
                       )}
 
-                      {/* Field Type 1: Text */}
-                      {field.type === 'text' && (
+                      {/* Field Type: Short Text */}
+                      {(field.type === 'text' || field.type === 'short_text') && (
                         <input
                           type="text"
                           required={field.required}
@@ -554,8 +631,8 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         />
                       )}
 
-                      {/* Field Type 2: Textarea */}
-                      {field.type === 'textarea' && (
+                      {/* Field Type: Long Text */}
+                      {(field.type === 'textarea' || field.type === 'long_text') && (
                         <textarea
                           rows={3}
                           required={field.required}
@@ -566,8 +643,8 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         />
                       )}
 
-                      {/* Field Type 3: Mobile Number with validation */}
-                      {field.type === 'mobile' && (
+                      {/* Field Type: Mobile / Phone with +91 */}
+                      {(field.type === 'mobile' || field.type === 'phone') && (
                         <div className="relative">
                           <span className="absolute left-3.5 top-2.5 text-xs font-mono font-bold text-slate-400">
                             +91
@@ -586,7 +663,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         </div>
                       )}
 
-                      {/* Field Type 4: Email */}
+                      {/* Field Type: Email */}
                       {field.type === 'email' && (
                         <input
                           type="email"
@@ -598,7 +675,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         />
                       )}
 
-                      {/* Field Type 5: Number */}
+                      {/* Field Type: Number */}
                       {field.type === 'number' && (
                         <input
                           type="number"
@@ -610,7 +687,43 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         />
                       )}
 
-                      {/* Field Type 6: Date */}
+                      {/* Field Type: Athlete Age */}
+                      {field.type === 'age' && (
+                        <div className="space-y-1">
+                          <input
+                            type="number"
+                            min={field.min ?? 10}
+                            max={field.max ?? 80}
+                            required={field.required}
+                            value={currentValue || ''}
+                            onChange={(e) => handleFieldChange(field.id, e.target.value)}
+                            placeholder="e.g. 24"
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 transition-colors"
+                          />
+                          {(field.min != null || field.max != null) && (
+                            <span className="text-[10px] text-slate-500">
+                              Eligible age: {field.min ?? 10} to {field.max ?? 80} years
+                            </span>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Field Type: City / Locality */}
+                      {field.type === 'city' && (
+                        <div className="relative">
+                          <span className="absolute left-3.5 top-2.5 text-xs text-slate-400">📍</span>
+                          <input
+                            type="text"
+                            required={field.required}
+                            value={currentValue || ''}
+                            onChange={(e) => handleFieldChange(field.id, e.target.value)}
+                            placeholder={field.placeholder || 'e.g. Maharajganj, Gorakhpur'}
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                          />
+                        </div>
+                      )}
+
+                      {/* Field Type: Date Picker */}
                       {field.type === 'date' && (
                         <input
                           type="date"
@@ -621,8 +734,8 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         />
                       )}
 
-                      {/* Field Type 7: Dropdown */}
-                      {field.type === 'dropdown' && (
+                      {/* Field Type: Dropdown / Select */}
+                      {(field.type === 'dropdown' || field.type === 'select') && (
                         <select
                           required={field.required}
                           value={currentValue || ''}
@@ -638,7 +751,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         </select>
                       )}
 
-                      {/* Field Type 8: Radio Buttons */}
+                      {/* Field Type: Radio Buttons */}
                       {field.type === 'radio' && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           {field.options?.map((opt, i) => {
@@ -672,8 +785,62 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         </div>
                       )}
 
-                      {/* Field Type 9: Checkboxes (multi-choice) */}
-                      {field.type === 'checkbox' && (
+                      {/* Field Type: Gender Selection */}
+                      {field.type === 'gender' && (
+                        <div className="grid grid-cols-3 gap-2 pt-1">
+                          {[
+                            { id: 'Male', label: 'Male', icon: '♂️' },
+                            { id: 'Female', label: 'Female', icon: '♀️' },
+                            { id: 'Other', label: 'Other', icon: '⚧' },
+                          ].map((g) => {
+                            const isSelected = currentValue === g.id || (answers.gender === g.id && !currentValue);
+                            return (
+                              <button
+                                key={g.id}
+                                type="button"
+                                onClick={() => {
+                                  handleFieldChange(field.id, g.id);
+                                  handleFieldChange('gender', g.id === 'Male' ? 'M' : g.id === 'Female' ? 'F' : 'Other');
+                                }}
+                                className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                                  isSelected
+                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                                    : 'bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-900'
+                                }`}
+                              >
+                                <span>{g.icon}</span>
+                                <span>{g.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Field Type: Yes / No Toggle */}
+                      {field.type === 'yes_no' && (
+                        <div className="grid grid-cols-2 gap-2 pt-1">
+                          {['Yes', 'No'].map((opt) => {
+                            const isSelected = currentValue === opt;
+                            return (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => handleFieldChange(field.id, opt)}
+                                className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                                  isSelected
+                                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                                    : 'bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-900'
+                                }`}
+                              >
+                                <span>{opt === 'Yes' ? '✅ Yes' : '❌ No'}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+
+                      {/* Field Type: Checkboxes */}
+                      {(field.type === 'checkbox' || field.type === 'checkboxes') && (
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                           {field.options?.map((opt, i) => {
                             const checkedList = (currentValue as string[]) || [];
@@ -704,7 +871,26 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         </div>
                       )}
 
-                      {/* Field Type 10: Profile Photo Upload */}
+                      {/* Field Type: Terms and Conditions */}
+                      {field.type === 'terms' && (
+                        <div className="p-3.5 bg-white/[0.03] border border-white/10 rounded-2xl text-xs space-y-2">
+                          <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                              type="checkbox"
+                              required={field.required}
+                              checked={Boolean(currentValue)}
+                              onChange={(e) => handleFieldChange(field.id, e.target.checked)}
+                              className="mt-0.5 rounded text-emerald-500 focus:ring-0 bg-slate-950 border-white/20 accent-emerald-400 cursor-pointer"
+                            />
+                            <div className="text-[11px] text-slate-300 leading-relaxed select-none">
+                              {field.termsText ||
+                                'I declare that the information provided is accurate and agree to follow all official tournament rules, referee decisions, and venue regulations of Smash Premier League Maharajganj.'}
+                            </div>
+                          </label>
+                        </div>
+                      )}
+
+                      {/* Field Type: Profile Photo Upload */}
                       {field.type === 'photo' && (
                         <div className="pt-1">
                           {photoPreview ? (
@@ -753,64 +939,159 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                   );
                 })}
 
-              {/* UPI Entry Fee Details Box */}
-              {entryFee > 0 && (
-                <div className="p-5 rounded-2xl bg-slate-900/90 border border-white/10 space-y-4">
-                  <div className="flex items-center justify-between pb-3 border-b border-white/5">
+              {/* Direct UPI Payment Section */}
+              {effectiveFee > 0 && (formConfig.payment?.enabled ?? true) && (
+                <div className="p-5 sm:p-6 rounded-3xl bg-slate-900/95 border border-emerald-500/30 space-y-5 shadow-2xl relative overflow-hidden">
+                  <div className="flex items-center justify-between pb-3 border-b border-white/10">
                     <div className="flex items-center gap-2">
-                      <CreditCard className="w-4 h-4 text-emerald-400" />
-                      <span className="text-xs font-bold text-white uppercase tracking-wider">
-                        Tournament Entry Fee Payment
-                      </span>
-                    </div>
-                    <span className="text-sm font-black font-mono text-emerald-400">
-                      {formatINR(entryFee)}
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center">
-                    {/* UPI QR & App link */}
-                    <div className="flex flex-col items-center sm:items-start space-y-2">
-                      {state.payment.qrImage && (
-                        <img
-                          src={state.payment.qrImage}
-                          alt="Tournament UPI QR"
-                          className="w-28 h-28 rounded-xl bg-white p-1 shadow-md"
-                        />
-                      )}
-                      <div className="text-xs text-slate-300">
-                        <span className="text-slate-400 block text-[10px]">UPI VPA:</span>
-                        <span className="font-mono font-bold text-white">
-                          {state.payment.upiId || 'spl.tournament@okhdfcbank'}
+                      <CreditCard className="w-5 h-5 text-emerald-400" />
+                      <div>
+                        <span className="text-xs font-black text-white uppercase tracking-wider block">
+                          Tournament Entry Fee Payment
+                        </span>
+                        <span className="text-[11px] text-slate-400">
+                          Direct UPI Transfer to Official Tournament Desk
                         </span>
                       </div>
-                      {upiLink && (
-                        <a
-                          href={upiLink}
-                          className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-400 hover:text-emerald-300 underline"
-                        >
-                          <span>Open in UPI App (GPay/PhonePe)</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-base sm:text-lg font-black font-mono text-emerald-400 block">
+                        {formatINR(effectiveFee)}
+                      </span>
+                      {selectedCategory && (
+                        <span className="text-[10px] text-slate-400 font-semibold block">
+                          Category: {selectedCategory}
+                        </span>
                       )}
                     </div>
+                  </div>
 
-                    {/* UTR / Transaction Input */}
-                    <div className="space-y-2">
-                      <label className="block text-xs font-bold text-slate-300">
-                        UPI Transaction / Reference Ref (UTR)
-                      </label>
-                      <input
-                        type="text"
-                        value={txnId}
-                        onChange={(e) => setTxnId(e.target.value)}
-                        placeholder="12-digit UPI Ref ID"
-                        className="w-full bg-slate-950 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500"
-                      />
-                      <p className="text-[10px] text-slate-400 leading-tight">
-                        You can also submit now and confirm payment directly with the match desk.
-                      </p>
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    {paymentInstructions}
+                  </p>
+
+                  {/* One-Tap UPI Launch Buttons (Mobile & Desktop) */}
+                  <div className="space-y-2">
+                    <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      ⚡ Quick One-Tap UPI Pay:
+                    </span>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <a
+                        href={gpayUri}
+                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white transition-all hover:scale-[1.02]"
+                      >
+                        <span className="text-emerald-400 font-black">G</span>
+                        <span>Google Pay</span>
+                      </a>
+
+                      <a
+                        href={phonepeUri}
+                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-xs font-bold text-purple-300 transition-all hover:scale-[1.02]"
+                      >
+                        <span className="text-purple-400 font-black">Pe</span>
+                        <span>PhonePe</span>
+                      </a>
+
+                      <a
+                        href={paytmUri}
+                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-xs font-bold text-sky-300 transition-all hover:scale-[1.02]"
+                      >
+                        <span className="text-sky-400 font-black">₹</span>
+                        <span>Paytm</span>
+                      </a>
+
+                      <a
+                        href={genericUri}
+                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 transition-all hover:scale-[1.02]"
+                      >
+                        <span>⚡ Any UPI App</span>
+                      </a>
                     </div>
+                  </div>
+
+                  {/* Desktop QR Code & Manual Copy */}
+                  <div className="flex flex-col sm:flex-row items-center gap-5 p-4 rounded-2xl bg-black/40 border border-white/10">
+                    <div className="shrink-0 flex flex-col items-center gap-1">
+                      {upiQrCodeUrl ? (
+                        <img
+                          src={upiQrCodeUrl}
+                          alt="Tournament UPI QR Code"
+                          className="w-32 h-32 rounded-xl bg-white p-1.5 shadow-lg"
+                        />
+                      ) : (
+                        <div className="w-32 h-32 rounded-xl bg-slate-800 flex items-center justify-center text-xs text-slate-400">
+                          <QrCode className="w-8 h-8 text-slate-500" />
+                        </div>
+                      )}
+                      <span className="text-[10px] text-slate-400">Scan via any UPI App</span>
+                    </div>
+
+                    <div className="space-y-3 flex-1 min-w-0 text-center sm:text-left">
+                      <div>
+                        <span className="text-[10px] text-slate-400 uppercase tracking-wider block">
+                          Recipient Official UPI ID
+                        </span>
+                        <div className="flex items-center justify-center sm:justify-start gap-2 mt-0.5">
+                          <span className="font-mono text-sm font-bold text-white select-all">
+                            {recipientUpiId}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={handleCopyUpiId}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/15 text-slate-300 transition-colors"
+                          >
+                            {copiedUpi ? (
+                              <>
+                                <Check className="w-3 h-3 text-emerald-400" />
+                                <span className="text-emerald-400 text-[10px]">Copied!</span>
+                              </>
+                            ) : (
+                              <>
+                                <Copy className="w-3 h-3" />
+                                <span className="text-[10px]">Copy</span>
+                              </>
+                            )}
+                          </button>
+                        </div>
+                        <span className="text-xs text-slate-400 block mt-0.5 truncate">
+                          Name: <span className="text-slate-200 font-semibold">{recipientName}</span>
+                        </span>
+                      </div>
+
+                      {/* UTR / Transaction Reference Input */}
+                      <div className="space-y-1.5 text-left">
+                        <label className="block text-xs font-bold text-slate-200">
+                          UPI Reference / UTR Number (12 Digits)
+                          {formConfig.payment?.isMandatory && (
+                            <span className="text-rose-400 ml-1 font-bold">*</span>
+                          )}
+                        </label>
+                        <input
+                          type="text"
+                          required={formConfig.payment?.isMandatory}
+                          value={txnId}
+                          onChange={(e) => setTxnId(e.target.value)}
+                          placeholder="e.g. 423589102456"
+                          className="w-full bg-slate-950 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 tracking-wider"
+                        />
+                        <p className="text-[10px] text-slate-400 leading-tight">
+                          Enter the 12-digit UPI transaction reference shown in Google Pay / PhonePe / Paytm after completing payment.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Free Registration Badge */}
+              {effectiveFee === 0 && (formConfig.payment?.enabled ?? true) && (
+                <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center gap-3 text-xs text-emerald-300">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <span className="font-bold block">Free Athlete Registration (₹0)</span>
+                    <span className="text-[11px] text-slate-300">
+                      No entry fee is required for this tournament category. Complete the form to confirm your spot.
+                    </span>
                   </div>
                 </div>
               )}
@@ -830,7 +1111,11 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                     </>
                   ) : (
                     <>
-                      <span>{appearance.submitButtonText || 'Submit Registration & Confirm Entry'}</span>
+                      <span>
+                        {effectiveFee > 0 && formConfig.payment?.isMandatory
+                          ? paymentBtnLabel
+                          : appearance.submitButtonText || 'Submit Registration & Confirm Entry'}
+                      </span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}

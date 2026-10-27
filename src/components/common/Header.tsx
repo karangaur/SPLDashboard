@@ -54,21 +54,23 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
       {/* 3-Zone Top Bar Contract */}
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-8 px-4 sm:px-6 lg:px-8">
         
-        {/* Zone 1: Single Brand Wordmark */}
+        {/* Zone 1: Single Brand Wordmark with Official Logo */}
         <div className="flex items-center gap-3 shrink-0">
           <button
             onClick={() => handleNav('dashboard')}
             className="flex items-center gap-2.5 text-left group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded-lg"
           >
-            <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-tr from-amber-500 to-amber-400 text-slate-950 font-black shadow-md shadow-amber-500/20 group-hover:scale-105 transition-transform">
-              <span className="text-xl leading-none">🏸</span>
-            </div>
+            <img
+              src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
+              alt="Smash Premier League"
+              className="h-10 w-auto object-contain shrink-0 drop-shadow group-hover:scale-105 transition-transform"
+            />
             <div className="min-w-0">
               <span className="block font-display text-lg font-black tracking-tight text-white whitespace-nowrap">
                 Smash Premier League
               </span>
               <span className="block text-[11px] font-medium text-slate-400 truncate -mt-0.5">
-                {state.settings.season || 'Tournament Central'}
+                {state.settings.season || 'Maharajganj Tournament Central'}
               </span>
             </div>
           </button>

@@ -29,6 +29,15 @@ import {
   Award,
   Layers,
   ShieldCheck,
+  CreditCard,
+  IndianRupee,
+  History,
+  FileText,
+  Plus,
+  ArrowUp,
+  ArrowDown,
+  ToggleLeft,
+  ToggleRight,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import {
@@ -38,7 +47,7 @@ import {
   downloadFile,
   validateIndianMobile,
 } from '../../utils/tournamentEngine';
-import { Registration, RegistrationSettings, RegistrationFormConfig } from '../../types/tournament';
+import { Registration, RegistrationSettings, RegistrationFormConfig, PaymentStatus, RegistrationFormField } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { FormCustomizerModal } from './FormCustomizerModal';
 import { RegenerateLinkModal } from './RegenerateLinkModal';
@@ -64,6 +73,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
     updateRegistration,
     approveRegistration,
     rejectRegistration,
+    verifyPayment,
     deleteRegistration,
     deleteRegistrationsBulk,
     bulkApproveRegistrations,
@@ -73,11 +83,18 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   const stats = calculateRegistrationStats(state.registrations);
 
   // Active view tab inside Player Registration Hub
-  const [activeTab, setActiveTab] = useState<'link' | 'roster' | 'settings'>('link');
+  const [activeTab, setActiveTab] = useState<'link' | 'builder' | 'payment' | 'roster'>('link');
 
   // Modals
   const [isFormCustomizerOpen, setIsFormCustomizerOpen] = useState(false);
   const [isRegenerateModalOpen, setIsRegenerateModalOpen] = useState(false);
+
+  // Payment Verification Modal
+  const [verifyTarget, setVerifyTarget] = useState<Registration | null>(null);
+  const [verifyStatus, setVerifyStatus] = useState<PaymentStatus>('paid');
+  const [verifyNote, setVerifyNote] = useState('');
+  const [verifyAdminName, setVerifyAdminName] = useState('Admin');
+  const [isVerifying, setIsVerifying] = useState(false);
 
   // Copy link feedback
   const [copiedLink, setCopiedLink] = useState(false);
@@ -85,7 +102,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
 
   // Search & Filters in Roster
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'pending_verification' | 'paid' | 'failed'>('all');
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -147,9 +164,18 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   // Filtered registrations
   const filteredRegistrations = state.registrations.filter((r) => {
     if (statusFilter !== 'all') {
-      if (statusFilter === 'approved' && r.status !== 'approved' && r.status !== 'paid') return false;
+      if (statusFilter === 'approved' && r.status !== 'approved') return false;
       if (statusFilter === 'pending' && r.status !== 'pending') return false;
       if (statusFilter === 'rejected' && r.status !== 'rejected') return false;
+      if (
+        statusFilter === 'pending_verification' &&
+        r.paymentStatus !== 'pending_verification' &&
+        (!r.txnId || r.paymentStatus === 'paid')
+      )
+        return false;
+      if (statusFilter === 'paid' && r.paymentStatus !== 'paid' && r.status !== 'paid') return false;
+      if (statusFilter === 'failed' && r.paymentStatus !== 'failed' && r.paymentStatus !== 'cancelled')
+        return false;
     }
     if (search.trim()) {
       const q = search.trim().toLowerCase();
@@ -157,7 +183,8 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
       const matchMobile = r.mobile.includes(q);
       const matchRegId = r.regId.toLowerCase().includes(q);
       const matchCity = r.city ? r.city.toLowerCase().includes(q) : false;
-      if (!matchName && !matchMobile && !matchRegId && !matchCity) return false;
+      const matchTxn = r.txnId ? r.txnId.toLowerCase().includes(q) : false;
+      if (!matchName && !matchMobile && !matchRegId && !matchCity && !matchTxn) return false;
     }
     return true;
   });
@@ -295,7 +322,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           onClick={() => setActiveTab('link')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === 'link'
-              ? 'bg-amber-400 text-slate-950 shadow-md'
+              ? 'bg-amber-400 text-slate-950 shadow-md font-black'
               : 'text-slate-400 hover:text-white hover:bg-white/5'
           }`}
         >
@@ -304,15 +331,39 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
         </button>
 
         <button
+          onClick={() => setActiveTab('builder')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'builder'
+              ? 'bg-amber-400 text-slate-950 shadow-md font-black'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Sliders className="w-4 h-4" />
+          <span>Form Builder & Fields</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('payment')}
+          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            activeTab === 'payment'
+              ? 'bg-amber-400 text-slate-950 shadow-md font-black'
+              : 'text-slate-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <CreditCard className="w-4 h-4" />
+          <span>Payment & UPI Configuration</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('roster')}
           className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
             activeTab === 'roster'
-              ? 'bg-amber-400 text-slate-950 shadow-md'
+              ? 'bg-amber-400 text-slate-950 shadow-md font-black'
               : 'text-slate-400 hover:text-white hover:bg-white/5'
           }`}
         >
           <Users2 className="w-4 h-4" />
-          <span>Registered Applicants</span>
+          <span>Applicants & Payments Roster</span>
           {stats.total > 0 && (
             <span
               className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
@@ -324,18 +375,6 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
               {stats.total}
             </span>
           )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
-            activeTab === 'settings'
-              ? 'bg-amber-400 text-slate-950 shadow-md'
-              : 'text-slate-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <Settings2 className="w-4 h-4" />
-          <span>Form Customization Settings</span>
         </button>
       </div>
 
@@ -529,13 +568,87 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
       {/* TAB 2: Registered Applicants Vetting Roster */}
       {activeTab === 'roster' && (
         <div className="space-y-4 animate-fade-in">
+          {/* Financial & Application Summary Metrics */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="rounded-2xl p-4 glass-card border border-white/10 space-y-1">
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider flex items-center gap-1.5">
+                <Users2 className="w-3.5 h-3.5 text-amber-400" />
+                <span>Total Submissions</span>
+              </span>
+              <div className="text-2xl sm:text-3xl font-black text-white font-mono">
+                {stats.total}
+              </div>
+              <span className="text-[11px] text-slate-500 block">
+                Across {regSettings.seasonSlug || 'season-4'}
+              </span>
+            </div>
+
+            <div className="rounded-2xl p-4 glass-card border border-emerald-500/20 bg-emerald-500/5 space-y-1">
+              <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5">
+                <IndianRupee className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Verified Revenue</span>
+              </span>
+              <div className="text-2xl sm:text-3xl font-black text-emerald-300 font-mono">
+                {formatINR(
+                  state.registrations
+                    .filter((r) => r.paymentStatus === 'paid' || r.status === 'paid' || r.status === 'approved')
+                    .reduce((acc, r) => acc + (r.fee || 0), 0)
+                )}
+              </div>
+              <span className="text-[11px] text-emerald-400/70 block">
+                Confirmed in tournament account
+              </span>
+            </div>
+
+            <div className="rounded-2xl p-4 glass-card border border-amber-500/20 bg-amber-500/5 space-y-1">
+              <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>Pending Verification</span>
+              </span>
+              <div className="text-2xl sm:text-3xl font-black text-amber-300 font-mono">
+                {
+                  state.registrations.filter(
+                    (r) =>
+                      r.paymentStatus === 'pending_verification' ||
+                      (r.txnId && r.paymentStatus !== 'paid' && r.status !== 'approved')
+                  ).length
+                }
+              </div>
+              <span className="text-[11px] text-amber-400/70 block">
+                {formatINR(
+                  state.registrations
+                    .filter(
+                      (r) =>
+                        r.paymentStatus === 'pending_verification' ||
+                        (r.txnId && r.paymentStatus !== 'paid' && r.status !== 'approved')
+                    )
+                    .reduce((acc, r) => acc + (r.fee || 0), 0)
+                )}{' '}
+                awaiting admin audit
+              </span>
+            </div>
+
+            <div className="rounded-2xl p-4 glass-card border border-blue-500/20 bg-blue-500/5 space-y-1">
+              <span className="text-[10px] uppercase font-bold text-blue-400 tracking-wider flex items-center gap-1.5">
+                <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
+                <span>Confirmed Players</span>
+              </span>
+              <div className="text-2xl sm:text-3xl font-black text-blue-300 font-mono">
+                {stats.approvedCount}
+              </div>
+              <span className="text-[11px] text-blue-400/70 block">
+                Vetted & added to roster
+              </span>
+            </div>
+          </div>
+
           {/* Action & Filter Bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-3 rounded-2xl glass-panel">
             <div className="relative flex-1">
               <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
-                placeholder="Search by player name, mobile, city, or SPL ID..."
+                placeholder="Search by player name, mobile, city, SPL ID, or UTR / Txn Ref..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="w-full bg-slate-900 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
@@ -544,10 +657,28 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
 
             <div className="flex items-center gap-2 overflow-x-auto">
               {/* Status Filter */}
-              <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl shrink-0">
+              <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl shrink-0 overflow-x-auto">
                 {[
-                  { id: 'all', label: 'All' },
-                  { id: 'pending', label: `Pending (${stats.pendingCount})` },
+                  { id: 'all', label: `All (${stats.total})` },
+                  {
+                    id: 'pending_verification',
+                    label: `🟡 Verify Payments (${
+                      state.registrations.filter(
+                        (r) =>
+                          r.paymentStatus === 'pending_verification' ||
+                          (r.txnId && r.paymentStatus !== 'paid' && r.status !== 'approved')
+                      ).length
+                    })`,
+                  },
+                  {
+                    id: 'paid',
+                    label: `🟢 Paid (${
+                      state.registrations.filter(
+                        (r) => r.paymentStatus === 'paid' || r.status === 'paid'
+                      ).length
+                    })`,
+                  },
+                  { id: 'pending', label: `Pending Approval (${stats.pendingCount})` },
                   { id: 'approved', label: `Approved (${stats.approvedCount})` },
                   { id: 'rejected', label: `Rejected (${stats.rejectedCount})` },
                 ].map((tab) => (
@@ -630,14 +761,15 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                       <th className="py-3.5">Athlete Name</th>
                       <th className="py-3.5">Contact Details</th>
                       <th className="py-3.5">Category & Style</th>
-                      <th className="py-3.5">Status</th>
-                      <th className="py-3.5">Fee / Method</th>
+                      <th className="py-3.5">Admission Status</th>
+                      <th className="py-3.5">Payment & UTR</th>
                       <th className="py-3.5 text-right pr-5">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {filteredRegistrations.map((r) => {
                       const isSelected = selectedIds.includes(r.id);
+                      const paymentStat = r.paymentStatus || (r.status === 'approved' ? 'paid' : (r.txnId ? 'pending_verification' : 'pending'));
                       return (
                         <tr
                           key={r.id}
@@ -693,10 +825,10 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                             <span
                               className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold ${
                                 r.status === 'approved' || r.status === 'paid'
-                                  ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
-                                  : r.status === 'pending'
-                                  ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                                  : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : r.status === 'pending'
+                                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                    : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
                               }`}
                             >
                               {r.status === 'approved' && <CheckCircle2 className="w-3 h-3" />}
@@ -707,16 +839,46 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                           </td>
 
                           <td className="py-3.5">
-                            <div className="font-mono text-xs font-bold text-white">
-                              {formatINR(r.fee)}
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-white">
+                                {formatINR(r.fee)}
+                              </span>
+                              <span
+                                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  paymentStat === 'paid'
+                                    ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : paymentStat === 'pending_verification'
+                                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                                    : paymentStat === 'failed'
+                                    ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                                    : 'bg-slate-700/50 text-slate-400 border border-white/10'
+                                }`}
+                              >
+                                {paymentStat === 'paid' ? 'Paid' : paymentStat === 'pending_verification' ? 'Audit Pending' : paymentStat}
+                              </span>
                             </div>
-                            <span className="text-[10px] text-slate-400 uppercase">
-                              {r.method || 'UPI'} {r.txnId ? `• Ref: ${r.txnId.slice(-6)}` : ''}
+                            <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
+                              {r.txnId ? `UTR: ${r.txnId}` : (r.method || 'UPI')}
                             </span>
                           </td>
 
                           <td className="py-3.5 text-right pr-5">
                             <div className="flex items-center justify-end gap-1.5">
+                              {/* Payment Verify Modal Trigger */}
+                              <button
+                                onClick={() => {
+                                  setVerifyTarget(r);
+                                  setVerifyStatus((r.paymentStatus as any) || (r.txnId ? 'paid' : 'pending_verification'));
+                                  setVerifyNote(r.notes || '');
+                                  setVerifyAdminName('Admin');
+                                }}
+                                title="Audit & verify UPI payment / UTR"
+                                className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 border border-amber-400/30 transition-colors"
+                              >
+                                <CreditCard className="w-3 h-3 text-amber-400" />
+                                <span>Verify</span>
+                              </button>
+
                               {/* Primary Action: Approve & Add to Master Players Roster */}
                               {r.status !== 'approved' && (
                                 <button
@@ -793,164 +955,456 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
         </div>
       )}
 
-      {/* TAB 3: Form Customization Settings */}
-      {activeTab === 'settings' && (
-        <div className="max-w-3xl space-y-6 animate-fade-in">
-          <div className="rounded-3xl glass-card p-6 sm:p-8 border border-white/10 space-y-6">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30">
-              <div className="space-y-1">
-                <span className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider block">
-                  Interactive Drag & Drop Customizer
+      {/* TAB: Form Builder & Fields Configuration */}
+      {activeTab === 'builder' && (
+        <div className="space-y-6 animate-fade-in">
+          {/* Hero Builder Header Card */}
+          <div className="rounded-3xl glass-card p-6 sm:p-8 border border-white/10 space-y-6 bg-gradient-to-br from-emerald-500/10 via-transparent to-transparent">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <span className="text-[10px] uppercase font-bold tracking-widest text-emerald-400 block">
+                  Interactive Form Designer
                 </span>
-                <h3 className="text-base font-black text-white">
-                  Advanced Form Builder & Field Manager
+                <h2 className="text-xl sm:text-2xl font-black text-white">
+                  Badminton Registration Form Builder
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 mt-1">
+                  Add, customize, reorder, or toggle fields across 15 badminton-specific field types. Changes take effect on the public registration link immediately.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  onClick={() => setIsFormCustomizerOpen(true)}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-all shadow-lg shadow-emerald-500/20"
+                >
+                  <Sliders className="w-4 h-4" />
+                  <span>Launch Visual Drag & Drop Builder</span>
+                </button>
+                <button
+                  onClick={() => onOpenPublicForm && onOpenPublicForm(currentSeasonSlug)}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white transition-colors"
+                >
+                  <Eye className="w-4 h-4 text-amber-400" />
+                  <span>Live Preview</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Quick General Form Settings */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-white/10">
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Form Heading / Headline
+                </label>
+                <input
+                  type="text"
+                  value={formConfig.appearance?.formTitle || ''}
+                  onChange={(e) => {
+                    saveFormConfig({
+                      ...formConfig,
+                      appearance: {
+                        ...formConfig.appearance,
+                        formTitle: e.target.value,
+                      },
+                    });
+                  }}
+                  placeholder="Official Player Registration"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Submit Button Text
+                </label>
+                <input
+                  type="text"
+                  value={formConfig.appearance?.submitButtonText || 'Confirm & Submit Registration'}
+                  onChange={(e) => {
+                    saveFormConfig({
+                      ...formConfig,
+                      appearance: {
+                        ...formConfig.appearance,
+                        submitButtonText: e.target.value,
+                      },
+                    });
+                  }}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Max Athlete Capacity
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  max={512}
+                  value={regSettings.maxSlots}
+                  onChange={(e) => {
+                    const slots = Number(e.target.value) || 32;
+                    updateRegistrationSettings({ maxSlots: slots });
+                    saveFormConfig({ ...formConfig, maxSlots: slots });
+                  }}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+
+            {/* Form Subtitle & Instructions */}
+            <div>
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                Form Instructions & Athlete Guidance
+              </label>
+              <textarea
+                rows={2}
+                value={formConfig.appearance?.formDescription || ''}
+                onChange={(e) => {
+                  saveFormConfig({
+                    ...formConfig,
+                    appearance: {
+                      ...formConfig.appearance,
+                      formDescription: e.target.value,
+                    },
+                  });
+                }}
+                placeholder="Fill all required details accurately. Verify your WhatsApp number for match fixture alerts..."
+                className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-400 placeholder-slate-500"
+              />
+            </div>
+          </div>
+
+          {/* Active Field Inventory & Fast Controls */}
+          <div className="rounded-3xl glass-card p-6 sm:p-8 border border-white/10 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div>
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <FileText className="w-5 h-5 text-amber-400" />
+                  <span>Configured Form Fields ({formConfig.fields?.length || 0})</span>
                 </h3>
-                <p className="text-xs text-slate-300">
-                  Add custom questions, edit choice options (dropdown, radio, checkboxes), photo uploads, colors, reorder fields, and preview live desktop/mobile forms.
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Toggle visibility, enforce mandatory validation, or launch the visual editor for advanced options.
                 </p>
               </div>
 
               <button
                 onClick={() => setIsFormCustomizerOpen(true)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-black bg-emerald-400 hover:bg-emerald-300 text-slate-950 transition-all shadow-lg shadow-emerald-500/20 shrink-0"
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-400 text-slate-950 hover:bg-amber-300 transition-colors shadow self-start sm:self-auto"
               >
-                <Sliders className="w-4 h-4" />
-                <span>Customize Registration Form</span>
+                <Plus className="w-4 h-4" />
+                <span>Add / Reorder Fields</span>
               </button>
             </div>
 
+            {/* Fields List Grid */}
+            <div className="grid grid-cols-1 gap-2.5">
+              {(formConfig.fields || []).map((field, idx) => (
+                <div
+                  key={field.id}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-3.5 rounded-2xl bg-white/[0.03] border border-white/5 hover:border-white/15 transition-all gap-3"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-6 h-6 rounded-lg bg-white/5 text-slate-400 flex items-center justify-center text-xs font-mono font-bold">
+                      {idx + 1}
+                    </span>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">{field.label}</span>
+                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-white/10 text-slate-300">
+                          {field.type.replace('_', ' ')}
+                        </span>
+                        {field.required && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                            Required
+                          </span>
+                        )}
+                        {!field.enabled && (
+                          <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-slate-700 text-slate-400">
+                            Hidden
+                          </span>
+                        )}
+                      </div>
+                      {field.helpText && (
+                        <p className="text-xs text-slate-400 mt-0.5 line-clamp-1">{field.helpText}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-3 sm:gap-4 shrink-0 justify-end">
+                    {/* Toggle Required */}
+                    <button
+                      type="button"
+                      disabled={field.isSystem}
+                      onClick={() => {
+                        const updated = formConfig.fields.map((f) =>
+                          f.id === field.id ? { ...f, required: !f.required } : f
+                        );
+                        saveFormConfig({ ...formConfig, fields: updated });
+                      }}
+                      className={`text-xs px-2.5 py-1 rounded-lg font-semibold transition-colors ${
+                        field.isSystem
+                          ? 'opacity-50 cursor-not-allowed text-slate-500 bg-white/5'
+                          : field.required
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : 'text-slate-400 hover:text-white bg-white/5'
+                      }`}
+                    >
+                      {field.required ? 'Mandatory' : 'Optional'}
+                    </button>
+
+                    {/* Toggle Enabled */}
+                    <button
+                      type="button"
+                      disabled={field.isSystem}
+                      onClick={() => {
+                        const updated = formConfig.fields.map((f) =>
+                          f.id === field.id ? { ...f, enabled: !f.enabled } : f
+                        );
+                        saveFormConfig({ ...formConfig, fields: updated });
+                      }}
+                      className={`flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-semibold transition-colors ${
+                        field.isSystem
+                          ? 'opacity-50 cursor-not-allowed text-slate-500 bg-white/5'
+                          : field.enabled
+                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                          : 'bg-slate-800 text-slate-400'
+                      }`}
+                    >
+                      {field.enabled ? <ToggleRight className="w-4 h-4 text-emerald-400" /> : <ToggleLeft className="w-4 h-4" />}
+                      <span>{field.enabled ? 'Visible' : 'Hidden'}</span>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB: Payment & UPI Configuration */}
+      {activeTab === 'payment' && (
+        <div className="space-y-6 animate-fade-in max-w-4xl">
+          <div className="rounded-3xl glass-card p-6 sm:p-8 border border-white/10 space-y-6 bg-gradient-to-br from-amber-500/10 via-transparent to-transparent">
             <div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-amber-400" />
-                <span>Public Registration Form Configuration</span>
+              <span className="text-[10px] uppercase font-bold tracking-widest text-amber-400 block">
+                Financial Settings
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black text-white flex items-center gap-2">
+                <CreditCard className="w-6 h-6 text-amber-400" />
+                <span>UPI Payment Gateway & Tournament Fee</span>
               </h2>
-              <p className="text-xs text-slate-400 mt-1">
-                Customize which optional fields appear on the public registration page and choose whether they are mandatory.
+              <p className="text-xs sm:text-sm text-slate-300 mt-1">
+                Configure tournament entry fees, payee UPI ID, account name, payment instructions, and QR code displayed on the player registration form.
               </p>
             </div>
 
-            {/* General Settings */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {/* UPI & Fee Matrix Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-white/10">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Tournament Season Slug (URL Parameter)
+                <label className="block text-xs font-bold text-slate-300 mb-1.5 flex items-center gap-1">
+                  <IndianRupee className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Standard Entry Fee (INR)</span>
+                </label>
+                <div className="relative">
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 font-bold">
+                    ₹
+                  </span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={50}
+                    value={formConfig.payment?.baseFee ?? formConfig.entryFee ?? 500}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      saveFormConfig({
+                        ...formConfig,
+                        entryFee: val,
+                        payment: {
+                          ...(formConfig.payment || {
+                            enabled: true,
+                            isMandatory: true,
+                            baseFee: 500,
+                            upiId: 'karan-hdfc@ybl',
+                            accountName: 'Smash Premier League (Karan Gaur)',
+                          }),
+                          baseFee: val,
+                        },
+                      });
+                    }}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl pl-8 pr-3.5 py-2.5 text-sm text-white font-mono font-bold focus:outline-none focus:border-amber-400"
+                  />
+                </div>
+                <span className="text-[11px] text-slate-500 mt-1 block">
+                  Set to ₹0 for complimentary free entry.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Beneficiary / Receiver UPI ID
                 </label>
                 <input
                   type="text"
-                  value={regSettings.seasonSlug}
-                  onChange={(e) =>
-                    updateRegistrationSettings({
-                      seasonSlug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
-                    })
-                  }
-                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono"
+                  value={formConfig.payment?.upiId || 'karan-hdfc@ybl'}
+                  onChange={(e) => {
+                    const upiVal = e.target.value.trim();
+                    saveFormConfig({
+                      ...formConfig,
+                      payment: {
+                        ...(formConfig.payment || {
+                          enabled: true,
+                          isMandatory: true,
+                          baseFee: 500,
+                          upiId: 'karan-hdfc@ybl',
+                          accountName: 'Smash Premier League (Karan Gaur)',
+                        }),
+                        upiId: upiVal,
+                      },
+                    });
+                  }}
+                  placeholder="e.g. karan-hdfc@ybl"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
                 />
                 <span className="text-[11px] text-slate-500 mt-1 block">
-                  e.g. season-4 generates: /register/season-4
+                  Athletes will send payment directly to this VPA.
                 </span>
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                  Maximum Athlete Capacity / Slot Limit
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Beneficiary Name (Shown in GPay / PhonePe / Paytm)
                 </label>
                 <input
-                  type="number"
-                  min={2}
-                  max={256}
-                  value={regSettings.maxSlots}
-                  onChange={(e) =>
-                    updateRegistrationSettings({ maxSlots: Number(e.target.value) || 32 })
-                  }
-                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white"
+                  type="text"
+                  value={formConfig.payment?.accountName || 'Smash Premier League (Karan Gaur)'}
+                  onChange={(e) => {
+                    const nameVal = e.target.value;
+                    saveFormConfig({
+                      ...formConfig,
+                      payment: {
+                        ...(formConfig.payment || {
+                          enabled: true,
+                          isMandatory: true,
+                          baseFee: 500,
+                          upiId: 'karan-hdfc@ybl',
+                          accountName: 'Smash Premier League (Karan Gaur)',
+                        }),
+                        accountName: nameVal,
+                      },
+                    });
+                  }}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
                 />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                  Payment Verification Requirement
+                </label>
+                <div className="p-2.5 rounded-xl bg-slate-900 border border-white/10 flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-bold text-white block">Require UTR / Txn Ref</span>
+                    <span className="text-[10px] text-slate-400">Athletes must submit payment ref to proceed</span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={formConfig.payment?.isMandatory !== false}
+                    onChange={(e) => {
+                      const reqVal = e.target.checked;
+                      saveFormConfig({
+                        ...formConfig,
+                        payment: {
+                          ...(formConfig.payment || {
+                            enabled: true,
+                            isMandatory: true,
+                            baseFee: 500,
+                            upiId: 'karan-hdfc@ybl',
+                            accountName: 'Smash Premier League (Karan Gaur)',
+                          }),
+                          isMandatory: reqVal,
+                        },
+                      });
+                    }}
+                    className="rounded accent-amber-400 cursor-pointer w-4 h-4"
+                  />
+                </div>
               </div>
             </div>
 
-            {/* Closed Notice Announcement */}
+            {/* Payment Instructions Text */}
             <div>
-              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                Registration Closed Notice (Shown when registrations are disabled)
+              <label className="block text-xs font-bold text-slate-300 mb-1.5">
+                Payment Guidance & Bank Notes
               </label>
               <textarea
-                rows={2}
-                value={regSettings.closedNotice || ''}
-                onChange={(e) => updateRegistrationSettings({ closedNotice: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm text-white placeholder-slate-500"
-                placeholder="e.g. Registrations are currently closed. Please contact the tournament desk..."
+                rows={3}
+                value={formConfig.payment?.instructions || ''}
+                onChange={(e) => {
+                  const insVal = e.target.value;
+                  saveFormConfig({
+                    ...formConfig,
+                    payment: {
+                      ...(formConfig.payment || {
+                        enabled: true,
+                        isMandatory: true,
+                        baseFee: 500,
+                        upiId: 'karan-hdfc@ybl',
+                        accountName: 'Smash Premier League (Karan Gaur)',
+                      }),
+                      instructions: insVal,
+                    },
+                  });
+                }}
+                placeholder="Scan the QR code below via GPay, PhonePe, or Paytm. Enter your player name in payment notes and keep the 12-digit UTR reference handy."
+                className="w-full bg-slate-900 border border-white/10 rounded-xl p-3 text-sm text-white focus:outline-none focus:border-amber-400 placeholder-slate-500"
               />
             </div>
 
-            {/* Field Visibility & Requirement Matrix */}
-            <div className="space-y-3 pt-4 border-t border-white/10">
-              <h3 className="text-sm font-bold text-white flex items-center justify-between">
-                <span>Field Customization Matrix</span>
-                <span className="text-[11px] text-slate-400 font-normal">
-                  * Full Name and Mobile Number are permanently mandatory
-                </span>
+            {/* Live QR Code Preview Card */}
+            <div className="pt-4 border-t border-white/10">
+              <h3 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-amber-400" />
+                <span>Live Generated UPI QR Code Preview</span>
               </h3>
 
-              <div className="rounded-2xl border border-white/10 overflow-hidden divide-y divide-white/5">
-                {[
-                  { key: 'whatsapp', label: 'WhatsApp Number' },
-                  { key: 'gender', label: 'Gender' },
-                  { key: 'age', label: 'Athlete Age' },
-                  { key: 'experience', label: 'Playing Experience (Beginner/Inter/Adv/Pro)' },
-                  { key: 'category', label: 'Event Category (Doubles/Singles)' },
-                  { key: 'style', label: 'Playing Style (Smash/Defensive/All-Rounder)' },
-                  { key: 'city', label: 'City / Locality' },
-                  { key: 'notes', label: 'Additional Information / Notes' },
-                ].map(({ key, label }) => {
-                  const fieldConfig = (regSettings.fields as any)[key] || {
-                    visible: true,
-                    required: false,
-                  };
-                  return (
-                    <div
-                      key={key}
-                      className="p-3.5 flex items-center justify-between hover:bg-white/[0.02] text-xs"
+              <div className="flex flex-col sm:flex-row items-center gap-6 p-4 rounded-2xl bg-slate-900 border border-white/10">
+                <div className="w-36 h-36 rounded-xl bg-white p-2 shrink-0 flex items-center justify-center shadow-md">
+                  <img
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
+                      `upi://pay?pa=${formConfig.payment?.upiId || 'karan-hdfc@ybl'}&pn=${encodeURIComponent(
+                        formConfig.payment?.accountName || 'Smash Premier League'
+                      )}&am=${formConfig.payment?.baseFee ?? formConfig.entryFee ?? 500}&cu=INR&tn=SPLRegistration`
+                    )}`}
+                    alt="UPI Payment QR"
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <div className="font-mono text-slate-300">
+                    <span className="text-slate-500 block text-[10px] uppercase">UPI String</span>
+                    <span className="break-all text-[11px] bg-black/40 p-2 rounded-lg block border border-white/5">
+                      upi://pay?pa={formConfig.payment?.upiId || 'karan-hdfc@ybl'}&pn={formConfig.payment?.accountName || 'Smash Premier League'}&am={formConfig.payment?.baseFee ?? formConfig.entryFee ?? 500}&cu=INR
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      Active Gateway: ₹{formConfig.payment?.baseFee ?? formConfig.entryFee ?? 500}
+                    </span>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(formConfig.payment?.upiId || 'karan-hdfc@ybl');
+                        alert('UPI ID copied!');
+                      }}
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-slate-400 hover:text-white bg-white/5 border border-white/10 transition-colors"
                     >
-                      <span className="font-medium text-slate-200">{label}</span>
-
-                      <div className="flex items-center gap-6">
-                        <label className="flex items-center gap-1.5 text-slate-400 hover:text-white cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={fieldConfig.visible}
-                            onChange={(e) =>
-                              updateRegistrationSettings({
-                                fields: {
-                                  ...regSettings.fields,
-                                  [key]: { ...fieldConfig, visible: e.target.checked },
-                                },
-                              })
-                            }
-                            className="rounded accent-amber-400"
-                          />
-                          <span>Show on form</span>
-                        </label>
-
-                        <label className="flex items-center gap-1.5 text-slate-400 hover:text-white cursor-pointer">
-                          <input
-                            type="checkbox"
-                            disabled={!fieldConfig.visible}
-                            checked={fieldConfig.required && fieldConfig.visible}
-                            onChange={(e) =>
-                              updateRegistrationSettings({
-                                fields: {
-                                  ...regSettings.fields,
-                                  [key]: { ...fieldConfig, required: e.target.checked },
-                                },
-                              })
-                            }
-                            className="rounded accent-rose-400 disabled:opacity-40"
-                          />
-                          <span>Mandatory</span>
-                        </label>
-                      </div>
-                    </div>
-                  );
-                })}
+                      Copy VPA
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1238,6 +1692,183 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
         onRegenerate={regenerateToken}
         onToggleStatus={toggleTokenStatus}
       />
+
+      {/* PAYMENT VERIFICATION MODAL */}
+      {verifyTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="max-w-lg w-full rounded-3xl glass-panel p-6 sm:p-8 border border-white/10 shadow-2xl space-y-5 my-auto">
+            <div className="flex items-start justify-between pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-lg border border-amber-500/30">
+                  <CreditCard className="w-5 h-5 text-amber-400" />
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400 block font-mono">
+                    Payment Verification Audit
+                  </span>
+                  <h3 className="text-lg font-bold text-white">{verifyTarget.name}</h3>
+                  <span className="text-[11px] text-slate-400 font-mono">
+                    ID: {verifyTarget.regId} • Mobile: +91 {verifyTarget.mobile}
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setVerifyTarget(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Payment Summary Box */}
+            <div className="grid grid-cols-2 gap-3 text-xs">
+              <div className="p-3 rounded-xl bg-white/5 space-y-0.5">
+                <span className="text-[10px] uppercase text-slate-400 block font-semibold">Entry Fee</span>
+                <span className="text-base font-mono font-black text-white block">
+                  {formatINR(verifyTarget.fee)}
+                </span>
+                <span className="text-[10px] text-slate-500 capitalize">{verifyTarget.category || 'Doubles'}</span>
+              </div>
+
+              <div className="p-3 rounded-xl bg-white/5 space-y-0.5">
+                <span className="text-[10px] uppercase text-slate-400 block font-semibold">Submitted UTR / Txn ID</span>
+                <div className="flex items-center justify-between gap-1">
+                  <span className="text-xs font-mono font-bold text-amber-300 truncate">
+                    {verifyTarget.txnId || 'Not provided'}
+                  </span>
+                  {verifyTarget.txnId && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(verifyTarget.txnId || '');
+                        alert('Transaction reference copied to clipboard!');
+                      }}
+                      className="p-1 hover:text-white text-slate-400"
+                      title="Copy UTR Reference"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <span className="text-[10px] text-slate-500">Method: {verifyTarget.method || 'UPI'}</span>
+              </div>
+            </div>
+
+            {/* Payment Proof / Screenshot Preview if available */}
+            {Boolean(verifyTarget.answers?.payment_screenshot || verifyTarget.answers?.photo || verifyTarget.photoUrl) && (
+              <div className="p-3 rounded-xl bg-white/5 space-y-2">
+                <span className="text-[10px] uppercase text-slate-400 block font-semibold flex items-center justify-between">
+                  <span>Player Payment Screenshot</span>
+                  <a
+                    href={(verifyTarget.answers?.payment_screenshot as string) || (verifyTarget.answers?.photo as string) || verifyTarget.photoUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-amber-400 hover:underline flex items-center gap-1"
+                  >
+                    <ExternalLink className="w-3 h-3" />
+                    <span>Open full size</span>
+                  </a>
+                </span>
+                <img
+                  src={(verifyTarget.answers?.payment_screenshot as string) || (verifyTarget.answers?.photo as string) || verifyTarget.photoUrl}
+                  alt="Payment screenshot"
+                  className="w-full max-h-48 object-contain rounded-lg bg-black/40 border border-white/10"
+                />
+              </div>
+            )}
+
+            {/* Payment Status Selector */}
+            <div className="space-y-2">
+              <label className="block text-xs font-bold text-slate-300">
+                Update Payment Status
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'paid', label: 'Verified Paid', color: 'border-emerald-500 bg-emerald-500/20 text-emerald-300' },
+                  { id: 'pending_verification', label: 'Pending Audit', color: 'border-amber-500 bg-amber-500/20 text-amber-300' },
+                  { id: 'pending', label: 'Unpaid / Pending', color: 'border-slate-500 bg-slate-500/20 text-slate-300' },
+                  { id: 'failed', label: 'Payment Failed', color: 'border-rose-500 bg-rose-500/20 text-rose-300' },
+                  { id: 'refunded', label: 'Refunded', color: 'border-purple-500 bg-purple-500/20 text-purple-300' },
+                  { id: 'cancelled', label: 'Cancelled', color: 'border-slate-700 bg-slate-700/50 text-slate-400' },
+                ].map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setVerifyStatus(item.id as PaymentStatus)}
+                    className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition-all text-center ${
+                      verifyStatus === item.id
+                        ? `${item.color} shadow-md`
+                        : 'border-white/10 bg-white/5 text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Verifier Admin Name & Notes */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Verified By (Admin Sign-off)
+                </label>
+                <input
+                  type="text"
+                  value={verifyAdminName}
+                  onChange={(e) => setVerifyAdminName(e.target.value)}
+                  placeholder="e.g. Admin - Karan"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                  Audit Comment / Bank Txn Note
+                </label>
+                <input
+                  type="text"
+                  value={verifyNote}
+                  onChange={(e) => setVerifyNote(e.target.value)}
+                  placeholder="e.g. Verified in HDFC bank statement"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                />
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-4 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setVerifyTarget(null)}
+                className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white bg-white/5 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isVerifying}
+                onClick={async () => {
+                  try {
+                    setIsVerifying(true);
+                    await verifyPayment(verifyTarget.id, verifyStatus, verifyNote, verifyAdminName);
+                    sportsAudio.playFanfare();
+                    setVerifyTarget(null);
+                  } catch (err) {
+                    console.error('Failed to verify payment:', err);
+                  } finally {
+                    setIsVerifying(false);
+                  }
+                }}
+                className="flex items-center gap-1.5 px-5 py-2 rounded-xl text-xs font-black text-slate-950 bg-amber-400 hover:bg-amber-300 transition-all shadow-lg shadow-amber-400/20 disabled:opacity-50"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>{isVerifying ? 'Saving Audit...' : 'Save & Update Payment'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

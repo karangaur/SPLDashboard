@@ -99,19 +99,21 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
       {/* Top Bar / Minimal Navigation */}
       <header className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex items-center justify-between border-b border-white/5">
         <div className="flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-tr from-lime-500 via-lime-400 to-emerald-400 text-slate-950 font-black shadow-lg shadow-lime-500/25">
-            <span className="text-2xl">🏸</span>
-          </div>
+          <img
+            src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
+            alt="Smash Premier League"
+            className="h-10 sm:h-12 w-auto object-contain drop-shadow"
+          />
           <div>
             <div className="flex items-center gap-2">
               <span className="font-display text-lg font-black tracking-tight text-white uppercase">
                 Smash Premier League
               </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-lime-400 text-slate-950">
-                PRO
+              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono">
+                ADMIN
               </span>
             </div>
-            <p className="text-xs text-slate-400 font-medium">Official Tournament Management Suite</p>
+            <p className="text-xs text-slate-400 font-medium">Maharajganj Badminton Tournament Suite</p>
           </div>
         </div>
 
@@ -166,30 +168,14 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900/90 via-[#0a0f1e] to-slate-950 p-6 shadow-2xl backdrop-blur-md">
               <div className="flex flex-col sm:flex-row items-center gap-6">
                 
-                {/* Badminton Court Smash SVG Badge */}
-                <div className="relative shrink-0 w-28 h-28 rounded-2xl bg-gradient-to-tr from-lime-500/20 via-emerald-500/10 to-transparent border border-lime-400/30 flex items-center justify-center p-3 shadow-inner">
-                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(163,230,53,0.35)_0%,transparent_70%)]" />
-                  {/* Stylized jump smash silhouette & shuttlecock */}
-                  <svg
-                    className="w-16 h-16 text-lime-400 drop-shadow-[0_0_12px_rgba(163,230,53,0.7)]"
-                    viewBox="0 0 64 64"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    {/* Shuttlecock Motion Trail */}
-                    <path d="M12 52L26 38" strokeDasharray="3 3" opacity="0.6" strokeWidth="1.5" />
-                    <path d="M18 56L30 44" strokeDasharray="3 3" opacity="0.4" strokeWidth="1.5" />
-                    {/* Shuttlecock Head & Feathers */}
-                    <circle cx="48" cy="18" r="4" fill="currentColor" />
-                    <path d="M45 21L34 32M48 22L40 36M51 19L44 32" strokeWidth="2.5" />
-                    <path d="M34 32C36 35 42 37 44 32" />
-                    {/* Speed Lines */}
-                    <line x1="56" y1="12" x2="60" y2="8" strokeWidth="2" />
-                    <line x1="52" y1="8" x2="54" y2="4" strokeWidth="2" />
-                  </svg>
+                {/* Official 3D Tournament Badge */}
+                <div className="relative shrink-0 w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-gradient-to-tr from-blue-600/20 via-sky-500/10 to-amber-500/15 border border-blue-400/30 flex items-center justify-center p-2 shadow-inner">
+                  <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.25)_0%,transparent_70%)]" />
+                  <img
+                    src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
+                    alt="Smash Premier League 3D Logo"
+                    className="w-full h-full object-contain drop-shadow-[0_4px_12px_rgba(37,99,235,0.4)]"
+                  />
                 </div>
 
                 <div className="space-y-2 text-center sm:text-left">
