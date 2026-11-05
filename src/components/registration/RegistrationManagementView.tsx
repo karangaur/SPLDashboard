@@ -38,8 +38,11 @@ import {
   ArrowDown,
   ToggleLeft,
   ToggleRight,
+  Globe,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
+import { AuthService } from '../../services/authService';
+import { SupabaseService } from '../../services/supabaseService';
 import {
   formatINR,
   calculateRegistrationStats,
@@ -125,12 +128,136 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   const [editCity, setEditCity] = useState('');
   const [editNotes, setEditNotes] = useState('');
 
+  // Custom Registration URL Slug State
+  const initialCustomSlug =
+    formConfig.appearance?.customUrlSlug || formConfig.customUrlSlug || 'register';
+  const [customSlugInput, setCustomSlugInput] = useState<string>(initialCustomSlug);
+  const [activeCustomSlug, setActiveCustomSlug] = useState<string>(initialCustomSlug);
+  const [isSavingSlug, setIsSavingSlug] = useState(false);
+  const [slugSaveSuccess, setSlugSaveSuccess] = useState<string | null>(null);
+  const [slugSaveError, setSlugSaveError] = useState<string | null>(null);
+
+  // Sync active custom slug when formConfig updates
+  React.useEffect(() => {
+    const slug = formConfig.appearance?.customUrlSlug || formConfig.customUrlSlug || 'register';
+    setActiveCustomSlug(slug);
+    setCustomSlugInput(slug);
+  }, [formConfig.appearance?.customUrlSlug, formConfig.customUrlSlug]);
+
   // Base URL calculation with active token
   const origin = typeof window !== 'undefined' ? window.location.origin : 'https://smash-premier-league.web.app';
   const currentSeasonSlug = formConfig.seasonSlug || regSettings.seasonSlug || 'season-4';
-  const publicRegistrationUrl = `${origin}?register=${currentSeasonSlug}${
-    activeToken ? `&token=${encodeURIComponent(activeToken.token)}` : ''
+  const cleanCustomSlug = (activeCustomSlug || 'register').trim().toLowerCase();
+  const customRegistrationUrl = `${origin}/${cleanCustomSlug}${
+    activeToken ? `?token=${encodeURIComponent(activeToken.token)}` : ''
   }`;
+  const publicRegistrationUrl = customRegistrationUrl;
+
+  const validateSlug = (slug: string) => {
+    const s = slug.toLowerCase().trim();
+    if (!s) return { valid: false, error: 'Slug cannot be empty' };
+    if (s.length < 3) return { valid: false, error: 'Slug must be at least 3 characters' };
+    if (s.length > 60) return { valid: false, error: 'Slug cannot exceed 60 characters' };
+    if (!/^[a-z0-9-]+$/.test(s)) {
+      return { valid: false, error: 'Only lowercase letters, numbers, and hyphens (-) allowed' };
+    }
+    if (s.startsWith('-') || s.endsWith('-') || s.includes('--')) {
+      return { valid: false, error: 'Cannot start, end, or have consecutive hyphens' };
+    }
+    const reserved = [
+      'admin', 'login', 'api', 'dashboard', 'fixtures', 'standings', 'teams', 'players',
+      'knockout', 'tokens', 'registration', 'registered', 'statistics', 'champion', 'settings',
+      'public', 'dist', 'src'
+    ];
+    if (reserved.includes(s)) {
+      return { valid: false, error: `"${s}" is a reserved system path and cannot be used` };
+    }
+    return { valid: true, error: null };
+  };
+
+  const handleSaveCustomSlug = async () => {
+    const check = validateSlug(customSlugInput);
+    if (!check.valid) {
+      setSlugSaveError(check.error);
+      return;
+    }
+    setSlugSaveError(null);
+    setIsSavingSlug(true);
+    const cleaned = customSlugInput.toLowerCase().trim();
+    try {
+      const res = await fetch('/api/registration-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ customUrlSlug: cleaned, seasonSlug: currentSeasonSlug }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSlugSaveError(data.error || 'Failed to save custom URL slug');
+      } else {
+        setActiveCustomSlug(cleaned);
+        const updatedConfig: RegistrationFormConfig = {
+          ...formConfig,
+          customUrlSlug: cleaned,
+          appearance: {
+            ...formConfig.appearance,
+            customUrlSlug: cleaned,
+          },
+        };
+        await saveFormConfig(updatedConfig, false);
+        if (SupabaseService.isAvailable()) {
+          SupabaseService.saveCustomUrlSlug(cleaned, currentSeasonSlug).catch(() => {});
+        }
+        sportsAudio.playFanfare();
+        setSlugSaveSuccess(`Registration link successfully set to /${cleaned}`);
+        setTimeout(() => setSlugSaveSuccess(null), 4000);
+      }
+    } catch (err: any) {
+      setSlugSaveError(err?.message || 'Network error updating custom slug');
+    } finally {
+      setIsSavingSlug(false);
+    }
+  };
+
+  const handleResetSlugToDefault = async () => {
+    setIsSavingSlug(true);
+    try {
+      await fetch('/api/registration-url/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug: currentSeasonSlug }),
+      });
+      setActiveCustomSlug('register');
+      setCustomSlugInput('register');
+      const updatedConfig: RegistrationFormConfig = {
+        ...formConfig,
+        customUrlSlug: 'register',
+        appearance: {
+          ...formConfig.appearance,
+          customUrlSlug: 'register',
+        },
+      };
+      await saveFormConfig(updatedConfig, false);
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveCustomUrlSlug('register', currentSeasonSlug).catch(() => {});
+      }
+      setSlugSaveSuccess('Registration link reset to default (/register)');
+      setTimeout(() => setSlugSaveSuccess(null), 3000);
+    } catch (e: any) {
+      setSlugSaveError(e?.message || 'Error resetting slug');
+    } finally {
+      setIsSavingSlug(false);
+    }
+  };
+
+  const handleCopyLink = () => {
+    navigator.clipboard.writeText(customRegistrationUrl);
+    setCopiedLink(true);
+    setCopiedSlug(true);
+    setTimeout(() => {
+      setCopiedLink(false);
+      setCopiedSlug(false);
+    }, 2000);
+  };
 
   // WhatsApp share text with active token
   const whatsAppShareText = `🏸 *Smash Premier League (S.P.L.) — Player Registration is OPEN!*\n\n🏆 *Tournament:* ${formConfig.tournamentName || state.settings.name}\n🌟 *Season:* ${formConfig.seasonTitle || state.settings.season || regSettings.seasonTitle}\n📅 *Date:* ${formConfig.date || state.settings.date}\n📍 *Venue:* ${formConfig.venue || state.settings.venue}\n💰 *Entry Fee:* ${formatINR(formConfig.entryFee ?? (state.settings.entryFee || 500))}\n\n👉 *Click here to submit your player entry:* \n${publicRegistrationUrl}\n\n_Register early to guarantee your tournament slot!_`;

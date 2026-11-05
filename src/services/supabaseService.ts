@@ -529,14 +529,19 @@ export class SupabaseService {
   // ============================================================================
   // 4. REGISTRATIONS & APPLICANTS
   // ============================================================================
-  static async fetchRegistrations(season = 'season-4'): Promise<Registration[] | null> {
+  static async fetchRegistrations(season = 'all'): Promise<Registration[] | null> {
     if (!this.isAvailable()) return null;
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('registrations')
         .select('*')
-        .eq('season_slug', season)
         .order('created_at', { ascending: false });
+
+      if (season && season !== 'all' && season !== 'any') {
+        query = query.eq('season_slug', season);
+      }
+
+      const { data, error } = await query;
 
       if (error || !data) return null;
 
@@ -613,8 +618,13 @@ export class SupabaseService {
       };
 
       const { error } = await supabase.from('registrations').upsert(payload as any);
-      return !error;
-    } catch {
+      if (error) {
+        console.error('Supabase saveRegistration error:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      console.error('Supabase saveRegistration exception:', e?.message);
       return false;
     }
   }
@@ -645,17 +655,47 @@ export class SupabaseService {
   static async fetchFormConfig(seasonSlug = 'season-4'): Promise<RegistrationFormConfig | null> {
     if (!this.isAvailable()) return null;
     try {
+      // 1. Try fetching exact slug match
+      let row: DbRegistrationFormConfig | null = null;
       const { data, error } = await supabase
         .from('registration_form_config')
         .select('*')
         .eq('season_slug', seasonSlug)
         .maybeSingle();
 
-      if (error || !data) return null;
+      if (!error && data) {
+        row = data as DbRegistrationFormConfig;
+      } else {
+        // Fallback to active published config
+        const { data: fallbackData } = await supabase
+          .from('registration_form_config')
+          .select('*')
+          .eq('is_published', true)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
-      const row = data as DbRegistrationFormConfig;
+        if (fallbackData) {
+          row = fallbackData as DbRegistrationFormConfig;
+        } else {
+          // Fallback to default season-4
+          const { data: season4Data } = await supabase
+            .from('registration_form_config')
+            .select('*')
+            .eq('season_slug', 'season-4')
+            .maybeSingle();
+          if (season4Data) row = season4Data as DbRegistrationFormConfig;
+        }
+      }
+
+      if (!row) return null;
+
+      const appJson = (row.appearance_json as any) || {};
+      const customUrlSlug = appJson.customUrlSlug || undefined;
+
       return {
         seasonSlug: row.season_slug,
+        customUrlSlug,
         tournamentName: row.tournament_name,
         seasonTitle: row.season_title,
         deadline: row.deadline || undefined,
@@ -670,7 +710,7 @@ export class SupabaseService {
         publishedAt: row.published_at ? new Date(row.published_at).getTime() : undefined,
         lastUpdatedAt: new Date(row.updated_at).getTime(),
         payment: row.payment_config_json as any,
-        appearance: row.appearance_json as any,
+        appearance: appJson,
         fields: row.fields_json || [],
       };
     } catch {
@@ -765,6 +805,26 @@ export class SupabaseService {
           successMessage: 'Thank you for registering for Smash Premier League.',
         },
         fields: existing?.fields || [],
+      };
+      return await this.saveFormConfig(updatedConfig, false);
+    } catch {
+      return false;
+    }
+  }
+
+  static async saveCustomUrlSlug(slug: string, seasonSlug = 'season-4'): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      const existing = await this.fetchFormConfig(seasonSlug);
+      if (!existing) return false;
+      const cleanSlug = slug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+      const updatedConfig: RegistrationFormConfig = {
+        ...existing,
+        customUrlSlug: cleanSlug || 'register',
+        appearance: {
+          ...existing.appearance,
+          customUrlSlug: cleanSlug || 'register',
+        },
       };
       return await this.saveFormConfig(updatedConfig, false);
     } catch {

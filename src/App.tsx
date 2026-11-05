@@ -27,59 +27,100 @@ import {
   UserPlus,
 } from 'lucide-react';
 
+const RESERVED_PATHS = new Set([
+  '',
+  'home',
+  'admin',
+  'login',
+  'api',
+  'dashboard',
+  'fixtures',
+  'standings',
+  'teams',
+  'players',
+  'knockout',
+  'tokens',
+  'registration',
+  'registered',
+  'statistics',
+  'champion',
+  'settings',
+]);
+
+function getRouteInfo(): { mode: 'home' | 'admin' | 'login' | 'register'; season?: string } {
+  if (typeof window === 'undefined') return { mode: 'home' };
+  const path = window.location.pathname;
+  const search = window.location.search;
+  const hash = window.location.hash;
+  const searchParams = new URLSearchParams(search);
+
+  // 1. Check login
+  if (path === '/login' || hash === '#/login' || searchParams.has('login')) {
+    return { mode: 'login' };
+  }
+
+  // 2. Check admin
+  if (path === '/admin' || hash === '#/admin') {
+    return { mode: 'admin' };
+  }
+
+  // 3. Check query triggers
+  if (
+    searchParams.has('register') ||
+    searchParams.has('slug') ||
+    searchParams.has('token') ||
+    searchParams.has('tok') ||
+    hash.startsWith('#/register') ||
+    hash.includes('token=')
+  ) {
+    const slug = searchParams.get('register') || searchParams.get('slug') || undefined;
+    return { mode: 'register', season: slug };
+  }
+
+  // 4. Check clean custom URL slugs (e.g. /spl-maharajganj-2026, /spl-season-3, /register)
+  const cleanPath = path.replace(/^\/+|\/+$/g, '');
+  if (cleanPath.length > 0) {
+    const segments = cleanPath.split('/');
+    const firstSegment = segments[0]?.toLowerCase();
+    if (firstSegment === 'register') {
+      return { mode: 'register', season: segments[1] || undefined };
+    }
+    if (firstSegment && !RESERVED_PATHS.has(firstSegment)) {
+      return { mode: 'register', season: firstSegment };
+    }
+  }
+
+  // 5. Check hash-based custom slugs (e.g. #/spl-maharajganj-2026)
+  if (hash.startsWith('#/')) {
+    const hashClean = hash.replace(/^#\/+/, '').split('/')[0]?.toLowerCase();
+    if (hashClean && !RESERVED_PATHS.has(hashClean)) {
+      return { mode: 'register', season: hashClean };
+    }
+  }
+
+  return { mode: 'home' };
+}
+
 export default function App() {
   const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => AuthService.isAuthenticated());
 
   // Determine initial view from URL
   const [viewMode, setViewMode] = useState<'home' | 'admin' | 'login' | 'register'>(() => {
-    if (typeof window === 'undefined') return 'home';
-    const path = window.location.pathname;
-    const search = window.location.search;
-    const hash = window.location.hash;
-    const searchParams = new URLSearchParams(search);
-    if (
-      path.startsWith('/register') ||
-      searchParams.has('register') ||
-      searchParams.has('token') ||
-      searchParams.has('tok') ||
-      hash.startsWith('#/register') ||
-      hash.includes('token=')
-    ) {
-      return 'register';
-    }
-    return 'home';
+    return getRouteInfo().mode;
   });
 
   const [publicSeason, setPublicSeason] = useState<string | undefined>(() => {
-    if (typeof window === 'undefined') return undefined;
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('register')) return params.get('register') || undefined;
-    const match = window.location.pathname.match(/\/register\/([^\/]+)/);
-    if (match) return match[1];
-    const hashMatch = window.location.hash.match(/#\/register\/([^\/]+)/);
-    if (hashMatch) return hashMatch[1];
-    return undefined;
+    return getRouteInfo().season;
   });
 
   // Listen for browser popstate / back button
   useEffect(() => {
     const checkRoute = () => {
-      const path = window.location.pathname;
-      const search = window.location.search;
-      const hash = window.location.hash;
-      const searchParams = new URLSearchParams(search);
-      const shouldBeRegister =
-        path.startsWith('/register') ||
-        searchParams.has('register') ||
-        searchParams.has('token') ||
-        searchParams.has('tok') ||
-        hash.startsWith('#/register') ||
-        hash.includes('token=');
-
-      if (shouldBeRegister) {
-        setViewMode('register');
-        if (searchParams.has('register')) setPublicSeason(searchParams.get('register') || undefined);
+      const route = getRouteInfo();
+      setViewMode(route.mode);
+      if (route.season !== undefined) {
+        setPublicSeason(route.season);
       }
     };
 
@@ -90,17 +131,16 @@ export default function App() {
   const handleOpenPublicForm = (season?: string) => {
     setPublicSeason(season);
     setViewMode('register');
+    try {
+      const targetSlug = season || 'register';
+      window.history.pushState({}, '', `/${targetSlug}`);
+    } catch {}
   };
 
   const handleBackToDashboard = () => {
     setViewMode('home');
-    // Clean URL query without reload
     try {
-      if (window.location.search.includes('register')) {
-        const url = new URL(window.location.href);
-        url.searchParams.delete('register');
-        window.history.pushState({}, '', url.pathname);
-      }
+      window.history.pushState({}, '', '/');
     } catch {}
   };
 

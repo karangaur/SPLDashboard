@@ -140,6 +140,7 @@ export interface FormAppearance {
   submitButtonText: string;
   successTitle: string;
   successMessage: string;
+  customUrlSlug?: string;
 }
 
 export interface FormPaymentConfig {
@@ -157,6 +158,7 @@ export interface FormPaymentConfig {
 
 export interface RegistrationFormConfig {
   seasonSlug: string;
+  customUrlSlug?: string;
   tournamentName: string;
   seasonTitle: string;
   deadline?: string;
@@ -196,6 +198,7 @@ export interface RegistrationSettings {
   enabled: boolean;
   seasonSlug: string;
   seasonTitle: string;
+  customUrlSlug?: string;
   maxSlots: number;
   deadline?: string;
   closedNotice?: string;

@@ -17,8 +17,16 @@ if (!process.env.VITE_SUPABASE_ANON_KEY && (process.env.SUPABASE_ANON_KEY || pro
   process.env.VITE_SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
 }
 
-const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const DEFAULT_FALLBACK_SUPABASE_URL = 'https://zwvljfermlrzzaymlxwn.supabase.co';
+const DEFAULT_FALLBACK_SUPABASE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3dmxqZmVybWxyenpheW1seHduIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM4NjE0MjUsImV4cCI6MjEwOTQzNzQyNX0.jEPYALVHm5s3wocdwcTsGq9NqgbbcG884YWW8P77W_c';
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || DEFAULT_FALLBACK_SUPABASE_URL;
+const supabaseKey =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ||
+  process.env.SUPABASE_ANON_KEY ||
+  process.env.VITE_SUPABASE_ANON_KEY ||
+  DEFAULT_FALLBACK_SUPABASE_KEY;
 const isSupabaseServerActive = Boolean(
   supabaseUrl &&
   supabaseKey &&
@@ -1181,11 +1189,65 @@ async function startServer() {
   });
 
   // 5. Get All Registrations
-  app.get('/api/registrations', (req, res) => {
-    const list = readJSON<any[]>(REGISTRATIONS_FILE, []);
+  app.get('/api/registrations', async (req, res) => {
+    let list = readJSON<any[]>(REGISTRATIONS_FILE, []);
     const season = req.query.season as string;
     const isAuthed = isAdminAuthorized(req);
-    const filtered = season ? list.filter((r) => r.season === season) : list;
+
+    // Fetch authoritative live registrations from Supabase if active
+    if (serverSupabase) {
+      try {
+        let query = serverSupabase
+          .from('registrations')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (season && season !== 'all') {
+          query = query.eq('season_slug', season);
+        }
+
+        const { data: dbRows, error: dbErr } = await query;
+        if (!dbErr && Array.isArray(dbRows) && dbRows.length > 0) {
+          const mappedFromDb = dbRows.map((r: any) => ({
+            id: r.id,
+            regId: r.reg_id,
+            playerId: r.player_id || undefined,
+            name: r.name,
+            mobile: r.mobile,
+            whatsapp: r.whatsapp || undefined,
+            age: r.age || undefined,
+            gender: r.gender,
+            experience: r.experience || undefined,
+            category: r.category || undefined,
+            style: r.style || undefined,
+            city: r.city || undefined,
+            notes: r.notes || undefined,
+            fee: r.fee,
+            status: r.status,
+            paymentStatus: r.payment_status,
+            method: r.method,
+            txnId: r.txn_id || undefined,
+            season: r.season_slug,
+            createdAt: new Date(r.created_at).getTime(),
+            paidAt: r.paid_at ? new Date(r.paid_at).getTime() : undefined,
+            approvedAt: r.approved_at ? new Date(r.approved_at).getTime() : undefined,
+            verifiedBy: r.verified_by || undefined,
+            verifiedAt: r.verified_at ? new Date(r.verified_at).getTime() : undefined,
+            auditLog: r.audit_log_json || [],
+            answers: r.answers_json || {},
+            photoUrl: r.photo_url || undefined,
+            tokenUsed: r.token_used || undefined,
+            formVersion: r.form_version || 1,
+          }));
+          list = mappedFromDb;
+          writeJSON(REGISTRATIONS_FILE, list);
+        }
+      } catch (err: any) {
+        console.warn('Error fetching registrations from Supabase, falling back to local file:', err?.message);
+      }
+    }
+
+    const filtered = season && season !== 'all' ? list.filter((r) => r.season === season) : list;
     if (isAuthed) {
       return res.json(filtered);
     }
@@ -1206,7 +1268,7 @@ async function startServer() {
   });
 
   // 6. Submit New Registration
-  app.post('/api/registrations', (req, res) => {
+  app.post('/api/registrations', async (req, res) => {
     const {
       name,
       mobile,
@@ -1241,7 +1303,7 @@ async function startServer() {
 
     // Validate settings & published form
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[season] || createDefaultForm(season);
+    const formConfig = forms[season] || forms['season-4'] || createDefaultForm(season);
     if (!formConfig.enabled) {
       return res.status(403).json({
         error: formConfig.closedNotice || 'Registrations are currently closed by the tournament committee.',
@@ -1362,37 +1424,45 @@ async function startServer() {
 
     // Save registration to Supabase PostgreSQL if active
     if (serverSupabase) {
-      serverSupabase
-        .from('registrations')
-        .insert({
-          id: newReg.id,
-          reg_id: newReg.regId,
-          season_slug: newReg.season,
-          name: newReg.name,
-          mobile: newReg.mobile,
-          whatsapp: newReg.whatsapp || null,
-          age: newReg.age || null,
-          gender: newReg.gender,
-          experience: newReg.experience || null,
-          category: newReg.category || null,
-          style: newReg.style || null,
-          city: newReg.city || null,
-          notes: newReg.notes || null,
-          fee: newReg.fee,
-          status: newReg.status,
-          payment_status: newReg.paymentStatus,
-          method: newReg.method,
-          txn_id: newReg.txnId || null,
-          answers_json: newReg.answers,
-          photo_url: newReg.photoUrl || null,
-          token_used: newReg.tokenUsed || null,
-          form_version: newReg.formVersion,
-          audit_log_json: newReg.auditLog,
-          created_at: new Date(newReg.createdAt).toISOString(),
-        } as any)
-        .then(() => {});
-    }
+      try {
+        const { error: insertErr } = await serverSupabase
+          .from('registrations')
+          .insert({
+            id: newReg.id,
+            reg_id: newReg.regId,
+            season_slug: newReg.season,
+            name: newReg.name,
+            mobile: newReg.mobile,
+            whatsapp: newReg.whatsapp || null,
+            age: newReg.age || null,
+            gender: newReg.gender,
+            experience: newReg.experience || null,
+            category: newReg.category || null,
+            style: newReg.style || null,
+            city: newReg.city || null,
+            notes: newReg.notes || null,
+            fee: newReg.fee,
+            status: newReg.status,
+            payment_status: newReg.paymentStatus,
+            method: newReg.method,
+            txn_id: newReg.txnId || null,
+            answers_json: newReg.answers,
+            photo_url: newReg.photoUrl || null,
+            token_used: newReg.tokenUsed || null,
+            form_version: newReg.formVersion,
+            audit_log_json: newReg.auditLog,
+            created_at: new Date(newReg.createdAt).toISOString(),
+          } as any);
 
+        if (insertErr) {
+          console.error('Supabase registration insert error:', insertErr.message);
+        } else {
+          console.log(`Saved registration ${newReg.regId} to Supabase PostgreSQL successfully`);
+        }
+      } catch (err: any) {
+        console.error('Supabase registration insert exception:', err?.message);
+      }
+    }
 
     // Update token submissions count if applicable
     if (tokenUsed) {
@@ -1413,6 +1483,137 @@ async function startServer() {
       success: true,
       registration: newReg,
       message: successMessage,
+    });
+  });
+
+  // 6.2 Get Custom Registration URL Settings
+  app.get('/api/registration-url', (req, res) => {
+    const seasonSlug = (req.query.season as string) || 'season-4';
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    const formConfig = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    const customSlug = formConfig.appearance?.customUrlSlug || formConfig.customUrlSlug || 'register';
+    res.json({
+      customUrlSlug: customSlug,
+      isDefault: customSlug === 'register',
+      enabled: formConfig.enabled ?? true,
+      seasonSlug,
+    });
+  });
+
+  // 6.3 Update Custom Registration URL Settings (Admin Only)
+  app.post('/api/registration-url', async (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
+    const { customUrlSlug, seasonSlug = 'season-4', enabled } = req.body;
+    if (typeof customUrlSlug !== 'string') {
+      return res.status(400).json({ error: 'customUrlSlug must be a string' });
+    }
+    const cleanedSlug = customUrlSlug.toLowerCase().trim().replace(/[^a-z0-9-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+
+    // Validate characters and format
+    if (!/^[a-z0-9-]+$/.test(cleanedSlug) || cleanedSlug.length < 3 || cleanedSlug.length > 60) {
+      return res.status(400).json({
+        error: 'Slug must be between 3 and 60 characters and contain only lowercase letters, numbers, and hyphens.',
+      });
+    }
+
+    const RESERVED_SLUGS = [
+      'admin', 'login', 'api', 'dashboard', 'fixtures', 'standings', 'teams', 'players',
+      'knockout', 'tokens', 'registration', 'registered', 'statistics', 'champion', 'settings',
+      'public', 'dist', 'src', 'data', 'supabase', 'node_modules'
+    ];
+    if (RESERVED_SLUGS.includes(cleanedSlug)) {
+      return res.status(400).json({
+        error: `"${cleanedSlug}" is a reserved system path and cannot be used as a registration link.`,
+      });
+    }
+
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    const formConfig = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    formConfig.customUrlSlug = cleanedSlug;
+    if (!formConfig.appearance) formConfig.appearance = {};
+    formConfig.appearance.customUrlSlug = cleanedSlug;
+    if (enabled !== undefined) {
+      formConfig.enabled = Boolean(enabled);
+    }
+    formConfig.lastUpdatedAt = Date.now();
+    forms[seasonSlug] = formConfig;
+    if (seasonSlug !== 'season-4') {
+      forms['season-4'] = { ...formConfig, seasonSlug: 'season-4' };
+    }
+    writeJSON(FORMS_FILE, forms);
+
+    // Sync to Supabase
+    if (serverSupabase) {
+      try {
+        await serverSupabase
+          .from('registration_form_config')
+          .update({
+            appearance_json: formConfig.appearance,
+            enabled: formConfig.enabled,
+            updated_at: new Date().toISOString(),
+          } as any)
+          .eq('season_slug', seasonSlug);
+      } catch (err: any) {
+        console.error('Error syncing custom URL slug to Supabase:', err?.message);
+      }
+    }
+
+    broadcastSse('registration_url_updated', {
+      customUrlSlug: cleanedSlug,
+      seasonSlug,
+      enabled: formConfig.enabled,
+    });
+
+    res.json({
+      success: true,
+      customUrlSlug: cleanedSlug,
+      isDefault: cleanedSlug === 'register',
+      enabled: formConfig.enabled,
+      message: `Registration link successfully set to /${cleanedSlug}`,
+    });
+  });
+
+  // 6.4 Reset Custom Registration URL Settings to Default (Admin Only)
+  app.post('/api/registration-url/reset', async (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
+    const seasonSlug = req.body?.seasonSlug || 'season-4';
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    const formConfig = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    formConfig.customUrlSlug = 'register';
+    if (!formConfig.appearance) formConfig.appearance = {};
+    formConfig.appearance.customUrlSlug = 'register';
+    formConfig.lastUpdatedAt = Date.now();
+    forms[seasonSlug] = formConfig;
+    writeJSON(FORMS_FILE, forms);
+
+    if (serverSupabase) {
+      try {
+        await serverSupabase
+          .from('registration_form_config')
+          .update({
+            appearance_json: formConfig.appearance,
+            updated_at: new Date().toISOString(),
+          } as any)
+          .eq('season_slug', seasonSlug);
+      } catch {}
+    }
+
+    broadcastSse('registration_url_updated', {
+      customUrlSlug: 'register',
+      seasonSlug,
+      enabled: formConfig.enabled,
+    });
+
+    res.json({
+      success: true,
+      customUrlSlug: 'register',
+      isDefault: true,
+      enabled: formConfig.enabled,
+      message: 'Registration link reset to default /register',
     });
   });
 

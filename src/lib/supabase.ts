@@ -2,8 +2,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { Database } from '../types/database.types';
 
 // Read client environment variables
-const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || '';
-const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || '';
+const envUrl = (import.meta as any).env?.VITE_SUPABASE_URL || 'https://zwvljfermlrzzaymlxwn.supabase.co';
+const envKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inp3dmxqZmVybWxyenpheW1seHduIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM4NjE0MjUsImV4cCI6MjEwOTQzNzQyNX0.jEPYALVHm5s3wocdwcTsGq9NqgbbcG884YWW8P77W_c';
 
 // Check if credentials are genuine (not placeholder)
 export const isSupabaseConfigured = (): boolean => {
