@@ -44,45 +44,76 @@ export const supabase: SupabaseClient<Database> = isSupabaseConfigured()
       }
     ) as unknown as SupabaseClient<Database>);
 
+export interface SupabaseTestResult {
+  configured: boolean;
+  connected: boolean;
+  message: string;
+  hint?: string;
+  tablesFound?: string[];
+}
+
 /**
  * Test connectivity to Supabase backend
  */
-export async function testSupabaseConnection(): Promise<{
-  connected: boolean;
-  message: string;
-  tablesFound?: string[];
-}> {
-  if (!isSupabaseConfigured()) {
-    return {
-      connected: false,
-      message: 'Supabase credentials (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) are not yet configured in environment variables.',
-    };
-  }
-
-  try {
-    const { data, error } = await supabase.from('registration_form_config').select('id, season_slug').limit(1);
-    if (error) {
-      // Table might not exist yet if schema was not run
-      if (error.code === '42P01') {
+export async function testSupabaseConnection(): Promise<SupabaseTestResult> {
+  if (isSupabaseConfigured()) {
+    try {
+      const { data, error } = await supabase.from('registration_form_config').select('id, season_slug').limit(1);
+      if (error) {
+        // Table might not exist yet if schema was not run
+        if (
+          error.code === '42P01' ||
+          error.message?.includes('not find the table') ||
+          error.message?.includes('schema cache')
+        ) {
+          return {
+            configured: true,
+            connected: true,
+            message: 'Connected to Supabase PostgreSQL, but tables need to be created.',
+            hint: 'Execute supabase/schema.sql in the Supabase SQL Editor to initialize all 11 relational tables.',
+          };
+        }
         return {
-          connected: true,
-          message: 'Connected to Supabase PostgreSQL, but tables need to be created. Please execute supabase/schema.sql in the Supabase SQL Editor.',
+          configured: true,
+          connected: false,
+          message: `Connected to Supabase endpoint, but query failed: ${error.message}`,
         };
       }
       return {
+        configured: true,
+        connected: true,
+        message: 'Successfully connected to centralized Supabase PostgreSQL database.',
+        tablesFound: ['registration_form_config'],
+      };
+    } catch (err: any) {
+      return {
+        configured: true,
         connected: false,
-        message: `Connected to Supabase, but query failed: ${error.message}`,
+        message: `Failed to connect to Supabase: ${err?.message || 'Network error'}`,
       };
     }
-    return {
-      connected: true,
-      message: 'Successfully connected to centralized Supabase PostgreSQL database.',
-      tablesFound: ['registration_form_config'],
-    };
-  } catch (err: any) {
-    return {
-      connected: false,
-      message: `Failed to connect to Supabase: ${err?.message || 'Network error'}`,
-    };
   }
+
+  // If client-side VITE_* vars are pending, check if server backend is configured with Supabase
+  try {
+    const res = await fetch('/api/database/status');
+    if (res.ok) {
+      const info = await res.json();
+      if (info.supabaseStatus?.configured) {
+        return {
+          configured: true,
+          connected: Boolean(info.supabaseStatus.connected),
+          message: info.supabaseStatus.message || info.message,
+          hint: info.supabaseStatus.hint,
+        };
+      }
+    }
+  } catch {}
+
+  return {
+    configured: false,
+    connected: false,
+    message: 'Supabase credentials (VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY) are not yet configured in environment variables.',
+    hint: 'Add your Supabase project URL and anon public key to your .env file and run supabase/schema.sql in the Supabase SQL Editor.',
+  };
 }

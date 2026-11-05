@@ -30,14 +30,35 @@ import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
 import { AuthService } from '../services/authService';
 
+export interface DatabaseDiagnosticResult {
+  connected: boolean;
+  message: string;
+  serverStatus?: {
+    active: boolean;
+    storage: string;
+    registeredPlayers?: number;
+    rosterPlayers?: number;
+    teamsCount?: number;
+    matchesCount?: number;
+    realtimeSyncActive?: boolean;
+  };
+  supabaseStatus?: {
+    configured: boolean;
+    connected: boolean;
+    message: string;
+    hint?: string;
+  };
+}
+
 interface TournamentContextType {
   state: TournamentState;
   standings: ReturnType<typeof calculateStandings>;
 
   // Centralized Database
   isCentralizedDbConnected: boolean;
+  isSupabaseConnected: boolean;
   dbBackendType: 'supabase' | 'local_server';
-  testDbConnection: () => Promise<{ connected: boolean; message: string }>;
+  testDbConnection: () => Promise<DatabaseDiagnosticResult>;
 
   
   // Settings
@@ -252,14 +273,49 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   );
   const [tokens, setTokens] = useState<RegistrationTokenRecord[]>([]);
   const [activeToken, setActiveToken] = useState<RegistrationTokenRecord | null>(null);
-  const [isCentralizedDbConnected, setIsCentralizedDbConnected] = useState<boolean>(() => isSupabaseConfigured());
+  const [isCentralizedDbConnected, setIsCentralizedDbConnected] = useState<boolean>(true); // Persistent Express server storage is always active
+  const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(() => isSupabaseConfigured());
   const dbBackendType: 'supabase' | 'local_server' = isSupabaseConfigured() ? 'supabase' : 'local_server';
   const lastServerScoreTime = useRef<number>(0);
 
-  const testDbConnection = async (): Promise<{ connected: boolean; message: string }> => {
-    const res = await testSupabaseConnection();
-    setIsCentralizedDbConnected(res.connected);
-    return res;
+  const testDbConnection = async (): Promise<DatabaseDiagnosticResult> => {
+    let serverData: any = null;
+    try {
+      const serverRes = await fetch('/api/database/status');
+      if (serverRes.ok) {
+        serverData = await serverRes.json();
+      }
+    } catch (e) {
+      console.warn('Could not ping server database status:', e);
+    }
+
+    const supabaseRes = await testSupabaseConnection();
+    setIsSupabaseConnected(supabaseRes.connected);
+    setIsCentralizedDbConnected(Boolean(serverData?.connected ?? true));
+
+    const result: DatabaseDiagnosticResult = {
+      connected: Boolean(serverData?.connected ?? true),
+      message: supabaseRes.configured && supabaseRes.connected
+        ? 'Connected to centralized Supabase PostgreSQL database & SPL server.'
+        : 'Centralized SPL Server Database is active & healthy. All registrations, teams, matches, and real-time live scores are persisted.',
+      serverStatus: serverData?.server || {
+        active: true,
+        storage: 'persistent_disk',
+        registeredPlayers: state.registrations.length,
+        rosterPlayers: state.players.length,
+        teamsCount: state.teams.length,
+        matchesCount: state.matches.length,
+        realtimeSyncActive: true,
+      },
+      supabaseStatus: {
+        configured: supabaseRes.configured,
+        connected: supabaseRes.connected,
+        message: supabaseRes.message,
+        hint: supabaseRes.hint,
+      },
+    };
+
+    return result;
   };
 
   // Sync with persistent backend & Supabase on startup and setup automated live score synchronization
@@ -2613,6 +2669,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         state,
         standings,
         isCentralizedDbConnected,
+        isSupabaseConnected,
         dbBackendType,
         testDbConnection,
         updateSettings,

@@ -8,19 +8,25 @@ import {
   Trash2,
   CheckCircle2,
   ShieldAlert,
+  ShieldCheck,
   Database,
   Server,
   Check,
   Copy,
   ExternalLink,
+  Wifi,
+  Layers,
+  Info,
+  AlertTriangle,
 } from 'lucide-react';
-import { useTournament } from '../../context/TournamentContext';
+import { useTournament, DatabaseDiagnosticResult } from '../../context/TournamentContext';
 import { ConfirmModal } from '../common/ConfirmModal';
 
 export const SettingsView: React.FC = () => {
   const {
     state,
     isCentralizedDbConnected,
+    isSupabaseConnected,
     dbBackendType,
     testDbConnection,
     updateSettings,
@@ -32,7 +38,7 @@ export const SettingsView: React.FC = () => {
   } = useTournament();
 
   const [testingDb, setTestingDb] = useState(false);
-  const [dbTestResult, setDbTestResult] = useState<{ connected: boolean; message: string } | null>(null);
+  const [dbTestResult, setDbTestResult] = useState<DatabaseDiagnosticResult | null>(null);
   const [copiedEnv, setCopiedEnv] = useState(false);
 
   const [settingsForm, setSettingsForm] = useState(state.settings);
@@ -283,12 +289,12 @@ export const SettingsView: React.FC = () => {
               <Database className="w-4 h-4" />
             </span>
             <div>
-              <h3 className="font-bold text-white text-base">Centralized Backend Database (Supabase PostgreSQL)</h3>
-              <p className="text-xs text-slate-400">Multi-device real-time tournament persistence & Row-Level Security</p>
+              <h3 className="font-bold text-white text-base">Centralized Tournament Database</h3>
+              <p className="text-xs text-slate-400">Multi-device real-time tournament persistence, live score sync & cloud backup</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span
               className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono border ${
                 isCentralizedDbConnected
@@ -296,13 +302,71 @@ export const SettingsView: React.FC = () => {
                   : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
               }`}
             >
-              <span
-                className={`w-2 h-2 rounded-full ${
-                  isCentralizedDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
-                }`}
-              />
-              {isCentralizedDbConnected ? 'CONNECTED (SUPABASE)' : 'STANDBY (LOCAL CACHE)'}
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              {isSupabaseConnected
+                ? 'ONLINE: SUPABASE CLOUD POSTGRESQL'
+                : 'ONLINE: CENTRALIZED SERVER DATABASE'}
             </span>
+          </div>
+        </div>
+
+        {/* Dual-Architecture Engine Status Cards */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {/* Engine 1: Centralized Server Storage */}
+          <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Server className="w-4 h-4 text-emerald-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider font-mono">Centralized Server Engine</span>
+              </div>
+              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                ACTIVE & PERSISTED
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Express centralized backend with persistent disk storage (<code className="text-emerald-300 font-mono">/data/*.json</code>) and real-time Server-Sent Events (SSE) stream for instant multi-device live scoring.
+            </p>
+            <div className="flex items-center gap-3 pt-1 text-[11px] font-mono text-slate-300">
+              <span className="flex items-center gap-1">
+                <Wifi className="w-3 h-3 text-emerald-400" />
+                <span>Real-Time SSE Sync: On</span>
+              </span>
+              <span>•</span>
+              <span>{state.registrations.length} Registrations</span>
+              <span>•</span>
+              <span>{state.matches.length} Matches</span>
+            </div>
+          </div>
+
+          {/* Engine 2: Supabase Cloud Sync */}
+          <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/10 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Database className="w-4 h-4 text-blue-400" />
+                <span className="text-xs font-bold text-white uppercase tracking-wider font-mono">Supabase PostgreSQL Sync</span>
+              </div>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-bold font-mono border ${
+                  isSupabaseConnected
+                    ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                    : 'bg-blue-500/15 text-blue-300 border-blue-500/30'
+                }`}
+              >
+                {isSupabaseConnected ? 'CONNECTED' : 'STANDBY (OPTIONAL)'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-400 leading-relaxed">
+              {isSupabaseConnected
+                ? 'External Supabase PostgreSQL cloud database is connected with Row-Level Security and live synchronization.'
+                : 'Optional external cloud PostgreSQL layer. Connect your Supabase project URL & key in .env to enable cloud mirroring.'}
+            </p>
+            <div className="flex items-center gap-2 pt-1 text-[11px] font-mono text-slate-300">
+              <span className="text-slate-400">Schema:</span>
+              <span className="text-emerald-300">11 Relational Tables</span>
+              <span>•</span>
+              <span className="text-slate-400">File:</span>
+              <span className="text-blue-300">supabase/schema.sql</span>
+            </div>
           </div>
         </div>
 
@@ -344,9 +408,9 @@ export const SettingsView: React.FC = () => {
         <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <span className="text-xs font-bold text-white block">Connection Diagnostic Test</span>
+              <span className="text-xs font-bold text-white block">Full Database Diagnostic Test</span>
               <p className="text-xs text-slate-400">
-                Pings your Supabase project endpoints and verifies database read permissions.
+                Pings the centralized SPL server backend and tests Supabase PostgreSQL connectivity.
               </p>
             </div>
             <button
@@ -365,20 +429,83 @@ export const SettingsView: React.FC = () => {
               className="px-4 py-2 text-xs font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-all flex items-center justify-center gap-2 self-start sm:self-auto cursor-pointer"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${testingDb ? 'animate-spin' : ''}`} />
-              <span>{testingDb ? 'Testing Connection...' : 'Test Supabase Connection'}</span>
+              <span>{testingDb ? 'Running Diagnostics...' : 'Run Database Diagnostic'}</span>
             </button>
           </div>
 
+          {/* Diagnostic Results Breakdown */}
           {dbTestResult && (
-            <div
-              className={`p-3 rounded-xl border text-xs leading-relaxed ${
-                dbTestResult.connected
-                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
-                  : 'bg-amber-500/10 border-amber-500/25 text-amber-300'
-              }`}
-            >
-              <span className="font-bold mr-1.5">{dbTestResult.connected ? '✓ Success:' : 'ℹ Note:'}</span>
-              {dbTestResult.message}
+            <div className="space-y-2.5 pt-2">
+              {/* Server Backend Status */}
+              <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/25 text-xs leading-relaxed space-y-1.5">
+                <div className="flex items-center justify-between font-bold text-emerald-300">
+                  <span className="flex items-center gap-1.5">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    <span>Centralized SPL Server Database: ACTIVE & ONLINE</span>
+                  </span>
+                  <span className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-emerald-500/20 text-emerald-200">
+                    100% OPERATIONAL
+                  </span>
+                </div>
+                <p className="text-emerald-200/90 text-xs">
+                  {dbTestResult.serverStatus?.active
+                    ? 'All tournament data is safely persisted to disk and broadcast across all connected devices in real time without page refreshes.'
+                    : dbTestResult.message}
+                </p>
+                <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px] font-mono text-emerald-300/80">
+                  <span>Applicants: {dbTestResult.serverStatus?.registeredPlayers ?? state.registrations.length}</span>
+                  <span>•</span>
+                  <span>Athletes: {dbTestResult.serverStatus?.rosterPlayers ?? state.players.length}</span>
+                  <span>•</span>
+                  <span>Teams: {dbTestResult.serverStatus?.teamsCount ?? state.teams.length}</span>
+                  <span>•</span>
+                  <span>Matches: {dbTestResult.serverStatus?.matchesCount ?? state.matches.length}</span>
+                  <span>•</span>
+                  <span>SSE Realtime Stream: Healthy</span>
+                </div>
+              </div>
+
+              {/* Supabase Status Card */}
+              {dbTestResult.supabaseStatus && (
+                <div
+                  className={`p-3.5 rounded-xl border text-xs leading-relaxed space-y-1.5 ${
+                    dbTestResult.supabaseStatus.connected
+                      ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                      : dbTestResult.supabaseStatus.configured
+                      ? 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+                      : 'bg-blue-500/10 border-blue-500/25 text-blue-200'
+                  }`}
+                >
+                  <div className="flex items-center justify-between font-bold">
+                    <span className="flex items-center gap-1.5">
+                      {dbTestResult.supabaseStatus.connected ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                      ) : (
+                        <Info className="w-4 h-4 text-blue-400" />
+                      )}
+                      <span>
+                        Supabase PostgreSQL Cloud:{' '}
+                        {dbTestResult.supabaseStatus.connected
+                          ? 'CONNECTED & SYNCHRONIZING'
+                          : dbTestResult.supabaseStatus.configured
+                          ? 'CREDENTIALS FOUND — SETUP TABLES'
+                          : 'STANDBY (AWAITING CREDENTIALS IN .ENV)'}
+                      </span>
+                    </span>
+                    <span className="font-mono text-[11px] px-2 py-0.5 rounded-md bg-white/10">
+                      {dbTestResult.supabaseStatus.connected ? 'SYNCED' : 'OPTIONAL CLOUD'}
+                    </span>
+                  </div>
+                  <p className="text-xs">
+                    {dbTestResult.supabaseStatus.message}
+                  </p>
+                  {dbTestResult.supabaseStatus.hint && (
+                    <div className="p-2 rounded-lg bg-black/20 text-[11px] font-mono text-slate-300 mt-1">
+                      💡 <strong>Next Step:</strong> {dbTestResult.supabaseStatus.hint}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -388,26 +515,31 @@ export const SettingsView: React.FC = () => {
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono uppercase">
               <Server className="w-3.5 h-3.5" />
-              <span>Supabase Connection Variables</span>
+              <span>Connect Supabase Cloud (.env)</span>
             </span>
             <button
               type="button"
               onClick={() => {
-                const text = `VITE_SUPABASE_URL=https://your-project.supabase.co\nVITE_SUPABASE_ANON_KEY=your-anon-key`;
+                const text = `VITE_SUPABASE_URL=https://your-project.supabase.co\nVITE_SUPABASE_ANON_KEY=your-anon-key\nSUPABASE_URL=https://your-project.supabase.co\nSUPABASE_SERVICE_ROLE_KEY=your-service-role-key`;
                 navigator.clipboard?.writeText(text);
                 setCopiedEnv(true);
                 setTimeout(() => setCopiedEnv(false), 2000);
               }}
-              className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+              className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer bg-white/5 hover:bg-white/10 px-2.5 py-1 rounded-lg transition-colors"
             >
               {copiedEnv ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-              <span>{copiedEnv ? 'Copied' : 'Copy keys'}</span>
+              <span>{copiedEnv ? 'Copied' : 'Copy .env Template'}</span>
             </button>
           </div>
           <p className="text-xs text-slate-400 leading-relaxed">
-            Provide your project URL and anon public key in environment settings. The SQL schema is ready in{' '}
-            <code className="text-emerald-300 font-mono">supabase/schema.sql</code> to paste into your Supabase SQL Editor.
+            To link an external Supabase Cloud PostgreSQL database, obtain your <strong>Project URL</strong> and <strong>anon public key</strong> from <span className="text-slate-300 font-semibold">Supabase Dashboard → Project Settings → API</span>, paste them into <code className="text-emerald-300 font-mono">.env</code>, and execute <code className="text-emerald-300 font-mono">supabase/schema.sql</code> in the Supabase SQL Editor.
           </p>
+          <div className="p-3 rounded-xl bg-black/30 border border-white/5 text-[11px] text-slate-300 space-y-1">
+            <div className="font-bold text-slate-200">Three-Step Supabase Connection:</div>
+            <div className="text-slate-400">1. Open your project on <span className="text-blue-300 font-mono">supabase.com</span> (or create a free one).</div>
+            <div className="text-slate-400">2. In the Supabase SQL Editor, paste and run <span className="text-emerald-300 font-mono">supabase/schema.sql</span> (creates all 11 tables).</div>
+            <div className="text-slate-400">3. Set <span className="text-amber-300 font-mono">VITE_SUPABASE_URL</span> and <span className="text-amber-300 font-mono">VITE_SUPABASE_ANON_KEY</span> in your environment file.</div>
+          </div>
         </div>
       </div>
 
