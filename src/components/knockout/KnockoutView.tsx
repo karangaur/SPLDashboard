@@ -12,10 +12,13 @@ import {
   CheckCircle2,
   ArrowUp,
   ArrowDown,
+  Maximize2,
+  SlidersHorizontal,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import { KnockoutMatch } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { LiveMatchScoringModal } from '../admin/LiveMatchScoringModal';
 
 export const KnockoutView: React.FC = () => {
   const {
@@ -31,6 +34,7 @@ export const KnockoutView: React.FC = () => {
   const [editMode, setEditMode] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [liveScoringMatchId, setLiveScoringMatchId] = useState<string | null>(null);
 
   const requiredTeams =
     state.knockout.format === 'top2' ? 2 : state.knockout.format === 'top4' ? 4 : 8;
@@ -325,6 +329,7 @@ export const KnockoutView: React.FC = () => {
                     match={m}
                     matchLabel={`Eliminator ${idx + 1}`}
                     onScoreSubmit={handleScoreChange}
+                    onOpenUmpire={(id) => setLiveScoringMatchId(id)}
                     editMode={editMode}
                   />
                 ))}
@@ -349,6 +354,7 @@ export const KnockoutView: React.FC = () => {
                     match={m}
                     matchLabel={`Semi Final ${idx + 1}`}
                     onScoreSubmit={handleScoreChange}
+                    onOpenUmpire={(id) => setLiveScoringMatchId(id)}
                     editMode={editMode}
                   />
                 ))}
@@ -371,6 +377,7 @@ export const KnockoutView: React.FC = () => {
                 matchLabel="Championship Final"
                 isFinal
                 onScoreSubmit={handleScoreChange}
+                onOpenUmpire={(id) => setLiveScoringMatchId(id)}
                 editMode={editMode}
               />
             </div>
@@ -413,6 +420,13 @@ export const KnockoutView: React.FC = () => {
         }}
         onCancel={() => setShowClearConfirm(false)}
       />
+      {/* Live Badminton Scoring Modal for Playoff matches */}
+      <LiveMatchScoringModal
+        isOpen={Boolean(liveScoringMatchId)}
+        onClose={() => setLiveScoringMatchId(null)}
+        initialMatchId={liveScoringMatchId || undefined}
+        isKnockout={true}
+      />
     </div>
   );
 };
@@ -423,6 +437,7 @@ interface KnockoutMatchCardProps {
   isFinal?: boolean;
   editMode?: boolean;
   onScoreSubmit: (matchId: string, sA: string, sB: string) => void;
+  onOpenUmpire?: (matchId: string) => void;
 }
 
 const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
@@ -430,6 +445,7 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
   matchLabel,
   isFinal,
   onScoreSubmit,
+  onOpenUmpire,
 }) => {
   const { state } = useTournament();
   const [scoreA, setScoreA] = useState(match.scoreA?.toString() ?? '');
@@ -458,11 +474,23 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
     >
       <div className="flex items-center justify-between text-xs pb-2 border-b border-white/10">
         <span className="font-bold text-slate-400 uppercase tracking-wider">{matchLabel}</span>
-        {match.status === 'completed' && (
-          <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
-            <CheckCircle2 className="w-3 h-3" /> Completed
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {teamA && teamB && onOpenUmpire && (
+            <button
+              onClick={() => onOpenUmpire(match.id)}
+              className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
+              title="Open Live Badminton Scoreboard and Umpire Console"
+            >
+              <Maximize2 className="w-3 h-3" />
+              <span>Umpire</span>
+            </button>
+          )}
+          {match.status === 'completed' && (
+            <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">
+              <CheckCircle2 className="w-3 h-3" /> Completed
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Team A */}

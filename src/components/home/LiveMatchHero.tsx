@@ -55,8 +55,11 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
 
   const scoreA = activeMatch?.scoreA ?? 0;
   const scoreB = activeMatch?.scoreB ?? 0;
+  const sets = activeMatch?.sets || [];
   const isLive = activeMatch?.status === 'live';
+  const isPaused = activeMatch?.status === 'paused';
   const isCompleted = activeMatch?.status === 'completed';
+  const isUpcoming = activeMatch?.status === 'upcoming';
 
   // Lead status calculation
   let leadText = 'Scores Level (0 - 0)';
@@ -103,14 +106,19 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
                 </span>
                 <span>🔴 LIVE COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
               </div>
+            ) : isPaused ? (
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>PAUSED / TIMEOUT · COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
+              </div>
             ) : isCompleted ? (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black uppercase tracking-wider">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
                 <span>FINAL RESULT · COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
               </div>
             ) : (
-              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider">
-                <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-500/20 border border-slate-500/40 text-slate-300 text-xs font-black uppercase tracking-wider">
+                <Clock className="w-3.5 h-3.5 text-slate-400" />
                 <span>NEXT ON COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
               </div>
             )}
@@ -204,11 +212,28 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
               </div>
               <div className="space-y-0.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-300 block">
-                  {isDeuce ? '⚡ DEUCE (20-ALL)' : isLive ? 'SET 01' : isCompleted ? 'FINAL' : 'UPCOMING'}
+                  {isDeuce
+                    ? '⚡ DEUCE (20-ALL)'
+                    : isLive
+                    ? `SET 0${sets.length + 1}`
+                    : isPaused
+                    ? 'PAUSED'
+                    : isCompleted
+                    ? 'FINAL RESULT'
+                    : 'UPCOMING'}
                 </span>
                 <span className="text-[10px] text-lime-400 font-medium block">
                   {leadText}
                 </span>
+                {sets.length > 0 && (
+                  <div className="pt-1 flex items-center justify-center gap-1.5 flex-wrap">
+                    {sets.map((s, idx) => (
+                      <span key={idx} className="px-1.5 py-0.5 rounded bg-white/10 text-[9px] font-mono text-slate-300">
+                        S{idx + 1}: {s.scoreA}-{s.scoreB}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {/* Badminton Shuttlecock Icon in motion */}

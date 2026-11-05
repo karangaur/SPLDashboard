@@ -1,3 +1,11 @@
+export interface BadmintonScoringRules {
+  pointTarget: number; // 21 (BWF standard), 15, 30, or custom
+  setsToWin: number; // 1 (single game) or 2 (best of 3)
+  deuceEnabled: boolean; // must win by 2 points
+  maxPointCap: number; // golden point / cap (e.g. 30 in BWF)
+  changeEndsAtInterval: boolean; // interval at 11 pts (or half point target)
+}
+
 export interface TournamentSettings {
   name: string;
   date: string;
@@ -9,6 +17,7 @@ export interface TournamentSettings {
   slotLimit: number;
   season?: string;
   announcement?: string;
+  scoringRules?: BadmintonScoringRules;
 }
 
 export interface Player {
@@ -18,6 +27,12 @@ export interface Player {
   age?: number;
   gender?: 'M' | 'F' | 'Other';
   skillLevel?: 'Intermediate' | 'Advanced' | 'Pro';
+  registrationId?: string;
+  registrationStatus?: 'pending' | 'approved' | 'rejected' | 'paid' | 'direct';
+  city?: string;
+  category?: string;
+  style?: string;
+  photoUrl?: string;
 }
 
 export interface Team {
@@ -33,6 +48,8 @@ export interface Team {
 export interface MatchSet {
   scoreA: number;
   scoreB: number;
+  winner?: 'A' | 'B';
+  isCompleted?: boolean;
 }
 
 export interface Match {
@@ -43,11 +60,12 @@ export interface Match {
   teamB: string; // Team ID
   scoreA?: number;
   scoreB?: number;
-  status: 'upcoming' | 'live' | 'completed' | 'postponed';
+  status: 'upcoming' | 'live' | 'paused' | 'completed' | 'postponed';
   winner?: string; // Team ID
   time?: string;
   sets?: MatchSet[];
   mvpPlayerId?: string;
+  version?: number;
 }
 
 export interface KnockoutMatch {
@@ -58,9 +76,11 @@ export interface KnockoutMatch {
   teamB?: string;
   scoreA?: number;
   scoreB?: number;
-  status: 'upcoming' | 'live' | 'completed';
+  status: 'upcoming' | 'live' | 'paused' | 'completed';
   winner?: string;
   manual?: boolean;
+  sets?: MatchSet[];
+  version?: number;
 }
 
 export interface KnockoutData {
@@ -147,12 +167,14 @@ export interface RegistrationFormConfig {
   enabled: boolean;
   closedNotice?: string;
   isPublished: boolean;
+  version?: number;
   publishedAt?: number;
   lastUpdatedAt?: number;
   payment?: FormPaymentConfig;
   appearance: FormAppearance;
   fields: RegistrationFormField[];
 }
+
 
 export interface RegistrationTokenRecord {
   id: string;
@@ -237,7 +259,9 @@ export interface Registration {
   answers?: Record<string, any>;
   photoUrl?: string;
   tokenUsed?: string;
+  formVersion?: number;
 }
+
 
 export interface PaymentSettings {
   enabled: boolean;

@@ -1,0 +1,194 @@
+{
+  "settings": {
+    "name": "Smash Premier League",
+    "date": "2026-10-25",
+    "venue": "Maharajganj Indoor Badminton Stadium, Court 1 & 2",
+    "organizer": "SPL Tournament Committee",
+    "courts": 2,
+    "format": "21",
+    "entryFee": 500,
+    "slotLimit": 32,
+    "season": "Season IV (Championship Edition)",
+    "announcement": "Grand Championship on Court 1! Live scoring active.",
+    "scoringRules": {
+      "pointTarget": 21,
+      "setsToWin": 1,
+      "deuceEnabled": true,
+      "maxPointCap": 30,
+      "changeEndsAtInterval": true
+    }
+  },
+  "players": [
+    {
+      "id": "p-abhishek",
+      "name": "Abhishek",
+      "mobile": "9811001100",
+      "gender": "M",
+      "experience": "Advanced",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-smash-strikers"
+    },
+    {
+      "id": "p-suraj",
+      "name": "Suraj",
+      "mobile": "9811001101",
+      "gender": "M",
+      "experience": "Advanced",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-smash-strikers"
+    },
+    {
+      "id": "p-alok",
+      "name": "Alok",
+      "mobile": "9822002200",
+      "gender": "M",
+      "experience": "Advanced",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-maharajganj-masters"
+    },
+    {
+      "id": "p-sandeep",
+      "name": "Sandeep",
+      "mobile": "9822002201",
+      "gender": "M",
+      "experience": "Advanced",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-maharajganj-masters"
+    },
+    {
+      "id": "p-karan",
+      "name": "Karan Gaur",
+      "mobile": "9876543210",
+      "gender": "M",
+      "experience": "Advanced",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-shuttle-warriors"
+    },
+    {
+      "id": "p-vikram",
+      "name": "Vikram Verma",
+      "mobile": "9822334455",
+      "gender": "M",
+      "experience": "Intermediate",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-shuttle-warriors"
+    },
+    {
+      "id": "p-rahul",
+      "name": "Rahul Sharma",
+      "mobile": "9833003300",
+      "gender": "M",
+      "experience": "Intermediate",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-royal-shuttlers"
+    },
+    {
+      "id": "p-amit",
+      "name": "Amit Kumar",
+      "mobile": "9833003301",
+      "gender": "M",
+      "experience": "Advanced",
+      "category": "Doubles",
+      "fee": 500,
+      "status": "approved",
+      "teamId": "team-royal-shuttlers"
+    }
+  ],
+  "teams": [
+    {
+      "id": "team-smash-strikers",
+      "name": "Smash Strikers",
+      "badge": "⚡",
+      "captainId": "p-abhishek",
+      "players": [
+        "p-abhishek",
+        "p-suraj"
+      ]
+    },
+    {
+      "id": "team-maharajganj-masters",
+      "name": "Maharajganj Masters",
+      "badge": "🏸",
+      "captainId": "p-alok",
+      "players": [
+        "p-alok",
+        "p-sandeep"
+      ]
+    },
+    {
+      "id": "team-shuttle-warriors",
+      "name": "Shuttle Warriors",
+      "badge": "⚔️",
+      "captainId": "p-karan",
+      "players": [
+        "p-karan",
+        "p-vikram"
+      ]
+    },
+    {
+      "id": "team-royal-shuttlers",
+      "name": "Royal Shuttlers",
+      "badge": "👑",
+      "captainId": "p-rahul",
+      "players": [
+        "p-rahul",
+        "p-amit"
+      ]
+    }
+  ],
+  "matches": [
+    {
+      "id": "match-live-01",
+      "round": 1,
+      "court": 1,
+      "teamA": "team-smash-strikers",
+      "teamB": "team-maharajganj-masters",
+      "scoreA": 12,
+      "scoreB": 8,
+      "status": "live",
+      "time": "Court 1 · In Progress",
+      "version": 2,
+      "sets": [
+        {
+          "scoreA": 11,
+          "scoreB": 8
+        }
+      ],
+      "lastUpdated": 1793854627991
+    },
+    {
+      "id": "match-upcoming-02",
+      "round": 1,
+      "court": 2,
+      "teamA": "team-shuttle-warriors",
+      "teamB": "team-royal-shuttlers",
+      "scoreA": 0,
+      "scoreB": 0,
+      "status": "upcoming",
+      "time": "Court 2 · Scheduled",
+      "version": 0,
+      "sets": []
+    }
+  ],
+  "knockout": {
+    "format": "top4",
+    "matches": []
+  },
+  "predefinedTeams": [],
+  "teamFormationMode": "random",
+  "lastUpdated": 1793854627991
+}

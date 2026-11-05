@@ -957,8 +957,26 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
               <div className="py-1 border-t border-b border-white/10 text-center">
                 <span className="text-xs font-bold text-slate-400 uppercase">
-                  {detailMatch.status === 'live' ? '🔴 Live in Progress' : detailMatch.status === 'completed' ? 'Final Match Result' : 'Scheduled Match'}
+                  {detailMatch.status === 'live'
+                    ? '🔴 Live in Progress'
+                    : detailMatch.status === 'paused'
+                    ? '⏸ Match Paused / Tactical Timeout'
+                    : detailMatch.status === 'completed'
+                    ? '🏆 Final Match Result'
+                    : 'Scheduled Match'}
                 </span>
+                {detailMatch.sets && detailMatch.sets.length > 0 && (
+                  <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                    {detailMatch.sets.map((s, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-slate-300"
+                      >
+                        Set {idx + 1}: {s.scoreA}-{s.scoreB}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-between">

@@ -3,9 +3,20 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
+import { createClient } from '@supabase/supabase-js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.VITE_SUPABASE_ANON_KEY;
+const isSupabaseServerActive = Boolean(
+  supabaseUrl &&
+  supabaseKey &&
+  !supabaseUrl.includes('your-project') &&
+  supabaseUrl.startsWith('https://')
+);
+const serverSupabase = isSupabaseServerActive ? createClient(supabaseUrl!, supabaseKey!) : null;
 
 const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION);
 const ORIGINAL_DATA_DIR = path.join(__dirname, 'data');
@@ -293,6 +304,43 @@ async function startServer() {
     next();
   });
 
+  // Centralized Database Health & Status Endpoint
+  app.get('/api/database/status', async (_req, res) => {
+    if (!serverSupabase) {
+      return res.json({
+        configured: false,
+        backend: 'local_server',
+        message: 'Supabase credentials pending in environment variables (VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY). Running resilient local storage mode.',
+      });
+    }
+    try {
+      const { data, error } = await serverSupabase.from('registration_form_config').select('id').limit(1);
+      if (error) {
+        return res.json({
+          configured: true,
+          connected: false,
+          backend: 'supabase',
+          error: error.message,
+          hint: 'Execute supabase/schema.sql in Supabase SQL editor to create the database tables.',
+        });
+      }
+      return res.json({
+        configured: true,
+        connected: true,
+        backend: 'supabase',
+        url: supabaseUrl,
+        message: 'Successfully connected to centralized Supabase PostgreSQL database.',
+      });
+    } catch (err: any) {
+      return res.json({
+        configured: true,
+        connected: false,
+        backend: 'supabase',
+        error: err?.message || 'Connection failed',
+      });
+    }
+  });
+
   // 0. Administrator Authentication Endpoints
   const DEFAULT_ADMIN_CONFIG = {
     accounts: [
@@ -471,16 +519,21 @@ async function startServer() {
     }
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
     const existing = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    const isPublishing = req.body.isPublished !== undefined ? req.body.isPublished : true;
+    const currentVersion = existing.version || 1;
+    const nextVersion = isPublishing ? currentVersion + 1 : currentVersion;
+
     const updated = {
       ...existing,
       ...req.body,
       seasonSlug,
-      isPublished: req.body.isPublished !== undefined ? req.body.isPublished : true,
+      version: nextVersion,
+      isPublished: isPublishing,
       lastUpdatedAt: Date.now(),
-      publishedAt: req.body.isPublished ? Date.now() : (existing.publishedAt || Date.now()),
+      publishedAt: isPublishing ? Date.now() : (existing.publishedAt || Date.now()),
     };
     if (updated.appearance) {
-      updated.appearance.submitButtonText = updated.appearance.submitButtonText || 'Submit Registration & Confirm Entry';
+      updated.appearance.submitButtonText = 'Submit Registration';
     }
     forms[seasonSlug] = updated;
     // Always mirror to season-4 if season-4 doesn't exist
@@ -488,8 +541,51 @@ async function startServer() {
       forms['season-4'] = updated;
     }
     writeJSON(FORMS_FILE, forms);
+
+    // Sync to Supabase PostgreSQL if active
+    if (serverSupabase) {
+      const nowIso = new Date().toISOString();
+      serverSupabase
+        .from('registration_form_config')
+        .upsert({
+          id: seasonSlug,
+          season_slug: seasonSlug,
+          tournament_name: updated.tournamentName,
+          season_title: updated.seasonTitle,
+          deadline: updated.deadline ? new Date(updated.deadline).toISOString() : null,
+          max_slots: updated.maxSlots ?? 32,
+          entry_fee: updated.entryFee ?? 500,
+          venue: updated.venue || null,
+          date: updated.date || null,
+          enabled: updated.enabled ?? true,
+          closed_notice: updated.closedNotice || null,
+          is_published: updated.isPublished,
+          payment_config_json: updated.payment || {},
+          appearance_json: updated.appearance || {},
+          fields_json: updated.fields || [],
+          version: nextVersion,
+          published_at: isPublishing ? nowIso : undefined,
+          updated_at: nowIso,
+        })
+        .then(() => {});
+
+      serverSupabase
+        .from('registration_form_versions')
+        .insert({
+          form_config_id: seasonSlug,
+          season_slug: seasonSlug,
+          version_num: nextVersion,
+          snapshot_json: updated,
+          created_by: 'admin',
+          created_at: nowIso,
+        })
+        .then(() => {});
+    }
+
+    broadcastSse('form_published', { config: updated });
     res.json(updated);
   });
+
 
   // 3.5. Persistent Tournament State & Automatic Live Score Synchronization
   const DEFAULT_TOURNAMENT_PAYLOAD = {
@@ -517,6 +613,46 @@ async function startServer() {
     lastUpdated: Date.now(),
   };
 
+  // Real-Time Server-Sent Events (SSE) Client Pool
+  const sseClients = new Set<express.Response>();
+  function broadcastSse(eventType: string, payload: any) {
+    const data = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
+    for (const client of sseClients) {
+      try {
+        client.write(data);
+      } catch {
+        sseClients.delete(client);
+      }
+    }
+  }
+
+  // Real-Time SSE Stream Endpoint for instantaneous zero-refresh updates
+  app.get('/api/tournament/stream', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+    res.write(`event: connected\ndata: {"status":"connected","time":${Date.now()}}\n\n`);
+
+    sseClients.add(res);
+
+    // Keep-alive heartbeat every 20s
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(`:heartbeat\n\n`);
+      } catch {
+        clearInterval(heartbeat);
+        sseClients.delete(res);
+      }
+    }, 20000);
+
+    req.on('close', () => {
+      clearInterval(heartbeat);
+      sseClients.delete(res);
+    });
+  });
+
   app.get('/api/tournament/state', (_req, res) => {
     const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
     res.json(data);
@@ -531,10 +667,10 @@ async function startServer() {
       lastUpdated: now,
     };
     writeJSON(TOURNAMENT_FILE, updated);
+    broadcastSse('tournament_state', updated);
     res.json({ success: true, lastUpdated: now, state: updated });
   });
 
-  // Lightweight rapid score endpoint for live polling without heavy payloads
   // Lightweight rapid score endpoint for live polling without heavy payloads
   app.get('/api/tournament/scores', (_req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
@@ -547,22 +683,41 @@ async function startServer() {
     });
   });
 
-  // Real-time match score update endpoint
+  // Real-time match score update endpoint with atomic concurrency and Supabase synchronization
   app.patch('/api/tournament/matches/:id', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const matchId = req.params.id;
     const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
     let matched = false;
+    let isKnockout = false;
     const now = Date.now();
 
+    const sanitizeScore = (val: any) => (val !== undefined && val !== null ? Math.max(0, Number(val)) : undefined);
+
+    let matchObj: any = null;
+
+    // 1. Check regular matches
     const updatedMatches = (current.matches || []).map((m: any) => {
       if (m.id === matchId) {
         matched = true;
-        const updated = { ...m, ...req.body };
+        const newScoreA = sanitizeScore(req.body.scoreA !== undefined ? req.body.scoreA : m.scoreA);
+        const newScoreB = sanitizeScore(req.body.scoreB !== undefined ? req.body.scoreB : m.scoreB);
+        const currentVersion = (m.version || 0) + 1;
+
+        const updated = {
+          ...m,
+          ...req.body,
+          scoreA: newScoreA,
+          scoreB: newScoreB,
+          version: currentVersion,
+          lastUpdated: now,
+        };
+
         if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
           if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
           else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
         }
+        matchObj = updated;
         return updated;
       }
       return m;
@@ -572,19 +727,69 @@ async function startServer() {
       current.matches = updatedMatches;
       current.lastUpdated = now;
       writeJSON(TOURNAMENT_FILE, current);
-      return res.json({ success: true, lastUpdated: now, match: updatedMatches.find((m: any) => m.id === matchId) });
+
+      // Sync to Supabase PostgreSQL if active
+      if (serverSupabase && matchObj) {
+        serverSupabase
+          .from('matches')
+          .upsert({
+            id: matchId,
+            tournament_season: 'season-4',
+            score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
+            score_b: matchObj.scoreB != null ? matchObj.scoreB : null,
+            status: matchObj.status,
+            winner_id: matchObj.winner || null,
+            sets_json: matchObj.sets || [],
+            updated_at: new Date(now).toISOString(),
+          } as any)
+          .then(() => {});
+
+        // Record point history log
+        if (matchObj.scoreA != null || matchObj.scoreB != null) {
+          serverSupabase
+            .from('match_scores')
+            .insert({
+              match_id: matchId,
+              set_number: Array.isArray(matchObj.sets) ? matchObj.sets.length : 1,
+              score_a: matchObj.scoreA || 0,
+              score_b: matchObj.scoreB || 0,
+              is_completed: matchObj.status === 'completed',
+              winner_team_id: matchObj.winner || null,
+              recorded_by: req.body.recordedBy || 'Official Umpire',
+              recorded_at: new Date(now).toISOString(),
+            } as any)
+            .then(() => {});
+        }
+      }
+
+      broadcastSse('match_score', { matchId, match: matchObj, lastUpdated: now });
+      return res.json({ success: true, lastUpdated: now, match: matchObj });
     }
 
-    // Check knockout matches
+    // 2. Check knockout matches
     if (current.knockout && Array.isArray(current.knockout.matches)) {
       const updatedKnockout = current.knockout.matches.map((k: any) => {
         if (k.id === matchId) {
           matched = true;
-          const updated = { ...k, ...req.body };
+          isKnockout = true;
+          const newScoreA = sanitizeScore(req.body.scoreA !== undefined ? req.body.scoreA : k.scoreA);
+          const newScoreB = sanitizeScore(req.body.scoreB !== undefined ? req.body.scoreB : k.scoreB);
+          const currentVersion = (k.version || 0) + 1;
+
+          const updated = {
+            ...k,
+            ...req.body,
+            scoreA: newScoreA,
+            scoreB: newScoreB,
+            version: currentVersion,
+            lastUpdated: now,
+          };
+
           if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
             if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
             else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
           }
+          matchObj = updated;
           return updated;
         }
         return k;
@@ -594,23 +799,50 @@ async function startServer() {
         current.knockout.matches = updatedKnockout;
         current.lastUpdated = now;
         writeJSON(TOURNAMENT_FILE, current);
-        return res.json({ success: true, lastUpdated: now, match: updatedKnockout.find((k: any) => k.id === matchId) });
+
+        if (serverSupabase && matchObj) {
+          serverSupabase
+            .from('matches')
+            .upsert({
+              id: matchId,
+              tournament_season: 'season-4',
+              match_type: 'knockout',
+              stage: matchObj.stage || 'SF',
+              slot: matchObj.slot || 1,
+              score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
+              score_b: matchObj.scoreB != null ? matchObj.scoreB : null,
+              status: matchObj.status,
+              winner_id: matchObj.winner || null,
+              sets_json: matchObj.sets || [],
+              updated_at: new Date(now).toISOString(),
+            } as any)
+            .then(() => {});
+        }
+
+        broadcastSse('knockout_score', { matchId, match: matchObj, lastUpdated: now });
+        return res.json({ success: true, lastUpdated: now, match: matchObj });
       }
     }
 
-    // Upsert match if created on client or sent with fullMatch details
+    // 3. Upsert match if created on client or sent with fullMatch details
     const newMatch = req.body.fullMatch || {
       id: matchId,
       ...req.body,
     };
+    newMatch.scoreA = sanitizeScore(newMatch.scoreA);
+    newMatch.scoreB = sanitizeScore(newMatch.scoreB);
+    newMatch.version = 1;
+
     if (newMatch.scoreA != null && newMatch.scoreB != null && newMatch.status === 'completed') {
       if (newMatch.scoreA > newMatch.scoreB) newMatch.winner = newMatch.teamA;
       else if (newMatch.scoreB > newMatch.scoreA) newMatch.winner = newMatch.teamB;
     }
+
     current.matches = current.matches || [];
     current.matches.push(newMatch);
     current.lastUpdated = now;
     writeJSON(TOURNAMENT_FILE, current);
+    broadcastSse('match_score', { matchId, match: newMatch, lastUpdated: now });
     res.json({ success: true, lastUpdated: now, match: newMatch });
   });
 
@@ -641,6 +873,7 @@ async function startServer() {
 
     current.lastUpdated = Date.now();
     writeJSON(TOURNAMENT_FILE, current);
+    broadcastSse('teams_update', { teams: current.teams, lastUpdated: current.lastUpdated });
     res.json({ success: true, teams: current.teams, lastUpdated: current.lastUpdated });
   });
 
@@ -927,10 +1160,45 @@ async function startServer() {
       answers,
       photoUrl: photoUrl || answers.photo || undefined,
       tokenUsed: tokenUsed || undefined,
+      formVersion: formConfig.version || 1,
     };
 
     list.push(newReg);
     writeJSON(REGISTRATIONS_FILE, list);
+
+    // Save registration to Supabase PostgreSQL if active
+    if (serverSupabase) {
+      serverSupabase
+        .from('registrations')
+        .insert({
+          id: newReg.id,
+          reg_id: newReg.regId,
+          season_slug: newReg.season,
+          name: newReg.name,
+          mobile: newReg.mobile,
+          whatsapp: newReg.whatsapp || null,
+          age: newReg.age || null,
+          gender: newReg.gender,
+          experience: newReg.experience || null,
+          category: newReg.category || null,
+          style: newReg.style || null,
+          city: newReg.city || null,
+          notes: newReg.notes || null,
+          fee: newReg.fee,
+          status: newReg.status,
+          payment_status: newReg.paymentStatus,
+          method: newReg.method,
+          txn_id: newReg.txnId || null,
+          answers_json: newReg.answers,
+          photo_url: newReg.photoUrl || null,
+          token_used: newReg.tokenUsed || null,
+          form_version: newReg.formVersion,
+          audit_log_json: newReg.auditLog,
+          created_at: new Date(newReg.createdAt).toISOString(),
+        } as any)
+        .then(() => {});
+    }
+
 
     // Update token submissions count if applicable
     if (tokenUsed) {
@@ -941,6 +1209,8 @@ async function startServer() {
         writeJSON(TOKENS_FILE, tokens);
       }
     }
+
+    broadcastSse('registration_created', { registration: newReg });
 
     const successMessage = formConfig.appearance?.successMessage ||
       'Registration submitted successfully! Thank you for registering for Smash Premier League. Your details have been received by the tournament organizer.';
@@ -992,6 +1262,7 @@ async function startServer() {
 
     list[index] = updated;
     writeJSON(REGISTRATIONS_FILE, list);
+    broadcastSse('registration_updated', { registration: updated });
     return res.json({ success: true, registration: updated });
   });
 
@@ -1016,6 +1287,7 @@ async function startServer() {
 
     list[index] = updated;
     writeJSON(REGISTRATIONS_FILE, list);
+    broadcastSse('registration_updated', { registration: updated });
     return res.json(updated);
   });
 
@@ -1026,6 +1298,7 @@ async function startServer() {
     const beforeCount = list.length;
     list = list.filter((r) => r.id !== id);
     writeJSON(REGISTRATIONS_FILE, list);
+    broadcastSse('registration_deleted', { id });
     return res.json({ success: true, deleted: beforeCount !== list.length });
   });
 
@@ -1040,6 +1313,7 @@ async function startServer() {
     const countBefore = list.length;
     list = list.filter((r) => !idSet.has(r.id));
     writeJSON(REGISTRATIONS_FILE, list);
+    broadcastSse('registrations_bulk_deleted', { ids });
     return res.json({ success: true, count: countBefore - list.length });
   });
 
@@ -1067,6 +1341,7 @@ async function startServer() {
     });
 
     writeJSON(REGISTRATIONS_FILE, list);
+    broadcastSse('registrations_bulk_approved', { ids });
     return res.json({ success: true, approvedCount });
   });
 

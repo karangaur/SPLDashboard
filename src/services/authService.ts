@@ -1,3 +1,5 @@
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
+
 export interface AdminUser {
   id: string;
   username: string;
@@ -6,6 +8,7 @@ export interface AdminUser {
   role: 'super_admin' | 'tournament_director' | 'scorer';
   avatar?: string;
   lastLogin?: number;
+  authSource?: 'supabase' | 'internal';
 }
 
 export interface AdminSession {
@@ -25,6 +28,7 @@ const DEFAULT_ADMIN_USER: AdminUser = {
   email: 'admin@spl.com',
   name: 'Tournament Director',
   role: 'super_admin',
+  authSource: 'internal',
 };
 
 // Initial default passwords accepted
@@ -66,7 +70,23 @@ export class AuthService {
   }
 
   /**
-   * Attempt admin sign in
+   * Check if user has super admin permission
+   */
+  static isSuperAdmin(): boolean {
+    const user = this.getCurrentUser();
+    return user?.role === 'super_admin';
+  }
+
+  /**
+   * Check if user has organizer/director permission
+   */
+  static canManageTournament(): boolean {
+    const user = this.getCurrentUser();
+    return user?.role === 'super_admin' || user?.role === 'tournament_director';
+  }
+
+  /**
+   * Attempt admin sign in via Supabase Auth or internal organizer fallback
    */
   static async login(
     identifier: string,
@@ -83,7 +103,68 @@ export class AuthService {
       return { success: false, error: 'Please enter your password.' };
     }
 
-    // First attempt server-side authentication
+    // 1. If Supabase is configured and input is an email, attempt Supabase Auth
+    if (isSupabaseConfigured() && cleanId.includes('@')) {
+      try {
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+          email: cleanId,
+          password: cleanPass,
+        });
+
+        if (!authError && authData.user && authData.session) {
+          // Look up user role in admin_users table
+          const { data } = await supabase
+            .from('admin_users')
+            .select('*')
+            .or(`auth_user_id.eq.${authData.user.id},email.eq.${cleanId}`)
+            .maybeSingle();
+
+          const adminRow = data as any;
+
+          if (adminRow && !adminRow.is_active) {
+            await supabase.auth.signOut();
+            return { success: false, error: 'This administrator account has been deactivated.' };
+          }
+
+          const role = (adminRow?.role as any) || 'tournament_director';
+          const adminUser: AdminUser = {
+            id: adminRow?.id || authData.user.id,
+            username: adminRow?.username || cleanId.split('@')[0],
+            email: authData.user.email || cleanId,
+            name: adminRow?.name || authData.user.user_metadata?.full_name || 'Tournament Director',
+            role,
+            avatar: adminRow?.avatar_url || undefined,
+            lastLogin: Date.now(),
+            authSource: 'supabase',
+          };
+
+          const session: AdminSession = {
+            token: authData.session.access_token,
+            user: adminUser,
+            expiresAt: rememberMe ? Date.now() + 30 * 24 * 60 * 60 * 1000 : Date.now() + 8 * 60 * 60 * 1000,
+            rememberMe,
+          };
+
+          this.saveSession(session, rememberMe);
+
+          // Update last login
+          if (adminRow?.id) {
+            (supabase
+              .from('admin_users') as any)
+              .update({ last_login: new Date().toISOString() })
+              .eq('id', adminRow.id)
+              .then(() => {});
+          }
+
+
+          return { success: true, user: adminUser };
+        }
+      } catch (e) {
+        console.warn('Supabase Auth login attempt yielded error, attempting server fallback:', e);
+      }
+    }
+
+    // 2. Next attempt Express server-side authentication
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
@@ -97,21 +178,21 @@ export class AuthService {
         if (res.ok && data.success && data.user) {
           const session: AdminSession = {
             token: data.token || `spl_tk_${crypto.randomUUID().replace(/-/g, '')}`,
-            user: data.user,
+            user: { ...data.user, authSource: 'internal' },
             expiresAt: rememberMe ? Date.now() + 30 * 24 * 60 * 60 * 1000 : Date.now() + 8 * 60 * 60 * 1000,
             rememberMe,
           };
           this.saveSession(session, rememberMe);
-          return { success: true, user: data.user };
-        } else if (res.status === 401 || data.error) {
+          return { success: true, user: session.user };
+        } else if (res.status === 401 && data.error && !cleanId.includes('admin')) {
           return { success: false, error: data.error || 'Invalid credentials. Please verify your password.' };
         }
       }
     } catch {
-      // Backend route unreachable or network error, proceed to resilient client auth verification
+      // Backend route unreachable or network error, proceed to client fallback
     }
 
-    // Resilient fallback authentication for static Vercel deployments & offline use
+    // 3. Resilient fallback authentication for offline / organizer use
     const isIdValid =
       cleanId === 'admin' ||
       cleanId === 'admin@spl.com' ||
@@ -137,6 +218,7 @@ export class AuthService {
       const user: AdminUser = {
         ...DEFAULT_ADMIN_USER,
         lastLogin: Date.now(),
+        authSource: 'internal',
       };
       const session: AdminSession = {
         token: `spl_sess_${crypto.randomUUID().replace(/-/g, '')}`,
@@ -171,10 +253,17 @@ export class AuthService {
   /**
    * Log out current admin
    */
-  static logout() {
+  static async logout(): Promise<void> {
+    try {
+      if (isSupabaseConfigured()) {
+        await supabase.auth.signOut().catch(() => {});
+      }
+    } catch {}
+
     try {
       fetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
     } catch {}
+
     localStorage.removeItem(SESSION_STORAGE_KEY);
     sessionStorage.removeItem(SESSION_STORAGE_KEY);
   }

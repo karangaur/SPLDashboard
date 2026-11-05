@@ -243,6 +243,13 @@ export const DEFAULT_STATE: TournamentState = {
     slotLimit: 32,
     season: 'Season IV (Championship Edition)',
     announcement: 'Grand Finale on Court 1! Live scoring active.',
+    scoringRules: {
+      pointTarget: 21,
+      setsToWin: 1,
+      deuceEnabled: true,
+      maxPointCap: 30,
+      changeEndsAtInterval: true,
+    },
   },
   registrationSettings: DEFAULT_REGISTRATION_SETTINGS,
   players: [],

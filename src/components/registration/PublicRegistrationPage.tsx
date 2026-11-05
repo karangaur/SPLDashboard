@@ -33,6 +33,7 @@ import {
   createDefaultFormConfig,
 } from '../../utils/tournamentEngine';
 import { Registration, RegistrationFormConfig } from '../../types/tournament';
+import { SupabaseService } from '../../services/supabaseService';
 
 interface PublicRegistrationPageProps {
   onBackToApp?: () => void;
@@ -117,8 +118,22 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     }
     setTokenParam(foundToken);
 
-    // 2. Fetch form config from persistent backend with cache-busting
+    // 2. Fetch form config from centralized Supabase backend directly if available
     const targetSlug = activeSeasonSlug && activeSeasonSlug !== 'undefined' ? activeSeasonSlug : 'season-4';
+
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.fetchFormConfig(targetSlug).then((supabaseForm) => {
+        if (isMounted && supabaseForm && Array.isArray(supabaseForm.fields) && supabaseForm.fields.length > 0) {
+          setFormConfig(supabaseForm);
+          setLoadingConfig(false);
+          try {
+            localStorage.setItem(`spl_forms_cache_${targetSlug}`, JSON.stringify(supabaseForm));
+          } catch {}
+        }
+      });
+    }
+
+    // Also fetch from server endpoint with cache-busting as resilient fallback
     fetch(`/api/forms/${encodeURIComponent(targetSlug)}?t=${Date.now()}`, { cache: 'no-store' })
       .then((res) => (res.ok ? res.json() : null))
       .then((data) => {
@@ -359,6 +374,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
         tokenUsed: tokenParam || undefined,
         answers: { ...answers },
         photoUrl: photoPreview || undefined,
+        formVersion: formConfig.version || 1,
       };
 
       const result = await submitPublicRegistration(payload);
@@ -1209,14 +1225,11 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                     </>
                   ) : (
                     <>
-                      <span>
-                        {effectiveFee > 0 && formConfig.payment?.isMandatory
-                          ? paymentBtnLabel
-                          : appearance.submitButtonText || 'Submit Registration & Confirm Entry'}
-                      </span>
+                      <span>Submit Registration</span>
                       <ArrowRight className="w-4 h-4" />
                     </>
                   )}
+
                 </button>
               </div>
             </form>

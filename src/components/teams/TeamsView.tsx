@@ -17,6 +17,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Sparkles,
+  Eye,
+  Calendar,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import { ConfirmModal } from '../common/ConfirmModal';
@@ -41,11 +43,14 @@ export const TeamsView: React.FC = () => {
     toggleTeamLock,
     setTeamCaptain,
     setCaptainsBulk,
+    assignPlayerToTeam,
+    removePlayerFromTeam,
     triggerCelebration,
   } = useTournament();
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
+  const [selectedTeamDetails, setSelectedTeamDetails] = useState<Team | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
 
   // Bulk team selection
@@ -417,6 +422,15 @@ export const TeamsView: React.FC = () => {
 
                       <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
                         <button
+                          onClick={() => setSelectedTeamDetails(team)}
+                          title="View Team Details & Fixtures"
+                          aria-label="View team details"
+                          className="p-1.5 text-slate-400 hover:text-amber-400 hover:bg-white/10 rounded-lg transition-colors"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+
+                        <button
                           onClick={() => toggleTeamLock(team.id)}
                           title={team.locked ? 'Locked (Protected from random draws)' : 'Unlocked'}
                           aria-label={team.locked ? 'Unlock team' : 'Lock team'}
@@ -453,7 +467,7 @@ export const TeamsView: React.FC = () => {
                   {/* Players / Squad List */}
                   <div className="p-5 space-y-3">
                     <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-slate-400">
-                      <span>Squad Roster</span>
+                      <span>Squad Roster ({team.players.length})</span>
                       {captain && (
                         <span className="text-amber-400 flex items-center gap-1 font-semibold normal-case">
                           <Crown className="w-3 h-3" />
@@ -485,19 +499,32 @@ export const TeamsView: React.FC = () => {
                                   {p?.name || 'Unnamed Player'}
                                 </span>
                               </div>
-                              {isCaptain ? (
-                                <span className="flex items-center gap-1 font-bold text-amber-400 text-[10px] uppercase tracking-wide">
-                                  <Crown className="w-3 h-3 text-amber-400" />
-                                  <span>Captain</span>
-                                </span>
-                              ) : (
+                              <div className="flex items-center gap-1.5">
+                                {isCaptain ? (
+                                  <span className="flex items-center gap-1 font-bold text-amber-400 text-[10px] uppercase tracking-wide">
+                                    <Crown className="w-3 h-3 text-amber-400" />
+                                    <span>Captain</span>
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => setTeamCaptain(team.id, pid)}
+                                    className="text-[10px] text-slate-400 hover:text-amber-400 transition-colors"
+                                  >
+                                    Make Cap
+                                  </button>
+                                )}
+
                                 <button
-                                  onClick={() => setTeamCaptain(team.id, pid)}
-                                  className="text-[10px] text-slate-500 hover:text-amber-400 transition-colors"
+                                  onClick={() => {
+                                    removePlayerFromTeam(team.id, pid);
+                                    showNotification(`Removed player from ${team.name}.`);
+                                  }}
+                                  title="Remove player from team"
+                                  className="p-1 text-slate-500 hover:text-rose-400 hover:bg-rose-500/10 rounded transition-colors"
                                 >
-                                  Make Captain
+                                  <X className="w-3.5 h-3.5" />
                                 </button>
-                              )}
+                              </div>
                             </div>
                           );
                         })
@@ -506,6 +533,33 @@ export const TeamsView: React.FC = () => {
                           No players assigned yet.
                         </div>
                       )}
+                    </div>
+
+                    {/* Quick Player Assignment Dropdown */}
+                    <div className="pt-1.5 border-t border-white/5" onClick={(e) => e.stopPropagation()}>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) {
+                            assignPlayerToTeam(team.id, e.target.value);
+                            const pl = getPlayer(e.target.value);
+                            showNotification(`Assigned ${pl?.name || 'player'} to ${team.name}.`);
+                          }
+                        }}
+                        className="w-full bg-slate-900 border border-white/10 hover:border-white/20 rounded-xl px-2.5 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-amber-400 cursor-pointer"
+                      >
+                        <option value="">+ Assign Player to Squad...</option>
+                        {state.players
+                          .filter((p) => !team.players.includes(p.id))
+                          .map((p) => {
+                            const otherTeam = state.teams.find((t) => t.id !== team.id && t.players.includes(p.id));
+                            return (
+                              <option key={p.id} value={p.id}>
+                                {p.name} {otherTeam ? `(Transfer from ${otherTeam.name})` : '(Available)'}
+                              </option>
+                            );
+                          })}
+                      </select>
                     </div>
                   </div>
                 </div>
@@ -1069,6 +1123,207 @@ export const TeamsView: React.FC = () => {
           );
         }}
       />
+
+      {/* View Team Details Modal */}
+      {selectedTeamDetails && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in overflow-y-auto">
+          <div className="max-w-lg w-full rounded-3xl glass-panel p-6 sm:p-8 border border-white/10 shadow-2xl space-y-6 my-auto">
+            <div className="flex items-start justify-between pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <span className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-500/30 text-3xl border border-amber-500/30 shadow-lg">
+                  {selectedTeamDetails.badge || '🏸'}
+                </span>
+                <div>
+                  <h3 className="font-display text-xl font-black text-white">{selectedTeamDetails.name}</h3>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-wider ${
+                      selectedTeamDetails.locked
+                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}>
+                      {selectedTeamDetails.locked ? '🔒 Locked Squad' : '⚡ Active Roster'}
+                    </span>
+                    <span className="text-xs text-slate-400">
+                      {selectedTeamDetails.players.length} Athletes
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedTeamDetails(null)}
+                className="text-slate-400 hover:text-white p-1"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Team Standing Metrics */}
+            {(() => {
+              const standing = standings.find((s) => s.team.id === selectedTeamDetails.id);
+              return (
+                <div className="grid grid-cols-4 gap-2 text-center p-3 rounded-2xl bg-white/5 border border-white/5 font-mono text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase text-slate-400 block">Played</span>
+                    <span className="font-bold text-white text-base">{standing?.played ?? 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase text-emerald-400 block">Wins</span>
+                    <span className="font-bold text-emerald-300 text-base">{standing?.won ?? 0}</span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase text-slate-400 block">Point Diff</span>
+                    <span className="font-bold text-slate-200 text-base">
+                      {(standing?.diff ?? 0) > 0 ? `+${standing?.diff}` : standing?.diff ?? 0}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase text-amber-400 block">Points</span>
+                    <span className="font-bold text-amber-300 text-base">{standing?.points ?? 0}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Full Squad Roster with Direct Actions */}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between text-xs font-bold uppercase tracking-wider text-slate-300">
+                <span>Squad Members</span>
+                <span className="text-amber-400 normal-case font-medium">
+                  {selectedTeamDetails.captainId
+                    ? `Captain: ${getPlayer(selectedTeamDetails.captainId)?.name || 'Assigned'}`
+                    : 'No Captain Assigned'}
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {selectedTeamDetails.players.length > 0 ? (
+                  selectedTeamDetails.players.map((pid) => {
+                    const p = getPlayer(pid);
+                    const isCap = selectedTeamDetails.captainId === pid;
+                    return (
+                      <div
+                        key={pid}
+                        className="flex items-center justify-between p-2.5 rounded-xl bg-white/[0.04] border border-white/5 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-500/20 text-blue-300 font-bold text-[11px]">
+                            {p?.name ? p.name.slice(0, 2).toUpperCase() : '??'}
+                          </span>
+                          <div>
+                            <span className="font-bold text-white block">{p?.name || 'Unnamed'}</span>
+                            <span className="text-[10px] text-slate-400">
+                              {p?.gender === 'F' ? 'Female' : 'Male'} {p?.age ? `· ${p.age}y` : ''} · {p?.skillLevel || 'Advanced'}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {isCap ? (
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30 flex items-center gap-1">
+                              <Crown className="w-3 h-3 text-amber-400" />
+                              <span>Captain</span>
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setTeamCaptain(selectedTeamDetails.id, pid);
+                                setSelectedTeamDetails((prev) =>
+                                  prev ? { ...prev, captainId: pid } : null
+                                );
+                              }}
+                              className="text-[10px] text-slate-400 hover:text-amber-300 font-semibold"
+                            >
+                              Make Captain
+                            </button>
+                          )}
+
+                          <button
+                            onClick={() => {
+                              removePlayerFromTeam(selectedTeamDetails.id, pid);
+                              setSelectedTeamDetails((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      players: prev.players.filter((x) => x !== pid),
+                                      captainId: prev.captainId === pid ? undefined : prev.captainId,
+                                    }
+                                  : null
+                              );
+                              showNotification(`Removed player from ${selectedTeamDetails.name}.`);
+                            }}
+                            title="Remove player"
+                            className="p-1 text-slate-500 hover:text-rose-400 transition-colors"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })
+                ) : (
+                  <p className="text-xs text-slate-500 italic p-3 text-center">
+                    No athletes in this squad yet.
+                  </p>
+                )}
+              </div>
+
+              {/* Assign Player into this Team */}
+              <div className="pt-2 border-t border-white/5">
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      assignPlayerToTeam(selectedTeamDetails.id, e.target.value);
+                      const pl = getPlayer(e.target.value);
+                      setSelectedTeamDetails((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              players: [...prev.players.filter((x) => x !== e.target.value), e.target.value],
+                            }
+                          : null
+                      );
+                      showNotification(`Assigned ${pl?.name || 'player'} to ${selectedTeamDetails.name}.`);
+                    }
+                  }}
+                  className="w-full bg-slate-900 border border-white/15 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-amber-400"
+                >
+                  <option value="">+ Assign Athlete to this Squad...</option>
+                  {state.players
+                    .filter((p) => !selectedTeamDetails.players.includes(p.id))
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name} ({p.skillLevel || 'Advanced'})
+                      </option>
+                    ))}
+                </select>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-3 border-t border-white/10">
+              <button
+                onClick={() => {
+                  toggleTeamLock(selectedTeamDetails.id);
+                  setSelectedTeamDetails((prev) =>
+                    prev ? { ...prev, locked: !prev.locked } : null
+                  );
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 transition-colors"
+              >
+                {selectedTeamDetails.locked ? <Unlock className="w-3.5 h-3.5 text-amber-400" /> : <Lock className="w-3.5 h-3.5" />}
+                <span>{selectedTeamDetails.locked ? 'Unlock Team' : 'Lock Squad'}</span>
+              </button>
+
+              <button
+                onClick={() => setSelectedTeamDetails(null)}
+                className="px-4 py-2 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl transition-colors shadow"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

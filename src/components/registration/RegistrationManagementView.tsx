@@ -787,7 +787,10 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                           </td>
 
                           <td className="py-3.5 font-mono text-xs font-bold text-amber-400">
-                            {r.regId}
+                            <div>{r.regId}</div>
+                            <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-slate-300 border border-white/10 mt-0.5">
+                              v{r.formVersion || 1}
+                            </span>
                           </td>
 
                           <td className="py-3.5">
@@ -1435,9 +1438,14 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                   />
                 )}
                 <div>
-                  <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400 block font-mono">
-                    {viewDetailsTarget.regId}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400 block font-mono">
+                      {viewDetailsTarget.regId}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-white/10 text-slate-300 border border-white/10">
+                      Form v{viewDetailsTarget.formVersion || 1}
+                    </span>
+                  </div>
                   <h3 className="text-xl font-bold text-white">{viewDetailsTarget.name}</h3>
                   {viewDetailsTarget.tokenUsed && (
                     <span className="text-[10px] text-slate-400 font-mono">

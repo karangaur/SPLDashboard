@@ -380,6 +380,9 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
                 >
                   {formConfig.isPublished ? 'Live Published' : 'Draft Mode'}
                 </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                  v{formConfig.version || 1}
+                </span>
               </div>
               <p className="text-xs text-slate-400">
                 Season: <span className="text-slate-200 font-semibold">{formConfig.seasonTitle}</span>

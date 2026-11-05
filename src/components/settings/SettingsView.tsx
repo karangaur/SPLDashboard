@@ -8,6 +8,11 @@ import {
   Trash2,
   CheckCircle2,
   ShieldAlert,
+  Database,
+  Server,
+  Check,
+  Copy,
+  ExternalLink,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { ConfirmModal } from '../common/ConfirmModal';
@@ -15,6 +20,9 @@ import { ConfirmModal } from '../common/ConfirmModal';
 export const SettingsView: React.FC = () => {
   const {
     state,
+    isCentralizedDbConnected,
+    dbBackendType,
+    testDbConnection,
     updateSettings,
     updatePaymentSettings,
     resetToDefault,
@@ -22,6 +30,10 @@ export const SettingsView: React.FC = () => {
     exportStateJSON,
     importStateJSON,
   } = useTournament();
+
+  const [testingDb, setTestingDb] = useState(false);
+  const [dbTestResult, setDbTestResult] = useState<{ connected: boolean; message: string } | null>(null);
+  const [copiedEnv, setCopiedEnv] = useState(false);
 
   const [settingsForm, setSettingsForm] = useState(state.settings);
   const [paymentForm, setPaymentForm] = useState(state.payment);
@@ -263,12 +275,149 @@ export const SettingsView: React.FC = () => {
         </div>
       </form>
 
+      {/* Centralized Supabase PostgreSQL Database Configuration */}
+      <div className="rounded-3xl glass-panel p-6 sm:p-8 border border-white/10 space-y-6">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-3 border-b border-white/10">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
+              <Database className="w-4 h-4" />
+            </span>
+            <div>
+              <h3 className="font-bold text-white text-base">Centralized Backend Database (Supabase PostgreSQL)</h3>
+              <p className="text-xs text-slate-400">Multi-device real-time tournament persistence & Row-Level Security</p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold font-mono border ${
+                isCentralizedDbConnected
+                  ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isCentralizedDbConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+                }`}
+              />
+              {isCentralizedDbConnected ? 'CONNECTED (SUPABASE)' : 'STANDBY (LOCAL CACHE)'}
+            </span>
+          </div>
+        </div>
+
+        {/* 11 Centralized Tables Grid */}
+        <div>
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 block mb-2">
+            Centralized Relational Schema (11 Tables Managed)
+          </span>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+            {[
+              { name: 'players', desc: 'Athlete profiles' },
+              { name: 'teams', desc: 'Franchises & purse' },
+              { name: 'team_players', desc: 'Roster allocations' },
+              { name: 'registrations', desc: 'Public applicant records' },
+              { name: 'registration_form_config', desc: 'Customizer schema' },
+              { name: 'registration_form_versions', desc: 'Form version audits' },
+              { name: 'registration_tokens', desc: 'Shareable links' },
+              { name: 'matches', desc: 'Round-robin & playoffs' },
+              { name: 'match_scores', desc: 'Live ball/set scores' },
+              { name: 'tournament_standings', desc: 'NRR & points table' },
+              { name: 'admin_users', desc: 'RBAC administrators' },
+              { name: 'audit_logs', desc: 'Security audit trail' },
+            ].map((tbl) => (
+              <div
+                key={tbl.name}
+                className="p-2.5 rounded-xl bg-white/[0.03] border border-white/5 flex flex-col justify-between"
+              >
+                <div className="flex items-center gap-1.5 font-mono text-[11px] font-bold text-slate-200">
+                  <span className="text-emerald-400">●</span>
+                  <span className="truncate">{tbl.name}</span>
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1">{tbl.desc}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Live Test & Diagnostics */}
+        <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <span className="text-xs font-bold text-white block">Connection Diagnostic Test</span>
+              <p className="text-xs text-slate-400">
+                Pings your Supabase project endpoints and verifies database read permissions.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={testingDb}
+              onClick={async () => {
+                setTestingDb(true);
+                setDbTestResult(null);
+                try {
+                  const res = await testDbConnection();
+                  setDbTestResult(res);
+                } finally {
+                  setTestingDb(false);
+                }
+              }}
+              className="px-4 py-2 text-xs font-bold text-slate-900 bg-emerald-400 hover:bg-emerald-300 rounded-xl transition-all flex items-center justify-center gap-2 self-start sm:self-auto cursor-pointer"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${testingDb ? 'animate-spin' : ''}`} />
+              <span>{testingDb ? 'Testing Connection...' : 'Test Supabase Connection'}</span>
+            </button>
+          </div>
+
+          {dbTestResult && (
+            <div
+              className={`p-3 rounded-xl border text-xs leading-relaxed ${
+                dbTestResult.connected
+                  ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-300'
+                  : 'bg-amber-500/10 border-amber-500/25 text-amber-300'
+              }`}
+            >
+              <span className="font-bold mr-1.5">{dbTestResult.connected ? '✓ Success:' : 'ℹ Note:'}</span>
+              {dbTestResult.message}
+            </div>
+          )}
+        </div>
+
+        {/* Environment Setup Guide */}
+        <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5 font-mono uppercase">
+              <Server className="w-3.5 h-3.5" />
+              <span>Supabase Connection Variables</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                const text = `VITE_SUPABASE_URL=https://your-project.supabase.co\nVITE_SUPABASE_ANON_KEY=your-anon-key`;
+                navigator.clipboard?.writeText(text);
+                setCopiedEnv(true);
+                setTimeout(() => setCopiedEnv(false), 2000);
+              }}
+              className="text-[11px] text-slate-400 hover:text-white flex items-center gap-1 cursor-pointer"
+            >
+              {copiedEnv ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+              <span>{copiedEnv ? 'Copied' : 'Copy keys'}</span>
+            </button>
+          </div>
+          <p className="text-xs text-slate-400 leading-relaxed">
+            Provide your project URL and anon public key in environment settings. The SQL schema is ready in{' '}
+            <code className="text-emerald-300 font-mono">supabase/schema.sql</code> to paste into your Supabase SQL Editor.
+          </p>
+        </div>
+      </div>
+
       {/* Data Backup & Maintenance Operations */}
       <div className="rounded-3xl glass-card p-6 sm:p-8 border border-white/10 space-y-6">
         <h3 className="font-bold text-white text-base flex items-center gap-2 pb-2 border-b border-white/10">
           <HardDriveDownload className="w-4 h-4 text-blue-400" />
           <span>Data Backup & Recovery</span>
         </h3>
+
 
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-2">

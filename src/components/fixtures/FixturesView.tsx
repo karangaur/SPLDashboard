@@ -9,13 +9,17 @@ import {
   Share2,
   CheckCircle,
   Play,
+  Pause,
   RotateCcw,
   Edit2,
   SlidersHorizontal,
+  Maximize2,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import { Match } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { LiveMatchScoringModal } from '../admin/LiveMatchScoringModal';
+import { evaluateSetStatus } from '../../utils/badmintonEngine';
 
 export const FixturesView: React.FC = () => {
   const { state, updateMatch, generateFixtures, clearResults, setMatches } = useTournament();
@@ -26,6 +30,7 @@ export const FixturesView: React.FC = () => {
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [liveScoringMatchId, setLiveScoringMatchId] = useState<string | null>(null);
 
   // Manual Match creation state
   const [manualTeamA, setManualTeamA] = useState('');
@@ -54,16 +59,22 @@ export const FixturesView: React.FC = () => {
     const nextA = teamKey === 'A' ? Math.max(0, curA + delta) : curA;
     const nextB = teamKey === 'B' ? Math.max(0, curB + delta) : curB;
 
-    const targetFormat = parseInt(state.settings.format || '21', 10);
-    let status: Match['status'] = 'live';
-    let winner: string | undefined = undefined;
+    const rules = state.settings.scoringRules || {
+      pointTarget: parseInt(state.settings.format || '21', 10) || 21,
+      setsToWin: 1,
+      deuceEnabled: true,
+      maxPointCap: 30,
+      changeEndsAtInterval: true,
+    };
 
-    // Standard badminton winning rule: >= targetFormat and ahead by >= 2 or reached cap (e.g. 30)
-    const isOverTarget = nextA >= targetFormat || nextB >= targetFormat;
-    const diff = Math.abs(nextA - nextB);
-    if (isOverTarget && (diff >= 2 || Math.max(nextA, nextB) >= 30)) {
+    const evalResult = evaluateSetStatus(nextA, nextB, rules);
+    let status: Match['status'] = match.status === 'upcoming' ? 'live' : match.status;
+    let winner: string | undefined = match.winner;
+
+    if (rules.setsToWin === 1 && evalResult.isFinished && evalResult.winner) {
       status = 'completed';
-      winner = nextA > nextB ? match.teamA : match.teamB;
+      winner = evalResult.winner === 'A' ? match.teamA : match.teamB;
+      sportsAudio.playFanfare();
     }
 
     updateMatch(matchId, {
@@ -71,7 +82,7 @@ export const FixturesView: React.FC = () => {
       scoreB: nextB,
       status,
       winner,
-      sets: [{ scoreA: nextA, scoreB: nextB }],
+      sets: match.sets && match.sets.length > 0 ? match.sets : [{ scoreA: nextA, scoreB: nextB }],
     });
   };
 
@@ -165,6 +176,18 @@ export const FixturesView: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => {
+              const liveOrFirst = state.matches.find((m) => m.status === 'live') || state.matches[0];
+              if (liveOrFirst) setLiveScoringMatchId(liveOrFirst.id);
+            }}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-lime-400 hover:from-emerald-300 rounded-xl shadow-md transition-all active:scale-95"
+            title="Open Live Badminton Scoreboard and Umpire Console"
+          >
+            <SlidersHorizontal className="w-4 h-4" />
+            <span>Live Umpire Console</span>
+          </button>
+
           <button
             onClick={() => setShowGenerateConfirm(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
@@ -305,10 +328,20 @@ export const FixturesView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setLiveScoringMatchId(match.id)}
+                      className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
+                      title="Open full badminton umpire scoring console"
+                    >
+                      <Maximize2 className="w-3 h-3" />
+                      <span>Umpire Console</span>
+                    </button>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         isLive
                           ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          : match.status === 'paused'
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           : isCompleted
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                           : 'bg-white/5 text-slate-400'
@@ -408,7 +441,41 @@ export const FixturesView: React.FC = () => {
                   </div>
 
                   {/* Status / Complete action */}
-                  <div>
+                  <div className="flex items-center gap-1.5">
+                    {match.status === 'upcoming' && (
+                      <button
+                        type="button"
+                        onClick={() => updateMatch(match.id, { status: 'live' })}
+                        className="px-2 py-1 text-[11px] font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        title="Start match"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>Start</span>
+                      </button>
+                    )}
+                    {match.status === 'live' && (
+                      <button
+                        type="button"
+                        onClick={() => updateMatch(match.id, { status: 'paused' })}
+                        className="px-2 py-1 text-[11px] font-bold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                        title="Pause match"
+                      >
+                        <Pause className="w-3 h-3" />
+                        <span>Pause</span>
+                      </button>
+                    )}
+                    {match.status === 'paused' && (
+                      <button
+                        type="button"
+                        onClick={() => updateMatch(match.id, { status: 'live' })}
+                        className="px-2 py-1 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                        title="Resume match"
+                      >
+                        <Play className="w-3 h-3 fill-current" />
+                        <span>Resume</span>
+                      </button>
+                    )}
+
                     {!isCompleted ? (
                       <button
                         onClick={() => handleMarkComplete(match)}
@@ -600,6 +667,14 @@ export const FixturesView: React.FC = () => {
           setShowClearConfirm(false);
         }}
         onCancel={() => setShowClearConfirm(false)}
+      />
+
+      {/* Live Badminton Scoring Modal (Umpire Console) */}
+      <LiveMatchScoringModal
+        isOpen={Boolean(liveScoringMatchId)}
+        onClose={() => setLiveScoringMatchId(null)}
+        initialMatchId={liveScoringMatchId || undefined}
+        isKnockout={false}
       />
     </div>
   );
