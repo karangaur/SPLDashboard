@@ -28,6 +28,7 @@ import {
 import confetti from 'canvas-confetti';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
+import { AuthService } from '../services/authService';
 
 interface TournamentContextType {
   state: TournamentState;
@@ -1855,7 +1856,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     options?: RequestInit
   ): Promise<{ ok: boolean; status: number; data: T | null; isJson: boolean; errorText?: string }> {
     try {
-      const res = await fetch(url, options);
+      const authHeaders = AuthService.getAuthHeader();
+      const mergedOptions: RequestInit = {
+        ...options,
+        headers: {
+          ...authHeaders,
+          ...(options?.headers || {}),
+        },
+      };
+      const res = await fetch(url, mergedOptions);
       const contentType = res.headers.get('content-type') || '';
       const text = await res.text();
       if (contentType.includes('application/json') || text.trim().startsWith('{') || text.trim().startsWith('[')) {

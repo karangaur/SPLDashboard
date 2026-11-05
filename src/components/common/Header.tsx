@@ -52,24 +52,24 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-slate-950/85 backdrop-blur-md">
       {/* 3-Zone Top Bar Contract */}
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-8 px-4 sm:px-6 lg:px-8">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-2 sm:gap-4 md:gap-8 px-3 sm:px-6 lg:px-8">
         
         {/* Zone 1: Single Brand Wordmark with Official Logo */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink min-w-0">
           <button
             onClick={() => handleNav('dashboard')}
-            className="flex items-center gap-2.5 text-left group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded-lg"
+            className="flex items-center gap-2 sm:gap-2.5 text-left group focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-400 rounded-lg min-w-0"
           >
             <img
               src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
               alt="Smash Premier League"
-              className="h-10 w-auto object-contain shrink-0 drop-shadow group-hover:scale-105 transition-transform"
+              className="h-8 sm:h-10 w-auto object-contain shrink-0 drop-shadow group-hover:scale-105 transition-transform"
             />
             <div className="min-w-0">
-              <span className="block font-display text-lg font-black tracking-tight text-white whitespace-nowrap">
+              <span className="block font-display text-sm sm:text-base md:text-lg font-black tracking-tight text-white truncate">
                 Smash Premier League
               </span>
-              <span className="block text-[11px] font-medium text-slate-400 truncate -mt-0.5">
+              <span className="block text-[10px] sm:text-[11px] font-medium text-slate-400 truncate -mt-0.5">
                 {state.settings.season || 'Maharajganj Tournament Central'}
               </span>
             </div>

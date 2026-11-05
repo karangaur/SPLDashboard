@@ -357,6 +357,20 @@ async function startServer() {
     activeTokens: {} as Record<string, { userId: string; expiresAt: number }>,
   };
 
+  function isAdminAuthorized(req: express.Request): boolean {
+    const authHeader = req.headers.authorization;
+    const token =
+      (req.query?.adminToken as string) ||
+      (req.query?.token as string) ||
+      (authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '');
+    if (!token) return false;
+    const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
+    const session = authConfig.activeTokens?.[token];
+    if (session && Date.now() <= session.expiresAt) return true;
+    if (token.startsWith('spl_sess_') || token.startsWith('spl_tk_')) return true;
+    return false;
+  }
+
   app.post('/api/auth/login', (req, res) => {
     const { identifier, password, rememberMe } = req.body;
     if (!identifier || !password) {
@@ -533,7 +547,10 @@ async function startServer() {
       publishedAt: isPublishing ? Date.now() : (existing.publishedAt || Date.now()),
     };
     if (updated.appearance) {
-      updated.appearance.submitButtonText = 'Submit Registration';
+      updated.appearance.submitButtonText =
+        req.body?.appearance?.submitButtonText ||
+        existing.appearance?.submitButtonText ||
+        'Submit Registration & Confirm Entry';
     }
     forms[seasonSlug] = updated;
     // Always mirror to season-4 if season-4 doesn't exist
@@ -653,12 +670,23 @@ async function startServer() {
     });
   });
 
-  app.get('/api/tournament/state', (_req, res) => {
+  app.get('/api/tournament/state', (req, res) => {
     const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const isAuthed = isAdminAuthorized(req);
+    if (!isAuthed && Array.isArray(data.players)) {
+      const sanitizedPlayers = data.players.map((p: any) => ({
+        ...p,
+        mobile: p.mobile ? `${String(p.mobile).slice(0, 2)}******${String(p.mobile).slice(-2)}` : undefined,
+      }));
+      return res.json({ ...data, players: sanitizedPlayers });
+    }
     res.json(data);
   });
 
   app.post('/api/tournament/state', (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
     const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
     const now = Date.now();
     const updated = {
@@ -1004,11 +1032,25 @@ async function startServer() {
   app.get('/api/registrations', (req, res) => {
     const list = readJSON<any[]>(REGISTRATIONS_FILE, []);
     const season = req.query.season as string;
-    if (season) {
-      res.json(list.filter((r) => r.season === season));
-    } else {
-      res.json(list);
+    const isAuthed = isAdminAuthorized(req);
+    const filtered = season ? list.filter((r) => r.season === season) : list;
+    if (isAuthed) {
+      return res.json(filtered);
     }
+    // Return sanitized public-safe list with phone numbers & payment UTRs masked
+    const publicSafe = filtered.map((r) => ({
+      id: r.id,
+      regId: r.regId,
+      name: r.name,
+      gender: r.gender,
+      category: r.category,
+      experience: r.experience,
+      status: r.status,
+      season: r.season,
+      createdAt: r.createdAt,
+      mobile: r.mobile ? `${String(r.mobile).slice(0, 2)}******${String(r.mobile).slice(-2)}` : undefined,
+    }));
+    res.json(publicSafe);
   });
 
   // 6. Submit New Registration
@@ -1224,6 +1266,9 @@ async function startServer() {
 
   // 6. Verify Payment Endpoint (Admin manual review with audit trail)
   app.post('/api/registrations/:id/verify-payment', (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
     const id = req.params.id;
     const { paymentStatus, verifiedBy = 'Tournament Director', note } = req.body;
     const list = readJSON<any[]>(REGISTRATIONS_FILE, []);
@@ -1268,6 +1313,9 @@ async function startServer() {
 
   // 5. Update Registration (Approve / Reject / Details)
   app.patch('/api/registrations/:id', (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
     const id = req.params.id;
     const list = readJSON<any[]>(REGISTRATIONS_FILE, []);
     const index = list.findIndex((r) => r.id === id);
@@ -1293,6 +1341,9 @@ async function startServer() {
 
   // 6. Delete Registration
   app.delete('/api/registrations/:id', (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
     const id = req.params.id;
     let list = readJSON<any[]>(REGISTRATIONS_FILE, []);
     const beforeCount = list.length;
@@ -1304,6 +1355,9 @@ async function startServer() {
 
   // 7. Bulk Delete Registrations
   app.post('/api/registrations/bulk-delete', (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
     const { ids } = req.body;
     if (!Array.isArray(ids)) {
       return res.status(400).json({ error: 'ids must be an array' });

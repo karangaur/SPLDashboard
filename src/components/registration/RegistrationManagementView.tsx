@@ -745,7 +745,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           {/* Applicants Roster Table (Desktop) & Cards (Mobile) */}
           {filteredRegistrations.length > 0 ? (
             <div className="rounded-3xl glass-panel border border-white/10 overflow-hidden shadow-2xl">
-              <div className="overflow-x-auto">
+              <div className="hidden md:block overflow-x-auto">
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-white/10 bg-white/[0.02] text-[11px] uppercase tracking-wider text-slate-400">
@@ -938,6 +938,145 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                     })}
                   </tbody>
                 </table>
+              </div>
+
+              {/* Mobile Card List for Smartphones & Tablets */}
+              <div className="md:hidden divide-y divide-white/10">
+                {filteredRegistrations.map((r) => {
+                  const isSelected = selectedIds.includes(r.id);
+                  const paymentStat = r.paymentStatus || (r.status === 'approved' ? 'paid' : (r.txnId ? 'pending_verification' : 'pending'));
+                  return (
+                    <div
+                      key={r.id}
+                      className={`p-4 space-y-3 transition-colors ${
+                        isSelected ? 'bg-amber-500/5' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => handleToggleSelectOne(r.id)}
+                            className="rounded accent-amber-400 cursor-pointer h-4 w-4"
+                          />
+                          <span className="font-mono text-xs font-bold text-amber-400">
+                            {r.regId}
+                          </span>
+                          <span className="text-[10px] font-semibold bg-white/10 text-slate-300 px-1.5 py-0.5 rounded">
+                            v{r.formVersion || 1}
+                          </span>
+                        </div>
+                        <span
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            r.status === 'approved' || r.status === 'paid'
+                              ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                              : r.status === 'pending'
+                              ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                              : 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
+                          }`}
+                        >
+                          {r.status === 'approved' && <CheckCircle2 className="w-2.5 h-2.5" />}
+                          {r.status === 'pending' && <Clock className="w-2.5 h-2.5" />}
+                          {r.status === 'rejected' && <XCircle className="w-2.5 h-2.5" />}
+                          <span className="capitalize">{r.status}</span>
+                        </span>
+                      </div>
+
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <h4 className="font-bold text-white text-base">
+                            {r.name} {r.age && <span className="text-xs text-slate-400 font-normal">({r.age}y)</span>}
+                          </h4>
+                          <p className="text-xs text-slate-400 mt-0.5">
+                            {r.gender === 'M' ? 'Male' : r.gender === 'F' ? 'Female' : 'Other'}
+                            {r.city ? ` • ${r.city}` : ''}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-mono text-xs font-bold text-white block">
+                            {formatINR(r.fee)}
+                          </span>
+                          <span
+                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                              paymentStat === 'paid'
+                                ? 'bg-emerald-500/15 text-emerald-400'
+                                : paymentStat === 'pending_verification'
+                                ? 'bg-amber-500/15 text-amber-400'
+                                : 'bg-slate-700/50 text-slate-400'
+                            }`}
+                          >
+                            {paymentStat === 'paid' ? 'Paid' : paymentStat === 'pending_verification' ? 'Audit Pending' : paymentStat}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-xs bg-black/30 p-2.5 rounded-xl border border-white/5">
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-500 block">Contact</span>
+                          <span className="font-mono text-slate-200 block">+91 {r.mobile}</span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-500 block">Category & Style</span>
+                          <span className="text-slate-200 block truncate">{r.category || 'Doubles'} • {r.style || 'All-Rounder'}</span>
+                        </div>
+                      </div>
+
+                      {/* Mobile Action Buttons */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
+                        <div className="flex items-center gap-1.5">
+                          {r.status === 'pending' && (
+                            <button
+                              onClick={() => approveRegistration(r.id)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 hover:bg-emerald-500/30"
+                            >
+                              Approve
+                            </button>
+                          )}
+                          {r.status === 'pending' && (
+                            <button
+                              onClick={() => rejectRegistration(r.id)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10"
+                            >
+                              Reject
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => setVerifyTarget(r)}
+                            className="p-2 text-slate-300 hover:text-white bg-white/5 rounded-lg text-xs flex items-center gap-1"
+                            title="Verify Payment"
+                          >
+                            <CreditCard className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Payment</span>
+                          </button>
+                          <button
+                            onClick={() => setViewDetailsTarget(r)}
+                            className="p-2 text-slate-300 hover:text-white bg-white/5 rounded-lg"
+                            title="View details"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => openEditModal(r)}
+                            className="p-2 text-slate-300 hover:text-amber-400 bg-white/5 rounded-lg"
+                            title="Edit applicant"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => setDeleteTargetId(r.id)}
+                            className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 rounded-lg"
+                            title="Delete record"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           ) : (

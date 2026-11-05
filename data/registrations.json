@@ -33,5 +33,33 @@
       "tshirtSize": "L (40)"
     },
     "tokenUsed": "SPL-SEASON4-CZB7ZK"
+  },
+  {
+    "id": "5e1afae3-9307-4d20-85d9-1a4aeec09866",
+    "regId": "SPL-2026-003",
+    "name": "Devendra Pratap",
+    "mobile": "9812345678",
+    "gender": "Male",
+    "experience": "Advanced",
+    "category": "Singles",
+    "city": "Maharajganj",
+    "fee": 500,
+    "status": "pending",
+    "paymentStatus": "unpaid",
+    "method": "upi",
+    "season": "season-4",
+    "createdAt": 1793856290645,
+    "auditLog": [
+      {
+        "action": "created",
+        "by": "Player Submission",
+        "at": 1793856290645,
+        "toStatus": "unpaid"
+      }
+    ],
+    "answers": {
+      "gender": "Male"
+    },
+    "formVersion": 1
   }
 ]

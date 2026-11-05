@@ -104,26 +104,26 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
         <div className="mx-auto flex h-16 sm:h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
           
           {/* Brand Wordmark with Official 3D Logo */}
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink min-w-0">
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-              className="flex items-center gap-3 text-left group"
+              className="flex items-center gap-2 sm:gap-3 text-left group min-w-0"
             >
               <img
                 src={SPL_LOGO_SRC}
                 alt="Smash Premier League Logo"
-                className="h-10 sm:h-12 w-auto object-contain shrink-0 drop-shadow-[0_2px_10px_rgba(59,130,246,0.5)] group-hover:scale-105 transition-transform"
+                className="h-8 sm:h-12 w-auto object-contain shrink-0 drop-shadow-[0_2px_10px_rgba(59,130,246,0.5)] group-hover:scale-105 transition-transform"
               />
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="font-display text-base sm:text-lg font-black tracking-tight text-white uppercase">
+              <div className="min-w-0">
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="font-display text-sm sm:text-base lg:text-lg font-black tracking-tight text-white uppercase truncate">
                     Smash Premier League
                   </span>
-                  <span className="hidden sm:inline px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono">
+                  <span className="hidden sm:inline px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono shrink-0">
                     Maharajganj
                   </span>
                 </div>
-                <span className="block text-xs font-semibold text-slate-400 -mt-0.5">
+                <span className="block text-[10px] sm:text-xs font-semibold text-slate-400 -mt-0.5 truncate">
                   Official Badminton Championship
                 </span>
               </div>

@@ -62,6 +62,17 @@ export class AuthService {
   }
 
   /**
+   * Get Authorization header for API requests
+   */
+  static getAuthHeader(): Record<string, string> {
+    const session = this.getSession();
+    if (session?.token) {
+      return { Authorization: `Bearer ${session.token}` };
+    }
+    return {};
+  }
+
+  /**
    * Get current logged in admin user
    */
   static getCurrentUser(): AdminUser | null {
