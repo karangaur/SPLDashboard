@@ -48,39 +48,16 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
   const activeSeasonSlug = seasonParam || state.registrationSettings.seasonSlug || 'season-4';
 
-  // Form configuration loaded from server, context, or cache
+  // Form configuration loaded from server, context, or Supabase
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() => {
-    // 1. Check if context has customized form config
     if (contextFormConfig && Array.isArray(contextFormConfig.fields) && contextFormConfig.fields.length > 0) {
       return contextFormConfig;
-    }
-    // 2. Check localStorage cache
-    if (typeof window !== 'undefined') {
-      try {
-        const cached =
-          localStorage.getItem(`spl_forms_cache_${activeSeasonSlug}`) ||
-          localStorage.getItem('spl_forms_cache_season-4');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (parsed && Array.isArray(parsed.fields) && parsed.fields.length > 0) {
-            return parsed;
-          }
-        }
-      } catch {}
     }
     return createDefaultFormConfig(activeSeasonSlug);
   });
 
   const [loadingConfig, setLoadingConfig] = useState<boolean>(() => {
     if (contextFormConfig && Array.isArray(contextFormConfig.fields) && contextFormConfig.fields.length > 0) return false;
-    if (typeof window !== 'undefined') {
-      try {
-        const cached =
-          localStorage.getItem(`spl_forms_cache_${activeSeasonSlug}`) ||
-          localStorage.getItem('spl_forms_cache_season-4');
-        if (cached) return false;
-      } catch {}
-    }
     return true;
   });
 
@@ -139,9 +116,6 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       .then((data) => {
         if (isMounted && data && Array.isArray(data.fields) && data.fields.length > 0) {
           setFormConfig(data);
-          try {
-            localStorage.setItem(`spl_forms_cache_${targetSlug}`, JSON.stringify(data));
-          } catch {}
         }
       })
       .catch(() => {})

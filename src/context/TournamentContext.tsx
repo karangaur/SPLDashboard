@@ -180,93 +180,7 @@ export const sportsAudio = {
 };
 
 export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<TournamentState>(() => {
-    if (typeof window === 'undefined') return DEFAULT_STATE;
-    try {
-      // Clear legacy storage keys that had seeded/demo data
-      [
-        'smash-premier-league-v1',
-        'smash-premier-league-v2',
-        'smash-premier-league-v3',
-        'smash-premier-league-v4',
-        'smash-premier-league-v5',
-        'smash-premier-league-v6',
-      ].forEach((k) => {
-        try { localStorage.removeItem(k); } catch {}
-      });
-
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-
-        // Filter out any predefined/seeded demo IDs (e.g. 'p-1', 'team-1', 'm-1', 'reg-1')
-        const isDemoId = (id?: string) => Boolean(id && /^(p|team|m|reg|ko)-\d+$/i.test(id));
-
-        if (Array.isArray(parsed.players)) {
-          parsed.players = parsed.players.filter((p: any) => p && p.id && !isDemoId(p.id));
-        } else {
-          parsed.players = [];
-        }
-
-        if (Array.isArray(parsed.teams)) {
-          parsed.teams = parsed.teams
-            .filter((t: any) => t && t.id && !isDemoId(t.id))
-            .map((t: any) => ({
-              ...t,
-              players: Array.isArray(t.players) ? t.players.filter((pid: string) => !isDemoId(pid)) : [],
-              captainId: t.captainId && !isDemoId(t.captainId) ? t.captainId : undefined,
-            }));
-        } else {
-          parsed.teams = [];
-        }
-
-        if (Array.isArray(parsed.matches)) {
-          parsed.matches = parsed.matches.filter(
-            (m: any) => m && m.id && !isDemoId(m.id) && !isDemoId(m.teamA) && !isDemoId(m.teamB)
-          );
-        } else {
-          parsed.matches = [];
-        }
-
-        if (Array.isArray(parsed.registrations)) {
-          parsed.registrations = parsed.registrations.filter(
-            (r: any) => r && r.id && !isDemoId(r.id) && !isDemoId(r.playerId)
-          );
-        } else {
-          parsed.registrations = [];
-        }
-
-        if (parsed.knockout && Array.isArray(parsed.knockout.matches)) {
-          parsed.knockout.matches = parsed.knockout.matches.filter((k: any) => k && k.id && !isDemoId(k.id));
-        }
-
-        if (Array.isArray(parsed.predefinedTeams)) {
-          parsed.predefinedTeams = parsed.predefinedTeams.filter(
-            (pt: any) => pt && Array.isArray(pt.players) && !pt.players.some((pid: string) => isDemoId(pid))
-          );
-        }
-
-        return {
-          ...DEFAULT_STATE,
-          ...parsed,
-          settings: { ...DEFAULT_STATE.settings, ...parsed.settings },
-          registrationSettings: {
-            ...DEFAULT_STATE.registrationSettings,
-            ...(parsed.registrationSettings || {}),
-            fields: {
-              ...DEFAULT_STATE.registrationSettings.fields,
-              ...(parsed.registrationSettings?.fields || {}),
-            },
-          },
-          payment: { ...DEFAULT_STATE.payment, ...parsed.payment },
-          knockout: { ...DEFAULT_STATE.knockout, ...(parsed.knockout || {}) },
-        };
-      }
-    } catch (e) {
-      console.warn('Failed to parse stored tournament state, falling back to default:', e);
-    }
-    return DEFAULT_STATE;
-  });
+  const [state, setState] = useState<TournamentState>(DEFAULT_STATE);
 
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() =>
     createDefaultFormConfig()
@@ -329,74 +243,69 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const testRes = await testSupabaseConnection();
         setIsCentralizedDbConnected(testRes.connected);
 
-        // 1. Fetch Players from Supabase
+        // 1. Fetch Players from Supabase (authoritative source of truth)
         const players = await SupabaseService.fetchPlayers();
-        if (players && players.length > 0) {
+        if (players !== null) {
           setState((prev) => ({ ...prev, players }));
         }
 
         // 2. Fetch Teams from Supabase
         const teams = await SupabaseService.fetchTeams();
-        if (teams && teams.length > 0) {
+        if (teams !== null) {
           setState((prev) => ({ ...prev, teams }));
         }
 
         // 3. Fetch Matches & Knockout from Supabase
         const matchData = await SupabaseService.fetchMatches(seasonSlug);
-        if (matchData) {
+        if (matchData !== null) {
           setState((prev) => ({
             ...prev,
-            matches: matchData.matches.length > 0 ? matchData.matches : prev.matches,
-            knockout: matchData.knockout.length > 0 ? { ...prev.knockout, matches: matchData.knockout } : prev.knockout,
+            matches: matchData.matches,
+            knockout: { ...prev.knockout, matches: matchData.knockout },
           }));
         }
 
         // 4. Fetch Registrations from Supabase
         const regs = await SupabaseService.fetchRegistrations(seasonSlug);
-        if (regs && regs.length > 0) {
+        if (regs !== null) {
           setState((prev) => ({ ...prev, registrations: regs }));
         }
 
         // 5. Fetch Form Config from Supabase
         const cfg = await SupabaseService.fetchFormConfig(seasonSlug);
-        if (cfg && cfg.fields && cfg.fields.length > 0) {
+        if (cfg !== null && Array.isArray(cfg.fields) && cfg.fields.length > 0) {
           setFormConfig(cfg);
         }
 
         // 6. Fetch Tokens from Supabase
         const tokData = await SupabaseService.fetchTokens(seasonSlug);
-        if (tokData && tokData.tokens.length > 0) {
+        if (tokData !== null) {
           setTokens(tokData.tokens);
           setActiveToken(tokData.activeToken);
         }
-      }
-
-      // Reconcile with server state
-      fetch('/api/tournament/state')
-        .then((res) => (res.ok ? res.json() : null))
-        .then((serverState) => {
-          if (serverState) {
-            if (serverState.lastUpdated) {
-              lastServerScoreTime.current = serverState.lastUpdated;
-            }
-            setState((prev) => {
-              const hasServerMatches = Array.isArray(serverState.matches) && serverState.matches.length > 0;
-              const hasServerTeams = Array.isArray(serverState.teams) && serverState.teams.length > 0;
-              const hasServerPlayers = Array.isArray(serverState.players) && serverState.players.length > 0;
-              return {
+      } else {
+        // Fallback to local server state only if Supabase is not configured
+        fetch('/api/tournament/state')
+          .then((res) => (res.ok ? res.json() : null))
+          .then((serverState) => {
+            if (serverState) {
+              if (serverState.lastUpdated) {
+                lastServerScoreTime.current = serverState.lastUpdated;
+              }
+              setState((prev) => ({
                 ...prev,
                 settings: serverState.settings ? { ...prev.settings, ...serverState.settings } : prev.settings,
-                players: hasServerPlayers ? serverState.players : prev.players,
-                teams: hasServerTeams ? serverState.teams : prev.teams,
-                matches: hasServerMatches ? serverState.matches : prev.matches,
+                players: Array.isArray(serverState.players) ? serverState.players : prev.players,
+                teams: Array.isArray(serverState.teams) ? serverState.teams : prev.teams,
+                matches: Array.isArray(serverState.matches) ? serverState.matches : prev.matches,
                 knockout: serverState.knockout || prev.knockout,
                 predefinedTeams: Array.isArray(serverState.predefinedTeams) ? serverState.predefinedTeams : prev.predefinedTeams,
                 teamFormationMode: serverState.teamFormationMode || prev.teamFormationMode,
-              };
-            });
-          }
-        })
-        .catch(() => {});
+              }));
+            }
+          })
+          .catch(() => {});
+      }
 
       // Reconcile server form config
       fetch(`/api/forms/${seasonSlug}`)
@@ -971,14 +880,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
   }, []);
 
-  // Save to LocalStorage on changes
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-    } catch (e) {
-      console.error('Failed to save to localStorage:', e);
-    }
-  }, [state]);
 
   // Derived Standings
   const standings = useMemo(() => {
@@ -1019,17 +920,54 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Settings
   const updateSettings = (settingsUpdate: Partial<TournamentSettings>) => {
-    setState((prev) => ({
-      ...prev,
-      settings: { ...prev.settings, ...settingsUpdate },
-    }));
+    setState((prev) => {
+      const nextSettings = { ...prev.settings, ...settingsUpdate };
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.updateTournamentSettings(
+          prev.registrationSettings.seasonSlug || 'season-4',
+          {
+            tournamentName: nextSettings.name,
+            venue: nextSettings.venue,
+            date: nextSettings.date,
+            entryFee: nextSettings.entryFee,
+            maxSlots: nextSettings.slotLimit,
+          }
+        ).catch(() => {});
+        SupabaseService.logAudit('settings_updated', 'settings', undefined, settingsUpdate).catch(() => {});
+      }
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ settings: nextSettings }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        settings: nextSettings,
+      };
+    });
   };
 
   const updatePaymentSettings = (paymentUpdate: Partial<PaymentSettings>) => {
-    setState((prev) => ({
-      ...prev,
-      payment: { ...prev.payment, ...paymentUpdate },
-    }));
+    setState((prev) => {
+      const nextPayment = { ...prev.payment, ...paymentUpdate };
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.updateTournamentSettings(
+          prev.registrationSettings.seasonSlug || 'season-4',
+          undefined,
+          nextPayment
+        ).catch(() => {});
+        SupabaseService.logAudit('payment_settings_updated', 'settings', undefined, paymentUpdate).catch(() => {});
+      }
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ payment: nextPayment }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        payment: nextPayment,
+      };
+    });
     setFormConfig((prev) => ({
       ...prev,
       payment: {
@@ -1227,15 +1165,26 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearPlayers = () => {
-    setState((prev) => ({
-      ...prev,
-      players: [],
-      registrations: [],
-      teams: [],
-      predefinedTeams: [],
-      matches: [],
-      knockout: { ...prev.knockout, matches: [] },
-    }));
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.clearPlayers().catch(() => {});
+      SupabaseService.logAudit('players_cleared', 'player', undefined).catch(() => {});
+    }
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ players: [], teams: [], matches: [] }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        players: [],
+        registrations: [],
+        teams: [],
+        predefinedTeams: [],
+        matches: [],
+        knockout: { ...prev.knockout, matches: [] },
+      };
+    });
   };
 
   // Teams
@@ -1541,12 +1490,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const clearTeams = () => {
     lastServerScoreTime.current = Date.now();
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deleteTeamsBulk(state.teams.map((t) => t.id)).catch(() => {});
+      SupabaseService.clearTeams().catch(() => {});
+      SupabaseService.logAudit('teams_cleared', 'team', undefined).catch(() => {});
     }
     setState((prev) => {
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: [] }),
       }).catch(() => {});
       return { ...prev, teams: [] };
@@ -1729,13 +1679,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const clearAllMatches = () => {
     const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.clearSeasonMatches(seasonSlug).catch(() => {});
+      SupabaseService.clearKnockoutMatches(seasonSlug).catch(() => {});
+      SupabaseService.logAudit('matches_cleared', 'matches', undefined).catch(() => {});
+    }
     setState((prev) => {
-      if (SupabaseService.isAvailable()) {
-        SupabaseService.clearSeasonMatches(seasonSlug).catch(() => {});
-      }
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ matches: [], knockout: { ...prev.knockout, matches: [] } }),
       }).catch(() => {});
       return {
@@ -1897,10 +1849,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearKnockout = () => {
-    setState((prev) => ({
-      ...prev,
-      knockout: { ...prev.knockout, matches: [] },
-    }));
+    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.clearKnockoutMatches(seasonSlug).catch(() => {});
+    }
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ knockout: { ...prev.knockout, matches: [] } }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        knockout: { ...prev.knockout, matches: [] },
+      };
+    });
   };
 
   const TOKENS_CACHE_PREFIX = 'spl_tokens_cache_';
@@ -2441,6 +2404,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           : r
       );
 
+      if (SupabaseService.isAvailable()) {
+        const approvedReg = updatedRegistrations.find((r) => r.id === id);
+        if (approvedReg) {
+          SupabaseService.saveRegistration(approvedReg).catch(() => {});
+          SupabaseService.logAudit('registration_approved', 'registration', id, { playerId }).catch(() => {});
+        }
+      }
+
       return {
         ...prev,
         players: updatedPlayers,
@@ -2450,12 +2421,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     fetch(`/api/registrations/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify({ status: 'approved', approvedAt: Date.now() }),
     }).catch(() => {});
   };
 
   const rejectRegistration = (id: string, reason?: string) => {
+    if (SupabaseService.isAvailable()) {
+      const rejectedReg = state.registrations.find((r) => r.id === id);
+      if (rejectedReg) {
+        SupabaseService.saveRegistration({
+          ...rejectedReg,
+          status: 'rejected',
+          notes: reason ? `${rejectedReg.notes || ''} [Rejected: ${reason}]`.trim() : rejectedReg.notes,
+        }).catch(() => {});
+        SupabaseService.logAudit('registration_rejected', 'registration', id, { reason }).catch(() => {});
+      }
+    }
+
     setState((prev) => ({
       ...prev,
       registrations: prev.registrations.map((r) =>
@@ -2471,7 +2454,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     fetch(`/api/registrations/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify({ status: 'rejected' }),
     }).catch(() => {});
   };
@@ -2495,6 +2478,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (res.ok && res.data && res.data.registration) {
         const updated = res.data.registration;
+        if (SupabaseService.isAvailable()) {
+          SupabaseService.saveRegistration(updated).catch(() => {});
+          SupabaseService.logAudit('payment_verified', 'registration', id, { paymentStatus, verifiedBy, note }).catch(() => {});
+        }
         setState((prev) => ({
           ...prev,
           registrations: prev.registrations.map((r) => (r.id === id ? updated : r)),
@@ -2532,6 +2519,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         auditLog: [...(target.auditLog || []), auditEntry],
       };
 
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveRegistration(updatedReg).catch(() => {});
+        SupabaseService.logAudit('payment_verified', 'registration', id, { paymentStatus, verifiedBy, note }).catch(() => {});
+      }
+
       return {
         ...prev,
         registrations: prev.registrations.map((r) => (r.id === id ? updatedReg! : r)),
@@ -2545,6 +2537,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deleteRegistration = (id: string) => {
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.deleteRegistration(id).catch(() => {});
+      SupabaseService.logAudit('registration_deleted', 'registration', id).catch(() => {});
+    }
+
     setState((prev) => ({
       ...prev,
       registrations: prev.registrations.filter((r) => r.id !== id),
@@ -2552,12 +2549,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     fetch(`/api/registrations/${id}`, {
       method: 'DELETE',
+      headers: { ...AuthService.getAuthHeader() },
     }).catch(() => {});
   };
 
   const deleteRegistrationsBulk = (ids: string[]) => {
     if (!ids || ids.length === 0) return;
     const idSet = new Set(ids);
+
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.deleteRegistrationsBulk(ids).catch(() => {});
+      SupabaseService.logAudit('registrations_bulk_deleted', 'registration', undefined, { count: ids.length }).catch(() => {});
+    }
+
     setState((prev) => ({
       ...prev,
       registrations: prev.registrations.filter((r) => !idSet.has(r.id)),
@@ -2565,7 +2569,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     fetch('/api/registrations/bulk-delete', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify({ ids }),
     }).catch(() => {});
   };
@@ -2577,6 +2581,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     setState((prev) => {
       const newPlayers = [...prev.players];
+      const newlyCreatedPlayers: Player[] = [];
       const updatedRegistrations = prev.registrations.map((r) => {
         if (!idSet.has(r.id)) return r;
 
@@ -2590,23 +2595,35 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const playerId = existingPlayer ? existingPlayer.id : (r.playerId || crypto.randomUUID());
 
         if (!existingPlayer) {
-          newPlayers.push({
+          const np: Player = {
             id: playerId,
             name: r.name.trim(),
             mobile: r.mobile,
             age: r.age,
             gender: r.gender || 'M',
             skillLevel: (r.experience === 'Pro' ? 'Pro' : r.experience === 'Intermediate' ? 'Intermediate' : 'Advanced') as any,
-          });
+          };
+          newPlayers.push(np);
+          newlyCreatedPlayers.push(np);
         }
 
-        return {
+        const approvedReg: Registration = {
           ...r,
           status: 'approved' as const,
           approvedAt: Date.now(),
           playerId,
         };
+
+        if (SupabaseService.isAvailable()) {
+          SupabaseService.saveRegistration(approvedReg).catch(() => {});
+        }
+
+        return approvedReg;
       });
+
+      if (SupabaseService.isAvailable() && newlyCreatedPlayers.length > 0) {
+        SupabaseService.upsertPlayersBulk(newlyCreatedPlayers).catch(() => {});
+      }
 
       return {
         ...prev,
@@ -2617,7 +2634,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     fetch('/api/registrations/bulk-approve', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify({ ids }),
     }).catch(() => {});
   };

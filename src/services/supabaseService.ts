@@ -61,24 +61,51 @@ export class SupabaseService {
     try {
       const payload: Record<string, any> = {
         id: player.id,
-        name: player.name,
-        mobile: player.mobile || null,
-        age: player.age || null,
+        name: player.name.trim(),
+        mobile: player.mobile ? String(player.mobile).trim() : null,
+        age: player.age ? Number(player.age) : null,
         gender: player.gender || 'M',
-        skill_level: player.skillLevel || 'Advanced',
+        skill_level: player.skillLevel === 'Pro' ? 'Pro' : player.skillLevel === 'Intermediate' ? 'Intermediate' : 'Advanced',
         photo_url: player.photoUrl || null,
         status: 'active',
         updated_at: new Date().toISOString(),
       };
-      if (player.city) payload.city = player.city;
-      if (player.category) payload.category = player.category;
-      if (player.style) payload.style = player.style;
-      if (player.registrationStatus) payload.registration_status = player.registrationStatus;
-      if (player.registrationId) payload.registration_id = player.registrationId;
 
       const { error } = await supabase.from('players').upsert(payload as any);
-      return !error;
-    } catch {
+      if (error) {
+        console.error('Supabase upsertPlayer error:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      console.error('Supabase upsertPlayer exception:', e?.message);
+      return false;
+    }
+  }
+
+  static async upsertPlayersBulk(players: Player[]): Promise<boolean> {
+    if (!this.isAvailable() || players.length === 0) return false;
+    try {
+      const rows = players.map((player) => ({
+        id: player.id,
+        name: player.name.trim(),
+        mobile: player.mobile ? String(player.mobile).trim() : null,
+        age: player.age ? Number(player.age) : null,
+        gender: player.gender || 'M',
+        skill_level: player.skillLevel === 'Pro' ? 'Pro' : player.skillLevel === 'Intermediate' ? 'Intermediate' : 'Advanced',
+        photo_url: player.photoUrl || null,
+        status: 'active',
+        updated_at: new Date().toISOString(),
+      }));
+
+      const { error } = await supabase.from('players').upsert(rows as any);
+      if (error) {
+        console.error('Supabase upsertPlayersBulk error:', error.message);
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      console.error('Supabase upsertPlayersBulk exception:', e?.message);
       return false;
     }
   }
@@ -86,8 +113,17 @@ export class SupabaseService {
   static async deletePlayer(id: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      // 1. Remove captaincy references to prevent FK violation
+      await (supabase.from('teams') as any).update({ captain_id: null }).eq('captain_id', id);
+      // 2. Remove from roster junction
+      await supabase.from('team_players').delete().eq('player_id', id);
+      // 3. Delete player
       const { error } = await supabase.from('players').delete().eq('id', id);
-      return !error;
+      if (error) {
+        console.error('Supabase deletePlayer error:', error.message);
+        return false;
+      }
+      return true;
     } catch {
       return false;
     }
@@ -96,7 +132,28 @@ export class SupabaseService {
   static async deletePlayersBulk(ids: string[]): Promise<boolean> {
     if (!this.isAvailable() || ids.length === 0) return false;
     try {
+      // 1. Remove captaincy references
+      await (supabase.from('teams') as any).update({ captain_id: null }).in('captain_id', ids);
+      // 2. Remove roster assignments
+      await supabase.from('team_players').delete().in('player_id', ids);
+      // 3. Bulk delete players
       const { error } = await supabase.from('players').delete().in('id', ids);
+      if (error) {
+        console.error('Supabase deletePlayersBulk error:', error.message);
+        return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  static async clearPlayers(): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      await (supabase.from('teams') as any).update({ captain_id: null }).neq('id', '___none___');
+      await supabase.from('team_players').delete().neq('id', '___none___');
+      const { error } = await supabase.from('players').delete().neq('id', '___none___');
       return !error;
     } catch {
       return false;
@@ -212,6 +269,17 @@ export class SupabaseService {
     }
   }
 
+  static async clearTeams(): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      await supabase.from('team_players').delete().neq('id', '___none___');
+      const { error } = await supabase.from('teams').delete().neq('id', '___none___');
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
   static async assignPlayerToTeam(teamId: string, playerId: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
@@ -287,7 +355,7 @@ export class SupabaseService {
           groupMatches.push({
             id: m.id,
             round: m.round,
-            court: m.court,
+            court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
             teamA: m.team_a_id || '',
             teamB: m.team_b_id || '',
             scoreA: m.score_a != null ? m.score_a : undefined,
@@ -350,7 +418,7 @@ export class SupabaseService {
         id: m.id,
         tournament_season: season,
         round: m.round,
-        court: m.court,
+        court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
         match_type: 'group' as const,
         team_a_id: m.teamA || null,
         team_b_id: m.teamB || null,
@@ -385,6 +453,46 @@ export class SupabaseService {
     if (!this.isAvailable()) return false;
     try {
       const { error } = await supabase.from('matches').delete().eq('tournament_season', season);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  static async batchSaveKnockoutMatches(matches: KnockoutMatch[], season = 'season-4'): Promise<boolean> {
+    if (!this.isAvailable() || matches.length === 0) return false;
+    try {
+      const rows = matches.map((m) => ({
+        id: m.id,
+        tournament_season: season,
+        round: 99,
+        court: 1,
+        match_type: 'knockout' as const,
+        stage: m.stage || 'SF',
+        slot: m.slot || 1,
+        team_a_id: m.teamA || null,
+        team_b_id: m.teamB || null,
+        score_a: m.scoreA != null ? m.scoreA : null,
+        score_b: m.scoreB != null ? m.scoreB : null,
+        status: m.status,
+        winner_id: m.winner || null,
+        updated_at: new Date().toISOString(),
+      }));
+      const { error } = await supabase.from('matches').upsert(rows as any);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  static async clearKnockoutMatches(season = 'season-4'): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      const { error } = await supabase
+        .from('matches')
+        .delete()
+        .eq('tournament_season', season)
+        .eq('match_type', 'knockout');
       return !error;
     } catch {
       return false;
@@ -521,6 +629,16 @@ export class SupabaseService {
     }
   }
 
+  static async deleteRegistrationsBulk(ids: string[]): Promise<boolean> {
+    if (!this.isAvailable() || ids.length === 0) return false;
+    try {
+      const { error } = await supabase.from('registrations').delete().in('id', ids);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
   // ============================================================================
   // 5. REGISTRATION FORM CONFIG & VERSIONS
   // ============================================================================
@@ -617,6 +735,43 @@ export class SupabaseService {
     }
   }
 
+  static async updateTournamentSettings(
+    seasonSlug = 'season-4',
+    settingsUpdate?: Partial<{ tournamentName: string; venue: string; date: string; maxSlots: number; entryFee: number; status: string }>,
+    paymentUpdate?: any
+  ): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      const existing = await this.fetchFormConfig(seasonSlug);
+      const updatedConfig: RegistrationFormConfig = {
+        seasonSlug,
+        tournamentName: settingsUpdate?.tournamentName || existing?.tournamentName || 'Smash Premier League',
+        seasonTitle: existing?.seasonTitle || 'Season IV (Championship Edition)',
+        venue: settingsUpdate?.venue !== undefined ? settingsUpdate.venue : existing?.venue,
+        date: settingsUpdate?.date !== undefined ? settingsUpdate.date : existing?.date,
+        maxSlots: settingsUpdate?.maxSlots !== undefined ? settingsUpdate.maxSlots : (existing?.maxSlots ?? 32),
+        entryFee: settingsUpdate?.entryFee !== undefined ? settingsUpdate.entryFee : (existing?.entryFee ?? 500),
+        enabled: existing?.enabled ?? true,
+        isPublished: existing?.isPublished ?? true,
+        payment: paymentUpdate ? { ...(existing?.payment || {}), ...paymentUpdate } : (existing?.payment || { upiId: 'karan-hdfc@ybl', upiName: 'SPL Admin', qrUrl: '', instructions: '' }),
+        appearance: existing?.appearance || {
+          formTitle: 'Player Entry & Registration Form',
+          formDescription: 'Official Smash Premier League athlete entry form.',
+          welcomeMessage: 'Welcome athletes! Please fill in your details accurately.',
+          accentColor: '#10b981',
+          accentName: 'Emerald Green',
+          submitButtonText: 'Submit Registration & Confirm Entry',
+          successTitle: 'Registration Submitted Successfully!',
+          successMessage: 'Thank you for registering for Smash Premier League.',
+        },
+        fields: existing?.fields || [],
+      };
+      return await this.saveFormConfig(updatedConfig, false);
+    } catch {
+      return false;
+    }
+  }
+
   // ============================================================================
   // 6. REGISTRATION TOKENS (Shareable Links)
   // ============================================================================
@@ -700,6 +855,37 @@ export class SupabaseService {
       return !error;
     } catch {
       return false;
+    }
+  }
+
+  static async fetchStandings(season = 'season-4'): Promise<StandingsRecord[] | null> {
+    if (!this.isAvailable()) return null;
+    try {
+      const { data, error } = await supabase
+        .from('tournament_standings')
+        .select('*, teams(*)')
+        .eq('season_slug', season)
+        .order('rank', { ascending: true });
+      if (error || !data) return null;
+      return (data as any[]).map((r) => ({
+        team: {
+          id: r.team_id,
+          name: r.teams?.name || r.team_id,
+          avatarColor: r.teams?.avatar_color || 'from-amber-500 to-orange-600',
+          badge: r.teams?.badge || '🏸',
+          players: [],
+        },
+        played: r.played,
+        won: r.won,
+        lost: r.lost,
+        points: r.points,
+        diff: r.net_run_rate || 0,
+        pointsFor: r.points_for || 0,
+        pointsAgainst: r.points_against || 0,
+        form: r.form || [],
+      }));
+    } catch {
+      return null;
     }
   }
 

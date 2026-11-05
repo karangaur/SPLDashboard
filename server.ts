@@ -734,7 +734,7 @@ async function startServer() {
     res.json(data);
   });
 
-  app.post('/api/tournament/state', (req, res) => {
+  app.post('/api/tournament/state', async (req, res) => {
     if (!isAdminAuthorized(req)) {
       return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
     }
@@ -746,6 +746,107 @@ async function startServer() {
       lastUpdated: now,
     };
     writeJSON(TOURNAMENT_FILE, updated);
+
+    // Synchronize directly with Supabase PostgreSQL if active
+    if (serverSupabase) {
+      const nowIso = new Date(now).toISOString();
+      try {
+        // 1. Sync Players if provided
+        if (Array.isArray(req.body.players)) {
+          if (req.body.players.length === 0) {
+            await serverSupabase.from('team_players').delete().neq('id', '___none___');
+            await serverSupabase.from('teams').update({ captain_id: null } as any).neq('id', '___none___');
+            await serverSupabase.from('players').delete().neq('id', '___none___');
+          } else {
+            const playerRows = req.body.players.map((p: any) => ({
+              id: p.id,
+              name: String(p.name || '').trim(),
+              mobile: p.mobile ? String(p.mobile).trim() : null,
+              age: p.age ? Number(p.age) : null,
+              gender: p.gender || 'M',
+              skill_level: p.skillLevel === 'Pro' ? 'Pro' : p.skillLevel === 'Intermediate' ? 'Intermediate' : 'Advanced',
+              photo_url: p.photoUrl || null,
+              status: 'active',
+              updated_at: nowIso,
+            }));
+            await serverSupabase.from('players').upsert(playerRows as any);
+          }
+        }
+
+        // 2. Sync Teams if provided
+        if (Array.isArray(req.body.teams)) {
+          if (req.body.teams.length === 0) {
+            await serverSupabase.from('team_players').delete().neq('id', '___none___');
+            await serverSupabase.from('teams').delete().neq('id', '___none___');
+          } else {
+            for (const t of req.body.teams) {
+              await serverSupabase.from('teams').upsert({
+                id: t.id,
+                name: t.name,
+                captain_id: t.captainId || null,
+                avatar_color: t.avatarColor || 'from-amber-500 to-orange-600',
+                badge: t.badge || '🏸',
+                locked: Boolean(t.locked),
+                updated_at: nowIso,
+              } as any);
+
+              await serverSupabase.from('team_players').delete().eq('team_id', t.id);
+              if (Array.isArray(t.players) && t.players.length > 0) {
+                const rosterRows = t.players.map((pid: string, idx: number) => ({
+                  team_id: t.id,
+                  player_id: pid,
+                  slot_index: idx,
+                  is_captain: t.captainId === pid,
+                }));
+                await serverSupabase.from('team_players').insert(rosterRows as any);
+              }
+            }
+          }
+        }
+
+        // 3. Sync Matches if provided
+        if (Array.isArray(req.body.matches)) {
+          if (req.body.matches.length === 0) {
+            await serverSupabase.from('matches').delete().eq('tournament_season', 'season-4');
+          } else {
+            const matchRows = req.body.matches.map((m: any) => ({
+              id: m.id,
+              tournament_season: 'season-4',
+              round: m.round || 1,
+              court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
+              match_type: 'group' as const,
+              team_a_id: m.teamA || null,
+              team_b_id: m.teamB || null,
+              score_a: m.scoreA != null ? m.scoreA : null,
+              score_b: m.scoreB != null ? m.scoreB : null,
+              status: m.status || 'upcoming',
+              winner_id: m.winner || null,
+              time: m.time || null,
+              sets_json: m.sets || null,
+              mvp_player_id: m.mvpPlayerId || null,
+              updated_at: nowIso,
+            }));
+            await serverSupabase.from('matches').upsert(matchRows as any);
+          }
+        }
+
+        // 4. Sync Settings if provided
+        if (req.body.settings) {
+          const s = req.body.settings;
+          await serverSupabase.from('registration_form_config').update({
+            tournament_name: s.name,
+            venue: s.venue,
+            date: s.date,
+            max_slots: s.slotLimit,
+            entry_fee: s.entryFee,
+            updated_at: nowIso,
+          } as any).eq('season_slug', 'season-4');
+        }
+      } catch (err: any) {
+        console.error('Error syncing tournament state to Supabase:', err?.message);
+      }
+    }
+
     broadcastSse('tournament_state', updated);
     res.json({ success: true, lastUpdated: now, state: updated });
   });
