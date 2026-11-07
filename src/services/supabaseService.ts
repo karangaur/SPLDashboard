@@ -619,27 +619,66 @@ export class SupabaseService {
   }
 
   static async saveRegistration(reg: Registration): Promise<boolean> {
-    if (!this.isAvailable()) return false;
+    const res = await this.saveRegistrationWithDetail(reg);
+    return res.success;
+  }
+
+  static async saveRegistrationWithDetail(reg: Registration): Promise<{ success: boolean; error?: string }> {
+    if (!this.isAvailable()) return { success: false, error: 'Supabase credentials not configured' };
     try {
+      // 1. Normalize gender to match PostgreSQL CHECK (gender IN ('M', 'F', 'Other'))
+      const rawGender = String(reg.gender || '').trim().toLowerCase();
+      let normalizedGender: 'M' | 'F' | 'Other' = 'M';
+      if (rawGender === 'm' || rawGender === 'male') {
+        normalizedGender = 'M';
+      } else if (rawGender === 'f' || rawGender === 'female') {
+        normalizedGender = 'F';
+      } else if (rawGender === 'other') {
+        normalizedGender = 'Other';
+      }
+
+      // 2. Normalize status to match PostgreSQL CHECK (status IN ('pending', 'approved', 'rejected', 'paid', 'complimentary'))
+      const validStatuses = ['pending', 'approved', 'rejected', 'paid', 'complimentary'];
+      const normalizedStatus = validStatuses.includes(reg.status) ? reg.status : 'pending';
+
+      // 3. Normalize payment_status to match PostgreSQL CHECK
+      const validPaymentStatuses = [
+        'unpaid',
+        'pending',
+        'initiated',
+        'pending_verification',
+        'paid',
+        'failed',
+        'cancelled',
+        'refunded',
+      ];
+      const normalizedPaymentStatus = validPaymentStatuses.includes(reg.paymentStatus as any)
+        ? (reg.paymentStatus as any)
+        : 'unpaid';
+
+      // 4. Normalize method to match PostgreSQL CHECK
+      const validMethods = ['cash', 'upi', 'bank', 'complimentary'];
+      const normalizedMethod = validMethods.includes(reg.method as any) ? (reg.method as any) : 'upi';
+
       const payload = {
         id: reg.id,
         reg_id: reg.regId,
         season_slug: reg.season || 'season-4',
         player_id: reg.playerId || null,
-        name: reg.name,
-        mobile: reg.mobile,
-        whatsapp: reg.whatsapp || null,
-        age: reg.age || null,
-        gender: reg.gender || 'M',
+        name: reg.name.trim(),
+        mobile: reg.mobile.replace(/\D/g, ''),
+        whatsapp: reg.whatsapp ? reg.whatsapp.replace(/\D/g, '') : null,
+        age: typeof reg.age === 'number' && !isNaN(reg.age) ? Math.round(reg.age) : null,
+        gender: normalizedGender,
         experience: reg.experience || null,
         category: reg.category || null,
         style: reg.style || null,
         city: reg.city || null,
         notes: reg.notes || null,
-        fee: reg.fee,
-        status: reg.status,
-        payment_status: reg.paymentStatus || 'unpaid',
-        method: reg.method || 'upi',
+        fee: Math.round(Number(reg.fee) || 250),
+        status: normalizedStatus,
+        payment_status: normalizedPaymentStatus,
+        method: normalizedMethod,
         txn_id: reg.txnId || null,
         answers_json: reg.answers || {},
         photo_url: reg.photoUrl || null,
@@ -656,13 +695,13 @@ export class SupabaseService {
 
       const { error } = await supabase.from('registrations').upsert(payload as any);
       if (error) {
-        console.error('Supabase saveRegistration error:', error.message);
-        return false;
+        console.error('Supabase saveRegistration error:', error.message, error.details);
+        return { success: false, error: error.message };
       }
-      return true;
+      return { success: true };
     } catch (e: any) {
       console.error('Supabase saveRegistration exception:', e?.message);
-      return false;
+      return { success: false, error: e?.message || 'Database error recording registration' };
     }
   }
 

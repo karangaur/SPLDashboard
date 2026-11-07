@@ -330,12 +330,16 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     setSubmitting(true);
 
     try {
+      const rawGen = String(answers.gender || '').trim().toLowerCase();
+      const normGender: 'M' | 'F' | 'Other' =
+        rawGen === 'm' || rawGen === 'male' ? 'M' : rawGen === 'f' || rawGen === 'female' ? 'F' : 'Other';
+
       const payload = {
         name: athleteName,
         mobile: mCheck.cleanMobile,
         whatsapp: answers.whatsapp ? String(answers.whatsapp).trim() : undefined,
         age: answers.age ? Number(answers.age) : undefined,
-        gender: answers.gender || 'M',
+        gender: normGender,
         experience: answers.experience || undefined,
         category: selectedCategory || answers.category || undefined,
         style: answers.style || undefined,

@@ -2213,6 +2213,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         const initialPaymentStatus: PaymentStatus = formData.txnId ? 'pending_verification' : 'unpaid';
 
+        const rawGen = String(formData.gender || '').trim().toLowerCase();
+        const normGen: 'M' | 'F' | 'Other' =
+          rawGen === 'm' || rawGen === 'male' ? 'M' : rawGen === 'f' || rawGen === 'female' ? 'F' : 'Other';
+
         const newReg: Registration = {
           id: crypto.randomUUID(),
           regId,
@@ -2220,7 +2224,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           mobile: cleanMobile,
           whatsapp: formData.whatsapp ? String(formData.whatsapp).trim() : undefined,
           age: formData.age ? Number(formData.age) : undefined,
-          gender: formData.gender || 'M',
+          gender: normGen,
           experience: formData.experience || undefined,
           category: formData.category || undefined,
           style: formData.style || undefined,
@@ -2248,16 +2252,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ],
         };
 
-        const saved = await SupabaseService.saveRegistration(newReg);
-        if (!saved) {
+        const saveRes = await SupabaseService.saveRegistrationWithDetail(newReg);
+        if (!saveRes.success) {
           // Retry once with alternative salt in case of any rare ID collision
           const altSalt = Math.floor(1000 + Math.random() * 9000);
           newReg.regId = `SPL-2026-${Date.now().toString(36).toUpperCase().slice(-3)}-${altSalt}`;
-          const retrySaved = await SupabaseService.saveRegistration(newReg);
-          if (!retrySaved) {
+          const retryRes = await SupabaseService.saveRegistrationWithDetail(newReg);
+          if (!retryRes.success) {
             return {
               success: false,
-              error: 'Database insertion error. Could not record registration in Supabase.',
+              error: `Database insertion error: ${retryRes.error || saveRes.error || 'Could not record registration in Supabase.'}`,
             };
           }
         }
