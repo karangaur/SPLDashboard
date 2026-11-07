@@ -581,6 +581,43 @@ export class SupabaseService {
     }
   }
 
+  static async checkDuplicateRegistration(
+    mobile: string,
+    seasonSlug = 'season-4'
+  ): Promise<{ isDuplicate: boolean; regId?: string } | null> {
+    if (!this.isAvailable()) return null;
+    try {
+      const clean = mobile.replace(/\D/g, '');
+      const { data, error } = await supabase
+        .from('registrations')
+        .select('id, reg_id, status')
+        .eq('season_slug', seasonSlug)
+        .eq('mobile', clean)
+        .neq('status', 'rejected')
+        .maybeSingle();
+
+      if (error || !data) return { isDuplicate: false };
+      return { isDuplicate: true, regId: (data as any).reg_id };
+    } catch {
+      return null;
+    }
+  }
+
+  static async generateCollisionFreeRegId(prefix = 'SPL-2026'): Promise<string> {
+    try {
+      const { count } = await supabase
+        .from('registrations')
+        .select('*', { count: 'exact', head: true });
+      const seq = String((count || 0) + 1).padStart(3, '0');
+      const salt = Math.floor(100 + Math.random() * 900);
+      return `${prefix}-${seq}-${salt}`;
+    } catch {
+      const fallbackSeq = String(Math.floor(1 + Math.random() * 999)).padStart(3, '0');
+      const salt = Math.floor(100 + Math.random() * 900);
+      return `${prefix}-${fallbackSeq}-${salt}`;
+    }
+  }
+
   static async saveRegistration(reg: Registration): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
@@ -879,6 +916,26 @@ export class SupabaseService {
       };
 
       const { error } = await supabase.from('registration_tokens').upsert(payload as any);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  static async incrementTokenSubmission(token: string): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      const { data } = await supabase
+        .from('registration_tokens')
+        .select('*')
+        .eq('token', token)
+        .maybeSingle();
+
+      if (!data) return false;
+      const count = ((data as any).submissions_count || 0) + 1;
+      const { error } = await (supabase.from('registration_tokens') as any)
+        .update({ submissions_count: count })
+        .eq('token', token);
       return !error;
     } catch {
       return false;

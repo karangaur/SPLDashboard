@@ -185,34 +185,46 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
     setIsSavingSlug(true);
     const cleaned = customSlugInput.toLowerCase().trim();
     try {
-      const res = await fetch('/api/registration-url', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ customUrlSlug: cleaned, seasonSlug: currentSeasonSlug }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setSlugSaveError(data.error || 'Failed to save custom URL slug');
-      } else {
-        setActiveCustomSlug(cleaned);
-        const updatedConfig: RegistrationFormConfig = {
-          ...formConfig,
+      // 1. Update component and context state immediately
+      setActiveCustomSlug(cleaned);
+      const updatedConfig: RegistrationFormConfig = {
+        ...formConfig,
+        customUrlSlug: cleaned,
+        appearance: {
+          ...formConfig.appearance,
           customUrlSlug: cleaned,
-          appearance: {
-            ...formConfig.appearance,
-            customUrlSlug: cleaned,
-          },
-        };
-        await saveFormConfig(updatedConfig, false);
-        if (SupabaseService.isAvailable()) {
-          SupabaseService.saveCustomUrlSlug(cleaned, currentSeasonSlug).catch(() => {});
-        }
-        sportsAudio.playFanfare();
-        setSlugSaveSuccess(`Registration link successfully set to /${cleaned}`);
-        setTimeout(() => setSlugSaveSuccess(null), 4000);
+        },
+      };
+
+      // 2. Persist to TournamentContext state & Supabase PostgreSQL directly
+      await saveFormConfig(updatedConfig, false);
+      if (SupabaseService.isAvailable()) {
+        await SupabaseService.saveCustomUrlSlug(cleaned, currentSeasonSlug);
       }
+
+      // 3. Gracefully notify local backend route without failing if on static hosting (e.g. Vercel)
+      try {
+        const res = await fetch('/api/registration-url', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ customUrlSlug: cleaned, seasonSlug: currentSeasonSlug }),
+        });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          const data = await res.json().catch(() => null);
+          if (data && !res.ok && data.error) {
+            console.warn('Backend custom-url sync warning:', data.error);
+          }
+        }
+      } catch {
+        // Safe to ignore on static/SPA hosting environments like Vercel
+      }
+
+      sportsAudio.playFanfare();
+      setSlugSaveSuccess(`Registration link successfully set to /${cleaned}`);
+      setTimeout(() => setSlugSaveSuccess(null), 4000);
     } catch (err: any) {
-      setSlugSaveError(err?.message || 'Network error updating custom slug');
+      setSlugSaveError(err?.message || 'Error updating custom slug');
     } finally {
       setIsSavingSlug(false);
     }
@@ -221,11 +233,6 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   const handleResetSlugToDefault = async () => {
     setIsSavingSlug(true);
     try {
-      await fetch('/api/registration-url/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ seasonSlug: currentSeasonSlug }),
-      });
       setActiveCustomSlug('register');
       setCustomSlugInput('register');
       const updatedConfig: RegistrationFormConfig = {
@@ -238,8 +245,17 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
       };
       await saveFormConfig(updatedConfig, false);
       if (SupabaseService.isAvailable()) {
-        SupabaseService.saveCustomUrlSlug('register', currentSeasonSlug).catch(() => {});
+        await SupabaseService.saveCustomUrlSlug('register', currentSeasonSlug);
       }
+
+      try {
+        await fetch('/api/registration-url/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ seasonSlug: currentSeasonSlug }),
+        });
+      } catch {}
+
       setSlugSaveSuccess('Registration link reset to default (/register)');
       setTimeout(() => setSlugSaveSuccess(null), 3000);
     } catch (e: any) {

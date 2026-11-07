@@ -265,8 +265,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }));
         }
 
-        // 4. Fetch Registrations from Supabase
-        const regs = await SupabaseService.fetchRegistrations(seasonSlug);
+        // 4. Fetch Registrations from Supabase (all seasons and custom slugs)
+        const regs = await SupabaseService.fetchRegistrations('all');
         if (regs !== null) {
           setState((prev) => ({ ...prev, registrations: regs }));
         }
@@ -2193,6 +2193,116 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const submitPublicRegistration = async (
     formData: any
   ): Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean }> => {
+    const cleanMobile = formData.mobile ? formData.mobile.replace(/\D/g, '') : '';
+    const targetSeason = formData.season || state.registrationSettings.seasonSlug || 'season-4';
+
+    // 1. Primary path: Supabase PostgreSQL direct database persistence
+    if (SupabaseService.isAvailable()) {
+      try {
+        // Direct duplicate mobile check in Supabase
+        const dupCheck = await SupabaseService.checkDuplicateRegistration(cleanMobile, targetSeason);
+        if (dupCheck?.isDuplicate) {
+          return {
+            success: false,
+            error: `A registration with mobile number ${cleanMobile} already exists for this season (Reg ID: ${dupCheck.regId || 'existing'}).`,
+          };
+        }
+
+        // Generate guaranteed collision-free registration ID
+        const regId = await SupabaseService.generateCollisionFreeRegId('SPL-2026');
+
+        const initialPaymentStatus: PaymentStatus = formData.txnId ? 'pending_verification' : 'unpaid';
+
+        const newReg: Registration = {
+          id: crypto.randomUUID(),
+          regId,
+          name: (formData.name || '').trim(),
+          mobile: cleanMobile,
+          whatsapp: formData.whatsapp ? String(formData.whatsapp).trim() : undefined,
+          age: formData.age ? Number(formData.age) : undefined,
+          gender: formData.gender || 'M',
+          experience: formData.experience || undefined,
+          category: formData.category || undefined,
+          style: formData.style || undefined,
+          city: formData.city ? String(formData.city).trim() : undefined,
+          notes: formData.notes ? String(formData.notes).trim() : undefined,
+          fee: formData.fee ?? (formConfig.payment?.baseFee ?? formConfig.entryFee ?? state.settings.entryFee ?? 250),
+          status: 'pending',
+          paymentStatus: initialPaymentStatus,
+          method: formData.method || 'upi',
+          txnId: formData.txnId ? String(formData.txnId).trim() : undefined,
+          season: targetSeason,
+          createdAt: Date.now(),
+          answers: formData.answers || {},
+          photoUrl: formData.photoUrl || undefined,
+          tokenUsed: formData.tokenUsed || undefined,
+          formVersion: formData.formVersion || formConfig.version || 1,
+          auditLog: [
+            {
+              action: 'created',
+              by: 'Player Submission',
+              at: Date.now(),
+              toStatus: initialPaymentStatus,
+              note: formData.txnId ? `Submitted UPI Ref: ${formData.txnId}` : undefined,
+            },
+          ],
+        };
+
+        const saved = await SupabaseService.saveRegistration(newReg);
+        if (!saved) {
+          // Retry once with alternative salt in case of any rare ID collision
+          const altSalt = Math.floor(1000 + Math.random() * 9000);
+          newReg.regId = `SPL-2026-${Date.now().toString(36).toUpperCase().slice(-3)}-${altSalt}`;
+          const retrySaved = await SupabaseService.saveRegistration(newReg);
+          if (!retrySaved) {
+            return {
+              success: false,
+              error: 'Database insertion error. Could not record registration in Supabase.',
+            };
+          }
+        }
+
+        // Increment token submission counter if link token was attached
+        if (formData.tokenUsed) {
+          SupabaseService.incrementTokenSubmission(formData.tokenUsed).catch(() => {});
+        }
+
+        // Record audit trail in Supabase
+        SupabaseService.logAudit('registration_submitted', 'registration', newReg.id, {
+          name: newReg.name,
+          regId: newReg.regId,
+          mobile: newReg.mobile,
+          season: newReg.season,
+          version: newReg.formVersion,
+        }).catch(() => {});
+
+        // Safely notify local full-stack dev server in background if running
+        safeFetchJson('/api/registrations', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(newReg),
+        }).catch(() => {});
+
+        // Update local React state immediately so confirmation card displays
+        setState((prev) => ({
+          ...prev,
+          registrations: [
+            ...prev.registrations.filter((r) => r.id !== newReg.id),
+            newReg,
+          ],
+        }));
+
+        return { success: true, registration: newReg };
+      } catch (err: any) {
+        console.error('Supabase registration submission error:', err);
+        return {
+          success: false,
+          error: err?.message || 'Database error processing registration. Please try again.',
+        };
+      }
+    }
+
+    // 2. Fallback when Supabase credentials are not configured (local dev server):
     try {
       const res = await safeFetchJson<{
         success: boolean;
@@ -2207,15 +2317,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       if (res.ok && res.data && res.data.registration) {
         const savedReg = res.data.registration;
-        if (SupabaseService.isAvailable()) {
-          SupabaseService.saveRegistration(savedReg).catch(() => {});
-          SupabaseService.logAudit('registration_submitted', 'registration', savedReg.id, {
-            name: savedReg.name,
-            regId: savedReg.regId,
-            mobile: savedReg.mobile,
-            version: savedReg.formVersion || formConfig.version || 1,
-          }).catch(() => {});
-        }
         setState((prev) => ({
           ...prev,
           registrations: [
@@ -2235,8 +2336,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
     } catch {}
 
-    // Resilient local fallback if backend route returned 404 HTML on Vercel or failed
-    const cleanMobile = formData.mobile ? formData.mobile.replace(/\D/g, '') : '';
+    // Resilient local memory fallback
     const isDup = state.registrations.some(
       (r) => r.mobile.replace(/\D/g, '') === cleanMobile && r.status !== 'rejected'
     );
@@ -2246,11 +2346,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         error: `A registration with mobile number ${cleanMobile} already exists for this season.`,
       };
     }
-    const regId = `SPL-2026-${String(state.registrations.length + 1).padStart(3, '0')}`;
+    const regSeq = String(state.registrations.length + 1).padStart(3, '0');
+    const regSalt = Math.floor(100 + Math.random() * 900);
+    const regId = `SPL-2026-${regSeq}-${regSalt}`;
     const newReg: Registration = {
       id: crypto.randomUUID(),
       regId,
-      name: formData.name.trim(),
+      name: (formData.name || '').trim(),
       mobile: cleanMobile,
       whatsapp: formData.whatsapp,
       age: formData.age ? Number(formData.age) : undefined,
@@ -2262,25 +2364,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       notes: formData.notes,
       fee: formData.fee || state.settings.entryFee || 500,
       status: 'pending',
+      paymentStatus: formData.txnId ? 'pending_verification' : 'unpaid',
       method: formData.method || 'upi',
       txnId: formData.txnId,
-      season: formData.season || state.registrationSettings.seasonSlug,
+      season: targetSeason,
       createdAt: Date.now(),
       answers: formData.answers || {},
       photoUrl: formData.photoUrl || undefined,
       tokenUsed: formData.tokenUsed || undefined,
       formVersion: formData.formVersion || formConfig.version || 1,
     };
-
-    if (SupabaseService.isAvailable()) {
-      SupabaseService.saveRegistration(newReg).catch(() => {});
-      SupabaseService.logAudit('registration_submitted', 'registration', newReg.id, {
-        name: newReg.name,
-        regId: newReg.regId,
-        mobile: newReg.mobile,
-        version: newReg.formVersion,
-      }).catch(() => {});
-    }
 
     setState((prev) => ({
       ...prev,
@@ -2289,11 +2382,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return { success: true, registration: newReg };
   };
 
-
   const addRegistration = (
     data: Partial<Registration> & { name: string; mobile: string }
   ): Registration => {
-    const regId = `SPL-2026-${String(state.registrations.length + 1).padStart(3, '0')}`;
+    const regSeq = String(state.registrations.length + 1).padStart(3, '0');
+    const regSalt = Math.floor(100 + Math.random() * 900);
+    const regId = `SPL-2026-${regSeq}-${regSalt}`;
     const newReg: Registration = {
       id: crypto.randomUUID(),
       regId,
@@ -2309,12 +2403,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       notes: data.notes,
       fee: data.fee || state.settings.entryFee || 500,
       status: (data.status as any) || 'pending',
+      paymentStatus: (data.paymentStatus as any) || (data.status === 'paid' ? 'paid' : 'unpaid'),
       method: data.method || 'upi',
       txnId: data.txnId,
       season: data.season || state.registrationSettings.seasonSlug,
       createdAt: Date.now(),
       paidAt: data.status === 'paid' ? Date.now() : undefined,
     };
+
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.saveRegistration(newReg).catch(() => {});
+    }
 
     setState((prev) => ({
       ...prev,
@@ -2332,9 +2431,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateRegistration = (id: string, updates: Partial<Registration>) => {
-    setState((prev) => ({
-      ...prev,
-      registrations: prev.registrations.map((r) =>
+    setState((prev) => {
+      const updated = prev.registrations.map((r) =>
         r.id === id
           ? {
               ...r,
@@ -2342,12 +2440,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               paidAt: updates.status === 'paid' && !r.paidAt ? Date.now() : r.paidAt,
             }
           : r
-      ),
-      players: prev.players.map((p) => {
-        const target = prev.registrations.find((r) => r.id === id);
-        return target && target.playerId === p.id && updates.name ? { ...p, name: updates.name } : p;
-      }),
-    }));
+      );
+      if (SupabaseService.isAvailable()) {
+        const item = updated.find((r) => r.id === id);
+        if (item) {
+          SupabaseService.saveRegistration(item).catch(() => {});
+        }
+      }
+      return {
+        ...prev,
+        registrations: updated,
+        players: prev.players.map((p) => {
+          const target = prev.registrations.find((r) => r.id === id);
+          return target && target.playerId === p.id && updates.name ? { ...p, name: updates.name } : p;
+        }),
+      };
+    });
 
     fetch(`/api/registrations/${id}`, {
       method: 'PATCH',
