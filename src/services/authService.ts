@@ -80,12 +80,24 @@ export class AuthService {
     return session ? session.user : null;
   }
 
+  static getUser(): AdminUser | null {
+    return this.getCurrentUser();
+  }
+
   /**
    * Check if user has super admin permission
    */
   static isSuperAdmin(): boolean {
     const user = this.getCurrentUser();
     return user?.role === 'super_admin';
+  }
+
+  /**
+   * Check if user has score operator permission
+   */
+  static isScoreOperator(): boolean {
+    const user = this.getCurrentUser();
+    return user?.role === 'scorer';
   }
 
   /**
@@ -108,70 +120,73 @@ export class AuthService {
     const cleanPass = password.trim();
 
     if (!cleanId) {
-      return { success: false, error: 'Please enter your admin username or email address.' };
+      return { success: false, error: 'Please enter your username or email address.' };
     }
     if (!cleanPass) {
       return { success: false, error: 'Please enter your password.' };
     }
 
-    // 1. If Supabase is configured and input is an email, attempt Supabase Auth
-    if (isSupabaseConfigured() && cleanId.includes('@')) {
+    // 1. If Supabase is configured, resolve user record from admin_users first
+    if (isSupabaseConfigured()) {
       try {
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-          email: cleanId,
-          password: cleanPass,
-        });
+        const { data: dbUser } = await supabase
+          .from('admin_users')
+          .select('*')
+          .or(`email.eq.${cleanId},username.eq.${cleanId}`)
+          .maybeSingle();
 
-        if (!authError && authData.user && authData.session) {
-          // Look up user role in admin_users table
-          const { data } = await supabase
-            .from('admin_users')
-            .select('*')
-            .or(`auth_user_id.eq.${authData.user.id},email.eq.${cleanId}`)
-            .maybeSingle();
+        const adminRow = dbUser as any;
 
-          const adminRow = data as any;
-
-          if (adminRow && !adminRow.is_active) {
-            await supabase.auth.signOut();
-            return { success: false, error: 'This administrator account has been deactivated.' };
-          }
-
-          const role = (adminRow?.role as any) || 'tournament_director';
-          const adminUser: AdminUser = {
-            id: adminRow?.id || authData.user.id,
-            username: adminRow?.username || cleanId.split('@')[0],
-            email: authData.user.email || cleanId,
-            name: adminRow?.name || authData.user.user_metadata?.full_name || 'Tournament Director',
-            role,
-            avatar: adminRow?.avatar_url || undefined,
-            lastLogin: Date.now(),
-            authSource: 'supabase',
+        if (adminRow && !adminRow.is_active) {
+          return {
+            success: false,
+            error: 'This account has been deactivated by the tournament administrator.',
           };
+        }
 
-          const session: AdminSession = {
-            token: authData.session.access_token,
-            user: adminUser,
-            expiresAt: rememberMe ? Date.now() + 30 * 24 * 60 * 60 * 1000 : Date.now() + 8 * 60 * 60 * 1000,
-            rememberMe,
-          };
+        const targetEmail = adminRow ? adminRow.email : cleanId.includes('@') ? cleanId : null;
 
-          this.saveSession(session, rememberMe);
+        if (targetEmail) {
+          const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email: targetEmail,
+            password: cleanPass,
+          });
 
-          // Update last login
-          if (adminRow?.id) {
-            (supabase
-              .from('admin_users') as any)
-              .update({ last_login: new Date().toISOString() })
-              .eq('id', adminRow.id)
-              .then(() => {});
+          if (!authError && authData.user && authData.session) {
+            const role = (adminRow?.role as any) || 'tournament_director';
+            const adminUser: AdminUser = {
+              id: adminRow?.id || authData.user.id,
+              username: adminRow?.username || cleanId.split('@')[0],
+              email: authData.user.email || targetEmail,
+              name: adminRow?.name || authData.user.user_metadata?.full_name || 'Tournament Official',
+              role,
+              avatar: adminRow?.avatar_url || undefined,
+              lastLogin: Date.now(),
+              authSource: 'supabase',
+            };
+
+            const session: AdminSession = {
+              token: authData.session.access_token,
+              user: adminUser,
+              expiresAt: rememberMe ? Date.now() + 30 * 24 * 60 * 60 * 1000 : Date.now() + 8 * 60 * 60 * 1000,
+              rememberMe,
+            };
+
+            this.saveSession(session, rememberMe);
+
+            // Update last login in admin_users
+            if (adminRow?.id) {
+              (supabase.from('admin_users') as any)
+                .update({ last_login: new Date().toISOString() })
+                .eq('id', adminRow.id)
+                .then(() => {});
+            }
+
+            return { success: true, user: adminUser };
           }
-
-
-          return { success: true, user: adminUser };
         }
       } catch (e) {
-        console.warn('Supabase Auth login attempt yielded error, attempting server fallback:', e);
+        console.warn('Supabase Auth login attempt yielded notice, trying fallback:', e);
       }
     }
 
@@ -183,9 +198,13 @@ export class AuthService {
         body: JSON.stringify({ identifier: cleanId, password: cleanPass, rememberMe }),
       });
 
-      const contentType = res.headers.get('content-type') || '';
-      if (contentType.includes('application/json')) {
-        const data = await res.json();
+      const rawText = await res.text().catch(() => '');
+      let data: any = null;
+      try {
+        if (rawText && rawText.trim()) data = JSON.parse(rawText);
+      } catch {}
+
+      if (data) {
         if (res.ok && data.success && data.user) {
           const session: AdminSession = {
             token: data.token || `spl_tk_${crypto.randomUUID().replace(/-/g, '')}`,

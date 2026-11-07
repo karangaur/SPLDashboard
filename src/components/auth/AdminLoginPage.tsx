@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { AuthService, AdminUser } from '../../services/authService';
+import { ForgotPasswordModal } from './ForgotPasswordModal';
 
 interface AdminLoginPageProps {
   onLoginSuccess: (user: AdminUser) => void;
@@ -35,6 +36,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showHelpModal, setShowHelpModal] = useState(false);
+  const [showForgotModal, setShowForgotModal] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -308,7 +310,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
                     </label>
                     <button
                       type="button"
-                      onClick={() => setShowHelpModal(true)}
+                      onClick={() => setShowForgotModal(true)}
                       className="text-[11px] font-semibold text-lime-400 hover:text-lime-300 transition-colors"
                     >
                       Forgot?
@@ -505,6 +507,16 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* Forgot Password Security Verification Modal */}
+      <ForgotPasswordModal
+        isOpen={showForgotModal}
+        onClose={() => setShowForgotModal(false)}
+        onPasswordResetSuccess={() => {
+          setShowForgotModal(false);
+          setErrorMessage(null);
+        }}
+      />
     </div>
   );
 };

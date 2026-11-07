@@ -12,8 +12,12 @@ import {
   LogOut,
   Shield,
   ExternalLink,
+  ShieldCheck,
+  User,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
+import { AuthService } from '../../services/authService';
+import { MyAccountModal } from '../auth/MyAccountModal';
 
 export type NavTab =
   | 'dashboard'
@@ -27,7 +31,8 @@ export type NavTab =
   | 'registered'
   | 'statistics'
   | 'champion'
-  | 'settings';
+  | 'settings'
+  | 'users';
 
 interface HeaderProps {
   currentTab: NavTab;
@@ -40,7 +45,9 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
   const { state } = useTournament();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
+  const [accountModalOpen, setAccountModalOpen] = useState(false);
 
+  const isSuperAdmin = AuthService.isSuperAdmin();
   const liveMatchesCount = state.matches.filter((m) => m.status === 'live').length;
 
   const handleNav = (tab: NavTab) => {
@@ -154,7 +161,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
             <button
               onClick={() => setMoreDropdownOpen((prev) => !prev)}
               className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 ${
-                ['tokens', 'registered', 'statistics', 'champion', 'settings'].includes(currentTab)
+                ['tokens', 'registered', 'statistics', 'champion', 'settings', 'users'].includes(currentTab)
                   ? 'bg-white/10 text-amber-400 font-semibold'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
@@ -213,6 +220,17 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                     <Sliders className="w-4 h-4 text-slate-400" />
                     <span>Tournament Settings</span>
                   </button>
+                  {isSuperAdmin && (
+                    <button
+                      onClick={() => handleNav('users')}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-slate-200 hover:text-white flex items-center gap-2.5 ${
+                        currentTab === 'users' ? 'bg-amber-400/20 text-amber-300' : 'hover:bg-white/10'
+                      }`}
+                    >
+                      <ShieldCheck className="w-4 h-4 text-amber-400" />
+                      <span>User Management (RBAC)</span>
+                    </button>
+                  )}
                 </div>
               </>
             )}
@@ -241,6 +259,17 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               <span>Public Site</span>
             </button>
           )}
+
+          {/* User Account / Password Management */}
+          <button
+            type="button"
+            onClick={() => setAccountModalOpen(true)}
+            title="My Account & Security"
+            className="hidden sm:flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
+          >
+            <User className="w-3.5 h-3.5 text-amber-400" />
+            <span>My Account</span>
+          </button>
 
           {/* Admin Indicator & Logout */}
           {onLogout && (
@@ -355,6 +384,25 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               <span>Settings & Data Backup</span>
               <Sliders className="w-4 h-4 text-slate-400" />
             </button>
+            {isSuperAdmin && (
+              <button
+                onClick={() => handleNav('users')}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-amber-300 text-sm font-semibold"
+              >
+                <span>User Management (RBAC)</span>
+                <ShieldCheck className="w-4 h-4 text-amber-400" />
+              </button>
+            )}
+            <button
+              onClick={() => {
+                setMobileMenuOpen(false);
+                setAccountModalOpen(true);
+              }}
+              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-sm mt-2 transition-colors"
+            >
+              <span>My Account & Security</span>
+              <User className="w-4 h-4 text-amber-400" />
+            </button>
             {onViewPublicHome && (
               <button
                 onClick={() => {
@@ -382,6 +430,12 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
           </div>
         </div>
       )}
+
+      {/* Authenticated User Account & Password Modal */}
+      <MyAccountModal
+        isOpen={accountModalOpen}
+        onClose={() => setAccountModalOpen(false)}
+      />
     </header>
   );
 };

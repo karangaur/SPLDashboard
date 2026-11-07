@@ -98,8 +98,12 @@ export async function testSupabaseConnection(): Promise<SupabaseTestResult> {
   try {
     const res = await fetch('/api/database/status');
     if (res.ok) {
-      const info = await res.json();
-      if (info.supabaseStatus?.configured) {
+      const rawText = await res.text().catch(() => '');
+      let info: any = null;
+      try {
+        if (rawText && rawText.trim()) info = JSON.parse(rawText);
+      } catch {}
+      if (info?.supabaseStatus?.configured) {
         return {
           configured: true,
           connected: Boolean(info.supabaseStatus.connected),

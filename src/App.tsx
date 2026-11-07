@@ -14,6 +14,8 @@ import { RegisteredView } from './components/registered/RegisteredView';
 import { StatisticsView } from './components/statistics/StatisticsView';
 import { ChampionView } from './components/champion/ChampionView';
 import { SettingsView } from './components/settings/SettingsView';
+import { UserManagementView } from './components/users/UserManagementView';
+import { ScoreOperatorDashboard } from './components/scorer/ScoreOperatorDashboard';
 import { PublicRegistrationPage } from './components/registration/PublicRegistrationPage';
 import { AdminLoginPage } from './components/auth/AdminLoginPage';
 import { HeroHomePage } from './components/home/HeroHomePage';
@@ -45,6 +47,7 @@ const RESERVED_PATHS = new Set([
   'statistics',
   'champion',
   'settings',
+  'users',
 ]);
 
 function getRouteInfo(): { mode: 'home' | 'admin' | 'login' | 'register'; season?: string } {
@@ -181,6 +184,8 @@ export default function App() {
         return <ChampionView />;
       case 'settings':
         return <SettingsView />;
+      case 'users':
+        return <UserManagementView />;
       default:
         return <DashboardView onSelectTab={setCurrentTab} />;
     }
@@ -214,8 +219,14 @@ export default function App() {
             onGoToPublicRegister={() => handleOpenPublicForm()}
             onBackToHome={() => setViewMode('home')}
           />
+        ) : AuthService.isScoreOperator() ? (
+          /* Normal User (Score Operator) Dedicated Console */
+          <ScoreOperatorDashboard
+            user={AuthService.getCurrentUser()!}
+            onLogout={handleLogout}
+          />
         ) : (
-          /* Admin Tournament Dashboard Shell */
+          /* Super Admin Tournament Dashboard Shell */
           <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans">
             {/* Main Header with 3-Zone Contract, View Public Site & Logout */}
             <Header

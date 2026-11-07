@@ -112,7 +112,11 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
     // Also fetch from server endpoint with cache-busting as resilient fallback
     fetch(`/api/forms/${encodeURIComponent(targetSlug)}?t=${Date.now()}`, { cache: 'no-store' })
-      .then((res) => (res.ok ? res.json() : null))
+      .then(async (res) => {
+        if (!res.ok) return null;
+        const text = await res.text().catch(() => '');
+        try { return text ? JSON.parse(text) : null; } catch { return null; }
+      })
       .then((data) => {
         if (isMounted && data && Array.isArray(data.fields) && data.fields.length > 0) {
           setFormConfig(data);
@@ -162,7 +166,11 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     // 4. Validate token if present
     if (foundToken) {
       fetch(`/api/validate-token/${encodeURIComponent(foundToken)}?t=${Date.now()}`, { cache: 'no-store' })
-        .then((res) => (res.ok ? res.json() : null))
+        .then(async (res) => {
+          if (!res.ok) return null;
+          const text = await res.text().catch(() => '');
+          try { return text ? JSON.parse(text) : null; } catch { return null; }
+        })
         .then((tokData) => {
           if (isMounted && tokData) {
             if (tokData.status === 'revoked') {

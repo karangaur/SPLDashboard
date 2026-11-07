@@ -12,7 +12,7 @@
     "closedNotice": "Registrations for this tournament are currently closed. Please contact the tournament organizer for spot entry inquiries.",
     "isPublished": true,
     "publishedAt": 1792927202685,
-    "lastUpdatedAt": 1794027458752,
+    "lastUpdatedAt": 1794034348111,
     "appearance": {
       "formTitle": "Player Entry & Registration Form",
       "formDescription": "Register as an official athlete for the upcoming Smash Premier League championship.",
@@ -22,7 +22,7 @@
       "submitButtonText": "Submit Registration & Confirm Entry",
       "successTitle": "Registration Submitted Successfully!",
       "successMessage": "Thank you for registering for Smash Premier League. Your details have been received by the tournament committee. Please save your Registration ID.",
-      "customUrlSlug": "spl-maharajganj-2026"
+      "customUrlSlug": "register"
     },
     "fields": [
       {
@@ -179,6 +179,6 @@
         "order": 13
       }
     ],
-    "customUrlSlug": "spl-maharajganj-2026"
+    "customUrlSlug": "register"
   }
 }

@@ -209,11 +209,15 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
           body: JSON.stringify({ customUrlSlug: cleaned, seasonSlug: currentSeasonSlug }),
         });
-        const contentType = res.headers.get('content-type') || '';
-        if (contentType.includes('application/json')) {
-          const data = await res.json().catch(() => null);
-          if (data && !res.ok && data.error) {
-            console.warn('Backend custom-url sync warning:', data.error);
+        const rawText = await res.text().catch(() => '');
+        if (rawText && rawText.trim()) {
+          try {
+            const data = JSON.parse(rawText);
+            if (data && !res.ok && data.error) {
+              console.warn('Backend custom-url sync warning:', data.error);
+            }
+          } catch {
+            // Not a JSON response, ignore
           }
         }
       } catch {

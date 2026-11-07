@@ -177,6 +177,37 @@ export const sportsAudio = {
       });
     } catch {}
   },
+  playButtonClick: () => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(440, ctx.currentTime);
+      gain.gain.setValueAtTime(0.08, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.05);
+    } catch {}
+  },
+  playTrash: () => {
+    try {
+      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(220, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(110, ctx.currentTime + 0.15);
+      gain.gain.setValueAtTime(0.1, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.15);
+    } catch {}
+  },
 };
 
 export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -197,7 +228,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const serverRes = await fetch('/api/database/status');
       if (serverRes.ok) {
-        serverData = await serverRes.json();
+        const rawText = await serverRes.text().catch(() => '');
+        if (rawText && rawText.trim()) {
+          try {
+            serverData = JSON.parse(rawText);
+          } catch {}
+        }
       }
     } catch (e) {
       console.warn('Could not ping server database status:', e);
@@ -286,7 +322,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } else {
         // Fallback to local server state only if Supabase is not configured
         fetch('/api/tournament/state')
-          .then((res) => (res.ok ? res.json() : null))
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const text = await res.text().catch(() => '');
+            try { return text ? JSON.parse(text) : null; } catch { return null; }
+          })
           .then((serverState) => {
             if (serverState) {
               if (serverState.lastUpdated) {
@@ -309,7 +349,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       // Reconcile server form config
       fetch(`/api/forms/${seasonSlug}`)
-        .then((res) => (res.ok ? res.json() : null))
+        .then(async (res) => {
+          if (!res.ok) return null;
+          const text = await res.text().catch(() => '');
+          try { return text ? JSON.parse(text) : null; } catch { return null; }
+        })
         .then((serverForm) => {
           if (serverForm && serverForm.fields) {
             setFormConfig(serverForm);
@@ -319,7 +363,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       // Reconcile server tokens
       fetch(`/api/tokens/${seasonSlug}`)
-        .then((res) => (res.ok ? res.json() : null))
+        .then(async (res) => {
+          if (!res.ok) return null;
+          const text = await res.text().catch(() => '');
+          try { return text ? JSON.parse(text) : null; } catch { return null; }
+        })
         .then((tok) => {
           if (tok && Array.isArray(tok.tokens)) {
             setTokens(tok.tokens);
