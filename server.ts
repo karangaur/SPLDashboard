@@ -1353,7 +1353,7 @@ async function startServer() {
     if (formConfig.fields && Array.isArray(formConfig.fields)) {
       for (const f of formConfig.fields) {
         if (f.enabled && f.required && !f.isSystem) {
-          const val = answers[f.id];
+          const val = answers[f.id] !== undefined && answers[f.id] !== null ? answers[f.id] : req.body[f.id];
           if (val === undefined || val === null || String(val).trim() === '') {
             return res.status(400).json({
               error: `Please fill in required field: "${f.label}"`,
@@ -1362,6 +1362,12 @@ async function startServer() {
         }
       }
     }
+
+    const effectiveGender = gender || answers.gender || 'M';
+    const effectiveAge = age ? Number(age) : answers.age ? Number(answers.age) : undefined;
+    const effectiveExperience = experience || answers.experience || undefined;
+    const effectiveStyle = style || answers.style || undefined;
+    const effectiveCity = city ? String(city).trim() : answers.city ? String(answers.city).trim() : undefined;
 
     // Calculate fee dynamically from server form configuration
     let calculatedFee = formConfig.payment?.baseFee ?? formConfig.entryFee ?? 500;
@@ -1382,19 +1388,31 @@ async function startServer() {
       initialPaymentStatus = 'unpaid';
     }
 
-    const regId = `SPL-2026-${String(list.length + 1).padStart(3, '0')}`;
+    const mergedAnswers = {
+      ...answers,
+      gender: effectiveGender,
+      ...(effectiveAge ? { age: effectiveAge } : {}),
+      ...(cat ? { category: cat } : {}),
+      ...(effectiveExperience ? { experience: effectiveExperience } : {}),
+      ...(effectiveStyle ? { style: effectiveStyle } : {}),
+      ...(effectiveCity ? { city: effectiveCity } : {}),
+    };
+
+    const regSeq = String(list.length + 1).padStart(3, '0');
+    const regSalt = Math.floor(100 + Math.random() * 900);
+    const regId = `SPL-2026-${regSeq}-${regSalt}`;
     const newReg = {
       id: crypto.randomUUID(),
       regId,
       name: name.trim(),
       mobile: mobileCheck.cleanMobile,
       whatsapp: cleanWhatsApp,
-      age: age ? Number(age) : undefined,
-      gender: gender || 'M',
-      experience: experience || undefined,
+      age: effectiveAge,
+      gender: effectiveGender,
+      experience: effectiveExperience,
       category: cat || undefined,
-      style: style || undefined,
-      city: city ? String(city).trim() : undefined,
+      style: effectiveStyle,
+      city: effectiveCity,
       notes: notes ? String(notes).trim() : undefined,
       fee: calculatedFee,
       status: 'pending',
@@ -1413,16 +1431,13 @@ async function startServer() {
           note: txnId ? `Submitted UPI Ref: ${txnId}` : undefined,
         },
       ],
-      answers,
+      answers: mergedAnswers,
       photoUrl: photoUrl || answers.photo || undefined,
       tokenUsed: tokenUsed || undefined,
       formVersion: formConfig.version || 1,
     };
 
-    list.push(newReg);
-    writeJSON(REGISTRATIONS_FILE, list);
-
-    // Save registration to Supabase PostgreSQL if active
+    // Save registration to Supabase PostgreSQL if active (fail fast if DB insert errors)
     if (serverSupabase) {
       try {
         const { error: insertErr } = await serverSupabase
@@ -1456,13 +1471,23 @@ async function startServer() {
 
         if (insertErr) {
           console.error('Supabase registration insert error:', insertErr.message);
-        } else {
-          console.log(`Saved registration ${newReg.regId} to Supabase PostgreSQL successfully`);
+          return res.status(500).json({
+            success: false,
+            error: `Database insertion failed: ${insertErr.message}. Please try again.`,
+          });
         }
+        console.log(`Saved registration ${newReg.regId} to Supabase PostgreSQL successfully`);
       } catch (err: any) {
         console.error('Supabase registration insert exception:', err?.message);
+        return res.status(500).json({
+          success: false,
+          error: `Database connection error: ${err?.message || 'Server error'}. Please try again.`,
+        });
       }
     }
+
+    list.push(newReg);
+    writeJSON(REGISTRATIONS_FILE, list);
 
     // Update token submissions count if applicable
     if (tokenUsed) {
