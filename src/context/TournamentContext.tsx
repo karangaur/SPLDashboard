@@ -87,7 +87,7 @@ interface TournamentContextType {
   setTeamPlayer: (teamId: string, playerIndex: number, newPlayerId: string) => void;
   assignPlayerToTeam: (teamId: string, playerId: string) => void;
   removePlayerFromTeam: (teamId: string, playerId: string) => void;
-  setTeams: (teams: Team[]) => void;
+  setTeams: (teams: Team[]) => Promise<boolean>;
   clearTeams: () => void;
   
   // Pre-decided & formation
@@ -1593,7 +1593,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
-  const setTeams = (teams: Team[]) => {
+  const setTeams = async (teams: Team[]): Promise<boolean> => {
     lastServerScoreTime.current = Date.now();
     // Deduplicate by team.id to guarantee no duplicate team entries
     const uniqueMap = new Map<string, Team>();
@@ -1606,14 +1606,27 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     setState((prev) => ({ ...prev, teams: uniqueTeams }));
 
-    if (SupabaseService.isAvailable()) {
-      SupabaseService.saveTeamsBulk(uniqueTeams).catch(() => {});
+    try {
+      const promises: Promise<boolean>[] = [];
+      if (SupabaseService.isAvailable()) {
+        promises.push(SupabaseService.saveTeamsBulk(uniqueTeams).catch(() => false));
+      }
+      promises.push(
+        fetch('/api/tournament/state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ teams: uniqueTeams }),
+        })
+          .then((res) => res.ok)
+          .catch(() => false)
+      );
+
+      const results = await Promise.all(promises);
+      lastServerScoreTime.current = Date.now();
+      return results.some(Boolean);
+    } catch {
+      return false;
     }
-    fetch('/api/tournament/state', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ teams: uniqueTeams }),
-    }).catch(() => {});
   };
 
   const clearTeams = () => {
