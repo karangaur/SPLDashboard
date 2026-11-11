@@ -548,29 +548,7 @@ export class SupabaseService {
   static async deleteMatch(id: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      await supabase.from('match_scores').delete().eq('match_id', id);
       const { error } = await supabase.from('matches').delete().eq('id', id);
-      return !error;
-    } catch {
-      return false;
-    }
-  }
-
-  static async resetMatchScore(id: string): Promise<boolean> {
-    if (!this.isAvailable()) return false;
-    try {
-      await supabase.from('match_scores').delete().eq('match_id', id);
-      const { error } = await (supabase as any)
-        .from('matches')
-        .update({
-          score_a: null,
-          score_b: null,
-          status: 'upcoming',
-          winner_id: null,
-          sets_json: [],
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', id);
       return !error;
     } catch {
       return false;

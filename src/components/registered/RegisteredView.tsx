@@ -178,11 +178,10 @@ export const RegisteredView: React.FC = () => {
         </div>
       </div>
 
-      {/* Roster Table (Desktop) & Cards (Mobile) */}
+      {/* Roster Table */}
       {filtered.length > 0 ? (
         <div className="rounded-3xl glass-panel border border-white/10 overflow-hidden shadow-2xl">
-          {/* Desktop Table */}
-          <div className="hidden md:block overflow-x-auto">
+          <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-white/10 bg-white/[0.02] text-[11px] uppercase tracking-wider text-slate-400">
@@ -291,89 +290,6 @@ export const RegisteredView: React.FC = () => {
                 })}
               </tbody>
             </table>
-          </div>
-
-          {/* Mobile Card List for Smartphones */}
-          <div className="md:hidden divide-y divide-white/10">
-            {filtered.map((r) => (
-              <div key={r.id} className="p-4 space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className="font-mono text-xs font-bold text-amber-400 bg-amber-400/10 px-2 py-0.5 rounded-lg border border-amber-400/20">
-                      {r.regId}
-                    </span>
-                    <span className="font-bold text-white text-sm">{r.name}</span>
-                    {r.age && <span className="text-xs text-slate-400">({r.age}y)</span>}
-                  </div>
-                  <span className="text-xs font-mono font-bold text-slate-200">
-                    {formatINR(r.fee)}
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs text-slate-300">
-                  <div className="bg-white/[0.03] p-2 rounded-xl">
-                    <span className="text-slate-400 block text-[10px]">Mobile</span>
-                    <span className="font-mono">{r.mobile}</span>
-                  </div>
-                  <div className="bg-white/[0.03] p-2 rounded-xl">
-                    <span className="text-slate-400 block text-[10px]">Method / Txn</span>
-                    <span className="truncate block font-mono text-[11px]">{r.txnId || r.method || 'Cash / Direct'}</span>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
-                  <select
-                    value={r.status}
-                    onChange={(e) => {
-                      const newStatus = e.target.value as any;
-                      if (newStatus === 'approved') {
-                        approveRegistration(r.id);
-                      } else {
-                        updateRegistration(r.id, { status: newStatus });
-                      }
-                    }}
-                    className={`text-xs font-bold rounded-xl px-3 py-2 min-h-[44px] border transition-colors ${
-                      r.status === 'approved' || r.status === 'paid'
-                        ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30'
-                        : r.status === 'pending'
-                        ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                        : 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                    }`}
-                  >
-                    <option value="pending" className="bg-slate-900 text-white">Pending Admission</option>
-                    <option value="approved" className="bg-slate-900 text-white">Approved & Paid</option>
-                    <option value="rejected" className="bg-slate-900 text-white">Rejected</option>
-                  </select>
-
-                  <div className="flex items-center gap-1.5">
-                    {r.status !== 'approved' && (
-                      <button
-                        onClick={() => approveRegistration(r.id)}
-                        className="px-3 py-2 min-h-[44px] text-xs font-bold bg-emerald-400 hover:bg-emerald-300 text-slate-950 rounded-xl transition-all shadow"
-                      >
-                        Approve
-                      </button>
-                    )}
-                    {r.status === 'pending' && (
-                      <button
-                        onClick={() => handleWhatsAppReminder(r)}
-                        className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-amber-400 hover:text-amber-300 bg-amber-400/10 rounded-xl transition-colors border border-amber-400/20"
-                        title="Send WhatsApp Reminder"
-                      >
-                        <Phone className="w-4 h-4" />
-                      </button>
-                    )}
-                    <button
-                      onClick={() => setDeleteTargetId(r.id)}
-                      className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 rounded-xl transition-colors border border-rose-500/20"
-                      title="Delete Record"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ))}
           </div>
         </div>
       ) : (
