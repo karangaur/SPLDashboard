@@ -22,7 +22,7 @@ import { LiveMatchScoringModal } from '../admin/LiveMatchScoringModal';
 import { evaluateSetStatus } from '../../utils/badmintonEngine';
 
 export const FixturesView: React.FC = () => {
-  const { state, updateMatch, generateFixtures, clearResults, setMatches } = useTournament();
+  const { state, updateMatch, resetMatchScore, deleteMatch, generateFixtures, clearResults, setMatches } = useTournament();
 
   const [filterStatus, setFilterStatus] = useState<'all' | 'live' | 'upcoming' | 'completed'>('all');
   const [selectedCourt, setSelectedCourt] = useState<number | 'all'>('all');
@@ -31,6 +31,11 @@ export const FixturesView: React.FC = () => {
   const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [liveScoringMatchId, setLiveScoringMatchId] = useState<string | null>(null);
+
+  // Dedicated independent states for Match Center Reset Score and Delete Match
+  const [matchToReset, setMatchToReset] = useState<Match | null>(null);
+  const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
+  const [isProcessingAction, setIsProcessingAction] = useState(false);
 
   // Manual Match creation state
   const [manualTeamA, setManualTeamA] = useState('');
@@ -106,15 +111,34 @@ export const FixturesView: React.FC = () => {
     showToast('Match marked as completed!', 'success');
   };
 
-  const handleResetMatch = (matchId: string) => {
-    updateMatch(matchId, {
-      scoreA: undefined,
-      scoreB: undefined,
-      status: 'upcoming',
-      winner: undefined,
-      sets: [],
-    });
-    showToast('Match score reset to 0 - 0.', 'success');
+  // Action 1: Reset Score (resets score to 0-0, preserves match in Match Center)
+  const handleConfirmReset = async () => {
+    if (!matchToReset) return;
+    setIsProcessingAction(true);
+    try {
+      await resetMatchScore(matchToReset.id);
+      showToast('Match score reset to 0 - 0. Match preserved in Match Center.', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to reset match score', 'error');
+    } finally {
+      setIsProcessingAction(false);
+      setMatchToReset(null);
+    }
+  };
+
+  // Action 2: Delete Match (permanently deletes match from Supabase & Match Center)
+  const handleConfirmDelete = async () => {
+    if (!matchToDelete) return;
+    setIsProcessingAction(true);
+    try {
+      await deleteMatch(matchToDelete.id);
+      showToast('Match permanently deleted from tournament and database.', 'success');
+    } catch (err: any) {
+      showToast(err?.message || 'Failed to delete match', 'error');
+    } finally {
+      setIsProcessingAction(false);
+      setMatchToDelete(null);
+    }
   };
 
   const handleShareSchedule = () => {
@@ -321,8 +345,8 @@ export const FixturesView: React.FC = () => {
 
       {/* Matches Grid */}
       {filteredMatches.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {filteredMatches.map((match) => {
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {filteredMatches.map((match, idx) => {
             const tA = getTeam(match.teamA);
             const tB = getTeam(match.teamB);
             const isLive = match.status === 'live';
@@ -333,7 +357,7 @@ export const FixturesView: React.FC = () => {
             return (
               <div
                 key={match.id}
-                className={`rounded-2xl glass-card p-3.5 sm:p-5 border transition-all space-y-3.5 sm:space-y-4 ${
+                className={`rounded-2xl glass-card p-4 sm:p-5 border transition-all space-y-4 shadow-lg ${
                   isLive
                     ? 'border-amber-500/40 royal-glow bg-amber-500/5'
                     : isCompleted
@@ -342,10 +366,10 @@ export const FixturesView: React.FC = () => {
                 }`}
               >
                 {/* Match Header info */}
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-3 border-b border-white/10">
-                  <div className="flex items-center gap-2">
+                <div className="flex items-center justify-between gap-2 text-xs pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-2 min-w-0">
                     <span
-                      className={`h-2 w-2 rounded-full shrink-0 ${
+                      className={`h-2.5 w-2.5 rounded-full shrink-0 ${
                         isLive
                           ? 'bg-rose-500 animate-ping'
                           : isCompleted
@@ -353,41 +377,29 @@ export const FixturesView: React.FC = () => {
                           : 'bg-slate-500'
                       }`}
                     />
-                    <span className="font-bold uppercase tracking-wider text-slate-300">
+                    <span className="font-bold uppercase tracking-wider text-white shrink-0">
+                      Match #{idx + 1}
+                    </span>
+                    <span className="text-slate-500 shrink-0">·</span>
+                    <span className="font-semibold text-slate-300 truncate">
                       Round {match.round} · Court {match.court}
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-1.5 sm:gap-2">
-                    <button
-                      onClick={() => setLiveScoringMatchId(match.id)}
-                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
-                      title="Open full badminton umpire scoring console"
-                    >
-                      <Maximize2 className="w-3 h-3 shrink-0" />
-                      <span>Umpire</span>
-                    </button>
+                  <div className="flex items-center gap-2 shrink-0">
                     <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         isLive
-                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30 animate-pulse'
                           : match.status === 'paused'
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           : isCompleted
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                          : 'bg-white/5 text-slate-400'
+                          : 'bg-white/5 text-slate-400 border border-white/10'
                       }`}
                     >
                       {match.status}
                     </span>
-                    <button
-                      onClick={() => handleResetMatch(match.id)}
-                      title="Reset score"
-                      aria-label="Reset match score"
-                      className="text-slate-500 hover:text-slate-300 p-1 rounded transition-colors"
-                    >
-                      <RotateCcw className="w-3.5 h-3.5" />
-                    </button>
                   </div>
                 </div>
 
@@ -547,6 +559,45 @@ export const FixturesView: React.FC = () => {
                     </span>
                   </div>
                 </div>
+
+                {/* Dedicated Match Center Action Controls: View/Edit | Reset Score | Delete Match */}
+                <div className="pt-3 border-t border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setLiveScoringMatchId(match.id)}
+                      className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 transition-all active:scale-95 shadow-sm"
+                      title="Open full live umpire & scoring console"
+                    >
+                      <SlidersHorizontal className="w-4 h-4 shrink-0 text-emerald-400" />
+                      <span>View / Edit</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 sm:flex sm:items-center gap-2">
+                    {/* Action 1: Reset Score */}
+                    <button
+                      type="button"
+                      onClick={() => setMatchToReset(match)}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95 shadow-sm"
+                      title="Reset match score to 0-0 (preserves match in schedule)"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 shrink-0 text-amber-400" />
+                      <span>Reset Score</span>
+                    </button>
+
+                    {/* Action 2: Delete Match */}
+                    <button
+                      type="button"
+                      onClick={() => setMatchToDelete(match)}
+                      className="flex items-center justify-center gap-1.5 px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold text-rose-300 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/40 transition-all active:scale-95 shadow-sm"
+                      title="Permanently delete match from tournament and Supabase"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 shrink-0 text-rose-400" />
+                      <span>Delete Match</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             );
           })}
@@ -575,8 +626,8 @@ export const FixturesView: React.FC = () => {
 
       {/* Manual Match Creation Modal */}
       {manualModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md rounded-2xl glass-panel p-6 shadow-2xl border border-white/10 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-md max-h-[90dvh] overflow-y-auto rounded-2xl glass-panel p-5 sm:p-6 shadow-2xl border border-white/10 space-y-4 my-auto">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <h3 className="font-bold text-white text-lg">Add Custom Match</h3>
               <button
@@ -656,17 +707,17 @@ export const FixturesView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3">
+              <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setManualModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white"
+                  className="px-4 py-2.5 min-h-[44px] text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300"
+                  className="px-5 py-2.5 min-h-[44px] text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 transition-all shadow-md active:scale-95"
                 >
                   Create Match
                 </button>
@@ -702,6 +753,34 @@ export const FixturesView: React.FC = () => {
           setShowClearConfirm(false);
         }}
         onCancel={() => setShowClearConfirm(false)}
+      />
+
+      {/* Action 1: Confirm Reset Match Score Modal */}
+      <ConfirmModal
+        isOpen={Boolean(matchToReset)}
+        title="Reset Score"
+        message="Are you sure you want to reset the score for this match? The match will remain in Match Center."
+        confirmLabel={isProcessingAction ? 'Resetting...' : 'Reset Score'}
+        cancelLabel="Cancel"
+        variant="warning"
+        onConfirm={handleConfirmReset}
+        onCancel={() => {
+          if (!isProcessingAction) setMatchToReset(null);
+        }}
+      />
+
+      {/* Action 2: Confirm Delete Match Modal */}
+      <ConfirmModal
+        isOpen={Boolean(matchToDelete)}
+        title="Delete Match"
+        message="Are you sure you want to permanently delete this match? This action cannot be undone."
+        confirmLabel={isProcessingAction ? 'Deleting...' : 'Delete Permanently'}
+        cancelLabel="Cancel"
+        variant="danger"
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!isProcessingAction) setMatchToDelete(null);
+        }}
       />
 
       {/* Live Badminton Scoring Modal (Umpire Console) */}

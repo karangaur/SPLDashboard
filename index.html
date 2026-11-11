@@ -2,6 +2,42 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Suppress WebSocket/HMR connection errors in iframe and proxy environments per platform guidelines
+      (function () {
+        function isHmrError(err) {
+          if (!err) return false;
+          var msg = String(err.message || err.reason || err || '');
+          var stack = String(err.stack || '');
+          return (
+            msg.indexOf('WebSocket') !== -1 ||
+            msg.indexOf('vite:ws') !== -1 ||
+            stack.indexOf('@vite/client') !== -1 ||
+            stack.indexOf('WebSocket') !== -1
+          );
+        }
+        window.addEventListener('unhandledrejection', function (e) {
+          if (isHmrError(e.reason)) {
+            e.preventDefault();
+            if (typeof e.stopImmediatePropagation === 'function') {
+              e.stopImmediatePropagation();
+            }
+          }
+        });
+        window.addEventListener('error', function (e) {
+          if (
+            isHmrError(e.error) ||
+            (e.message && e.message.indexOf('WebSocket') !== -1) ||
+            (e.filename && e.filename.indexOf('@vite/client') !== -1)
+          ) {
+            e.preventDefault();
+            if (typeof e.stopImmediatePropagation === 'function') {
+              e.stopImmediatePropagation();
+            }
+          }
+        }, true);
+      })();
+    </script>
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0" />
     <title>Smash Premier League Maharajganj — Official Badminton Tournament</title>
     <meta name="description" content="Official badminton tournament portal for Smash Premier League Maharajganj. Live match scores, fixtures, standings, team rosters, and athlete registration." />

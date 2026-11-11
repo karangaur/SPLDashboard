@@ -99,6 +99,8 @@ interface TournamentContextType {
   
   // Matches & Fixtures
   updateMatch: (id: string, updates: Partial<Match>) => void;
+  resetMatchScore: (id: string) => Promise<boolean>;
+  deleteMatch: (id: string) => Promise<boolean>;
   setMatches: (matches: Match[]) => void;
   generateFixtures: () => void;
   clearResults: () => void;
@@ -790,6 +792,23 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         } catch {}
       });
 
+      eventSource.addEventListener('match_deleted', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.matchId) {
+            lastServerScoreTime.current = data.lastUpdated || Date.now();
+            setState((prev) => ({
+              ...prev,
+              matches: prev.matches.filter((m) => m.id !== data.matchId),
+              knockout: {
+                ...prev.knockout,
+                matches: prev.knockout?.matches ? prev.knockout.matches.filter((k) => k.id !== data.matchId) : [],
+              },
+            }));
+          }
+        } catch {}
+      });
+
       eventSource.addEventListener('tournament_state', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
@@ -910,6 +929,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             matches: Array.isArray(matches) ? matches : prev.matches,
             teams: Array.isArray(teams) && teams.length > 0 ? teams : prev.teams,
             knockout: knockout || prev.knockout,
+          }));
+        } else if (event.data?.type === 'MATCH_DELETED') {
+          const { matchId, lastUpdated } = event.data;
+          if (lastUpdated) lastServerScoreTime.current = lastUpdated;
+          setState((prev) => ({
+            ...prev,
+            matches: prev.matches.filter((m) => m.id !== matchId),
+            knockout: {
+              ...prev.knockout,
+              matches: prev.knockout?.matches ? prev.knockout.matches.filter((k) => k.id !== matchId) : [],
+            },
           }));
         }
       };
@@ -1772,6 +1802,149 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         matches: nextMatches,
       };
     });
+  };
+
+  const deleteMatch = async (id: string): Promise<boolean> => {
+    sportsAudio.playButtonClick();
+    lastServerScoreTime.current = Date.now();
+
+    // 1. Supabase permanent deletion
+    if (SupabaseService.isAvailable()) {
+      try {
+        await SupabaseService.deleteMatch(id);
+      } catch (err) {
+        console.warn('Supabase deleteMatch error:', err);
+      }
+    }
+
+    // 2. Server backend deletion
+    try {
+      await fetch(`/api/tournament/matches/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+      });
+    } catch (err) {
+      console.warn('Backend match delete error:', err);
+    }
+
+    // 3. React state & BroadcastChannel
+    setState((prev) => {
+      const nextMatches = prev.matches.filter((m) => m.id !== id);
+      const nextKnockoutMatches = (prev.knockout?.matches || []).filter((k) => k.id !== id);
+      const nextKnockout = { ...prev.knockout, matches: nextKnockoutMatches };
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const ch = new BroadcastChannel('spl_live_scores_channel');
+          ch.postMessage({
+            type: 'MATCH_DELETED',
+            matchId: id,
+            matches: nextMatches,
+            teams: prev.teams,
+            knockout: nextKnockout,
+            lastUpdated: Date.now(),
+          });
+          ch.close();
+        } catch {}
+      }
+
+      return {
+        ...prev,
+        matches: nextMatches,
+        knockout: nextKnockout,
+      };
+    });
+
+    return true;
+  };
+
+  const resetMatchScore = async (id: string): Promise<boolean> => {
+    sportsAudio.playButtonClick();
+    lastServerScoreTime.current = Date.now();
+
+    let targetMatch: Match | undefined;
+
+    setState((prev) => {
+      const nextMatches: Match[] = prev.matches.map((m) => {
+        if (m.id !== id) return m;
+        const resetItem: Match = {
+          ...m,
+          scoreA: 0,
+          scoreB: 0,
+          status: 'upcoming' as const,
+          winner: undefined,
+          sets: [],
+        };
+        targetMatch = resetItem;
+        return resetItem;
+      });
+
+      const nextKnockoutMatches = (prev.knockout?.matches || []).map((k) => {
+        if (k.id !== id) return k;
+        const updated = {
+          ...k,
+          scoreA: 0,
+          scoreB: 0,
+          status: 'upcoming' as const,
+          winner: undefined,
+          sets: [],
+        };
+        targetMatch = updated as any;
+        return updated;
+      });
+
+      // 1. Supabase sync
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.resetMatchScore(id).catch(() => {});
+      }
+
+      // 2. Dispatch to backend
+      fetch(`/api/tournament/matches/${encodeURIComponent(id)}/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+      }).catch(() => {
+        fetch(`/api/tournament/matches/${encodeURIComponent(id)}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({
+            scoreA: 0,
+            scoreB: 0,
+            status: 'upcoming',
+            winner: null,
+            sets: [],
+            fullMatch: targetMatch,
+          }),
+        }).catch(() => {});
+      });
+
+      // 3. Multi-Tab BroadcastChannel
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const ch = new BroadcastChannel('spl_live_scores_channel');
+          ch.postMessage({
+            type: 'SCORE_UPDATE',
+            matchId: id,
+            match: targetMatch,
+            matches: nextMatches,
+            teams: prev.teams,
+            knockout: { ...prev.knockout, matches: nextKnockoutMatches },
+            lastUpdated: Date.now(),
+          });
+          ch.close();
+        } catch {}
+      }
+
+      return {
+        ...prev,
+        matches: nextMatches,
+        knockout: {
+          ...prev.knockout,
+          matches: nextKnockoutMatches,
+        },
+      };
+    });
+
+    return true;
   };
 
   const setMatches = (matches: Match[]) => {
@@ -3002,6 +3175,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         deletePredefinedTeam,
         clearPredefinedTeams,
         updateMatch,
+        resetMatchScore,
+        deleteMatch,
         setMatches,
         generateFixtures,
         clearResults,
