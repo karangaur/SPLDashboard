@@ -12,6 +12,7 @@ export interface TournamentSettings {
   venue: string;
   organizer: string;
   courts: number;
+  courtNames?: string[];
   format: string; // '21' | '15' | '30'
   entryFee: number;
   slotLimit: number;
@@ -58,6 +59,8 @@ export interface Match {
   id: string;
   round: number;
   court: number;
+  courtName?: string;
+  courtSlot?: number;
   teamA: string; // Team ID
   teamB: string; // Team ID
   scoreA?: number;

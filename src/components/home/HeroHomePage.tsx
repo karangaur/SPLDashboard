@@ -460,31 +460,29 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               </div>
 
               {/* Court filter */}
-              <div className="inline-flex rounded-xl bg-slate-900 border border-white/10 p-1">
+              <div className="inline-flex rounded-xl bg-slate-900 border border-white/10 p-1 overflow-x-auto max-w-full no-scrollbar">
                 <button
                   onClick={() => setSelectedCourtFilter('all')}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold ${
+                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
                     selectedCourtFilter === 'all' ? 'bg-white/10 text-white' : 'text-slate-400'
                   }`}
                 >
-                  Both Courts
+                  All Courts
                 </button>
-                <button
-                  onClick={() => setSelectedCourtFilter(1)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold ${
-                    selectedCourtFilter === 1 ? 'bg-white/10 text-lime-400' : 'text-slate-400'
-                  }`}
-                >
-                  Court 1
-                </button>
-                <button
-                  onClick={() => setSelectedCourtFilter(2)}
-                  className={`px-2.5 py-1.5 rounded-lg text-xs font-bold ${
-                    selectedCourtFilter === 2 ? 'bg-white/10 text-cyan-400' : 'text-slate-400'
-                  }`}
-                >
-                  Court 2
-                </button>
+                {Array.from({ length: Math.max(1, state.settings.courts || 1) }, (_, i) => i + 1).map((c) => {
+                  const cName = state.settings.courtNames?.[c - 1]?.trim() || `Court ${c}`;
+                  return (
+                    <button
+                      key={c}
+                      onClick={() => setSelectedCourtFilter(c)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap ${
+                        selectedCourtFilter === c ? 'bg-white/10 text-lime-400 font-extrabold' : 'text-slate-400'
+                      }`}
+                    >
+                      {cName}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -526,8 +524,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     <div>
                       {/* Top Badges */}
                       <div className="flex items-center justify-between pb-3 border-b border-white/5 text-xs">
-                        <span className="font-mono text-slate-400 font-semibold">
-                          Round {m.round} · Court {m.court}
+                        <span className="font-mono text-slate-400 font-semibold truncate max-w-[200px]">
+                          Round {m.round} · {m.courtName || state.settings.courtNames?.[m.court - 1]?.trim() || `Court ${m.court}`}
                         </span>
                         {isLive ? (
                           <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40">
@@ -1036,7 +1034,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-lime-400 mb-1">
               <span>Match Center Card</span>
               <span>•</span>
-              <span>Court {detailMatch.court}</span>
+              <span>{detailMatch.courtName || state.settings.courtNames?.[detailMatch.court - 1]?.trim() || `Court ${detailMatch.court}`}</span>
             </div>
 
             <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">

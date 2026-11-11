@@ -310,139 +310,185 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
 
       </div>
 
-      {/* Mobile Drawer Navigation */}
+      {/* Mobile Drawer Backdrop & Navigation */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-t border-white/10 bg-slate-950/98 backdrop-blur-xl px-4 py-4 pb-24 max-h-[calc(100dvh-4rem)] overflow-y-auto space-y-1 animate-fade-in shadow-2xl">
-          <div className="grid grid-cols-2 gap-2 pb-2">
-            <button
-              onClick={() => handleNav('dashboard')}
-              className={`p-2.5 rounded-xl text-left text-sm font-semibold transition-colors ${
-                currentTab === 'dashboard' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-white/5 text-slate-200'
-              }`}
-            >
-              📊 Live Dashboard
-            </button>
-            <button
-              onClick={() => handleNav('fixtures')}
-              className={`p-2.5 rounded-xl text-left text-sm font-semibold transition-colors ${
-                currentTab === 'fixtures' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-white/5 text-slate-200'
-              }`}
-            >
-              🏸 Match Centre
-            </button>
-            <button
-              onClick={() => handleNav('standings')}
-              className={`p-2.5 rounded-xl text-left text-sm font-semibold transition-colors ${
-                currentTab === 'standings' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-white/5 text-slate-200'
-              }`}
-            >
-              🏆 Standings
-            </button>
-            <button
-              onClick={() => handleNav('knockout')}
-              className={`p-2.5 rounded-xl text-left text-sm font-semibold transition-colors ${
-                currentTab === 'knockout' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-white/5 text-slate-200'
-              }`}
-            >
-              ⚔️ Knockout Stage
-            </button>
-          </div>
+        <>
+          <div
+            className="lg:hidden fixed inset-0 top-16 z-30 bg-black/60 backdrop-blur-sm animate-fade-in"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-hidden="true"
+          />
+          <div className="lg:hidden relative z-40 border-t border-white/10 bg-slate-950/98 backdrop-blur-xl px-4 py-4 pb-28 max-h-[calc(100dvh-4rem)] overflow-y-auto space-y-1.5 animate-fade-in shadow-2xl">
+            <div className="grid grid-cols-2 gap-2 pb-2">
+              <button
+                onClick={() => handleNav('dashboard')}
+                className={`p-3 min-h-[44px] rounded-xl text-left text-sm font-semibold transition-all active:scale-98 flex items-center gap-2 ${
+                  currentTab === 'dashboard' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm' : 'bg-white/5 text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <span>📊</span>
+                <span>Live Dashboard</span>
+              </button>
+              <button
+                onClick={() => handleNav('fixtures')}
+                className={`p-3 min-h-[44px] rounded-xl text-left text-sm font-semibold transition-all active:scale-98 flex items-center justify-between ${
+                  currentTab === 'fixtures' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm' : 'bg-white/5 text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <span className="flex items-center gap-2">
+                  <span>🏸</span>
+                  <span>Match Centre</span>
+                </span>
+                {liveMatchesCount > 0 && (
+                  <span className="px-1.5 py-0.5 text-[9px] font-black rounded-full bg-rose-500/30 text-rose-300 border border-rose-500/40">
+                    {liveMatchesCount}
+                  </span>
+                )}
+              </button>
+              <button
+                onClick={() => handleNav('standings')}
+                className={`p-3 min-h-[44px] rounded-xl text-left text-sm font-semibold transition-all active:scale-98 flex items-center gap-2 ${
+                  currentTab === 'standings' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm' : 'bg-white/5 text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <span>🏆</span>
+                <span>Standings</span>
+              </button>
+              <button
+                onClick={() => handleNav('knockout')}
+                className={`p-3 min-h-[44px] rounded-xl text-left text-sm font-semibold transition-all active:scale-98 flex items-center gap-2 ${
+                  currentTab === 'knockout' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 shadow-sm' : 'bg-white/5 text-slate-200 hover:bg-white/10'
+                }`}
+              >
+                <span>⚔️</span>
+                <span>Knockout</span>
+              </button>
+            </div>
 
-          <div className="pt-2 border-t border-white/10 space-y-1">
-            <button
-              onClick={() => handleNav('teams')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Teams & Squads</span>
-              <span className="text-xs text-slate-400">{state.teams.length} teams</span>
-            </button>
-            <button
-              onClick={() => handleNav('players')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Players Directory</span>
-              <span className="text-xs text-slate-400">{state.players.length} players</span>
-            </button>
-            <button
-              onClick={() => handleNav('tokens')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Token Draw (Lottery)</span>
-              <Dices className="w-4 h-4 text-amber-400" />
-            </button>
-            <button
-              onClick={() => handleNav('registered')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Registered Roster & Payments</span>
-              <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            </button>
-            <button
-              onClick={() => handleNav('statistics')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Tournament Statistics</span>
-              <BarChart3 className="w-4 h-4 text-blue-400" />
-            </button>
-            <button
-              onClick={() => handleNav('champion')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Champion Ceremony</span>
-              <Trophy className="w-4 h-4 text-amber-400" />
-            </button>
-            <button
-              onClick={() => handleNav('settings')}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-slate-300 text-sm"
-            >
-              <span>Settings & Data Backup</span>
-              <Sliders className="w-4 h-4 text-slate-400" />
-            </button>
-            {isSuperAdmin && (
+            <div className="pt-2 border-t border-white/10 space-y-1">
               <button
-                onClick={() => handleNav('users')}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 text-amber-300 text-sm font-semibold"
+                onClick={() => handleNav('teams')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'teams' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
               >
-                <span>User Management (RBAC)</span>
-                <ShieldCheck className="w-4 h-4 text-amber-400" />
+                <span>Teams & Squads</span>
+                <span className="text-xs text-slate-400">{state.teams.length} teams</span>
               </button>
-            )}
-            <button
-              onClick={() => {
-                setMobileMenuOpen(false);
-                setAccountModalOpen(true);
-              }}
-              className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-sm mt-2 transition-colors"
-            >
-              <span>My Account & Security</span>
-              <User className="w-4 h-4 text-amber-400" />
-            </button>
-            {onViewPublicHome && (
               <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onViewPublicHome();
-                }}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 text-sm border border-lime-400/30 mt-2 transition-colors font-bold"
+                onClick={() => handleNav('players')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'players' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
               >
-                <span>View Public Tournament Home</span>
-                <ExternalLink className="w-4 h-4 text-lime-400" />
+                <span>Players Directory</span>
+                <span className="text-xs text-slate-400">{state.players.length} players</span>
               </button>
-            )}
-            {onLogout && (
               <button
-                onClick={() => {
-                  setMobileMenuOpen(false);
-                  onLogout();
-                }}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-sm border border-rose-500/30 mt-2 transition-colors"
+                onClick={() => handleNav('tokens')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'tokens' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
               >
-                <span>Logout Administrator</span>
-                <LogOut className="w-4 h-4 text-rose-400" />
+                <span>Token Draw (Lottery)</span>
+                <Dices className="w-4 h-4 text-amber-400" />
               </button>
-            )}
+              <button
+                onClick={() => handleNav('registration')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'registration' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
+              >
+                <span>Player Registration Config</span>
+                <PlusCircle className="w-4 h-4 text-amber-400" />
+              </button>
+              <button
+                onClick={() => handleNav('registered')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'registered' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
+              >
+                <span>Registered Roster & Payments</span>
+                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+              </button>
+              <button
+                onClick={() => handleNav('statistics')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'statistics' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
+              >
+                <span>Tournament Statistics</span>
+                <BarChart3 className="w-4 h-4 text-blue-400" />
+              </button>
+              <button
+                onClick={() => handleNav('champion')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'champion' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
+              >
+                <span>Champion Ceremony</span>
+                <Trophy className="w-4 h-4 text-amber-400" />
+              </button>
+              <button
+                onClick={() => handleNav('settings')}
+                className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${
+                  currentTab === 'settings' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'hover:bg-white/5 text-slate-300'
+                }`}
+              >
+                <span>Settings & Data Backup</span>
+                <Sliders className="w-4 h-4 text-slate-400" />
+              </button>
+              {isSuperAdmin && (
+                <button
+                  onClick={() => handleNav('users')}
+                  className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm font-semibold ${
+                    currentTab === 'users' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'hover:bg-white/5 text-amber-300'
+                  }`}
+                >
+                  <span>User Management (RBAC)</span>
+                  <ShieldCheck className="w-4 h-4 text-amber-400" />
+                </button>
+              )}
+
+              <div className="pt-2 border-t border-white/10 space-y-1.5">
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    setAccountModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-sm transition-all active:scale-98"
+                >
+                  <span>My Account & Security</span>
+                  <User className="w-4 h-4 text-amber-400" />
+                </button>
+                {onViewPublicHome && (
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      onViewPublicHome();
+                    }}
+                    className="w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 text-sm border border-lime-400/30 transition-all active:scale-98 font-bold"
+                  >
+                    <span>View Public Tournament Home</span>
+                    <ExternalLink className="w-4 h-4 text-lime-400" />
+                  </button>
+                )}
+                {onLogout && (
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      onLogout();
+                    }}
+                    className="w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 text-sm border border-rose-500/30 transition-all active:scale-98 font-semibold"
+                  >
+                    <span>Logout Administrator</span>
+                    <LogOut className="w-4 h-4 text-rose-400" />
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
-        </div>
+        </>
       )}
 
       {/* Authenticated User Account & Password Modal */}

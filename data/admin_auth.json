@@ -29,6 +29,10 @@
     "spl_sess_6dbe2eade8354186be9f75f410f711f0": {
       "userId": "admin-spl-master-01",
       "expiresAt": 1794056258145
+    },
+    "spl_sess_b8b562962ec246abaf41e95b0742e75c": {
+      "userId": "admin-spl-master-01",
+      "expiresAt": 1794457949018
     }
   }
 }

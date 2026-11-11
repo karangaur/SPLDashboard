@@ -671,6 +671,7 @@ async function startServer() {
       venue: 'Maharajganj Indoor Badminton Stadium, Court 1 & 2',
       organizer: 'SPL Tournament Committee',
       courts: 2,
+      courtNames: ['Court 1', 'Court 2'] as string[],
       format: '21',
       entryFee: 500,
       slotLimit: 32,
@@ -858,21 +859,41 @@ async function startServer() {
         // 3. Sync Matches if provided
         if (Array.isArray(req.body.matches)) {
           if (req.body.matches.length === 0) {
+            await serverSupabase.from('match_scores').delete().neq('id', '___none___');
             await serverSupabase.from('matches').delete().eq('tournament_season', 'season-4');
           } else {
+            const keepMatchIds = req.body.matches.map((m: any) => String(m.id)).filter(Boolean);
+            const keepMatchIdSet = new Set<string>(keepMatchIds);
+            const { data: existingGroupMatches } = await serverSupabase
+              .from('matches')
+              .select('id')
+              .eq('tournament_season', 'season-4')
+              .eq('match_type', 'group');
+
+            if (existingGroupMatches && existingGroupMatches.length > 0) {
+              const orphanMatchIds = existingGroupMatches
+                .map((m: any) => String(m.id))
+                .filter((id: string) => id && !keepMatchIdSet.has(id));
+              if (orphanMatchIds.length > 0) {
+                await serverSupabase.from('match_scores').delete().in('match_id', orphanMatchIds);
+                await serverSupabase.from('matches').delete().in('id', orphanMatchIds);
+              }
+            }
+
             const matchRows = req.body.matches.map((m: any) => ({
               id: m.id,
               tournament_season: 'season-4',
               round: m.round || 1,
               court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
               match_type: 'group' as const,
+              slot: m.courtSlot || null,
               team_a_id: m.teamA || null,
               team_b_id: m.teamB || null,
               score_a: m.scoreA != null ? m.scoreA : null,
               score_b: m.scoreB != null ? m.scoreB : null,
               status: m.status || 'upcoming',
               winner_id: m.winner || null,
-              time: m.time || null,
+              time: m.time || (m.courtName ? `Round ${m.round} · ${m.courtName}` : null),
               sets_json: m.sets || null,
               mvp_player_id: m.mvpPlayerId || null,
               updated_at: nowIso,
@@ -1075,6 +1096,150 @@ async function startServer() {
     writeJSON(TOURNAMENT_FILE, current);
     broadcastSse('match_score', { matchId, match: newMatch, lastUpdated: now });
     res.json({ success: true, lastUpdated: now, match: newMatch });
+  });
+
+  // Dedicated Atomic Schedule Replacement Endpoint with Multi-Court Support
+  app.post('/api/tournament/schedule/replace', async (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
+    const { seasonSlug = 'season-4', matches = [], courts = 1, courtNames = [] } = req.body;
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+
+    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+
+    // 1. Atomic Supabase synchronization
+    if (serverSupabase) {
+      try {
+        // Find existing matches to clear dependent match_scores
+        const { data: existingMatches } = await serverSupabase
+          .from('matches')
+          .select('id')
+          .eq('tournament_season', seasonSlug)
+          .eq('match_type', 'group');
+
+        const existingIds = (existingMatches || []).map((m: any) => m.id);
+        if (existingIds.length > 0) {
+          await serverSupabase.from('match_scores').delete().in('match_id', existingIds);
+        }
+
+        // Delete all old group matches for this tournament
+        await serverSupabase
+          .from('matches')
+          .delete()
+          .eq('tournament_season', seasonSlug)
+          .eq('match_type', 'group');
+
+        // Insert new matches
+        if (Array.isArray(matches) && matches.length > 0) {
+          const matchRows = matches.map((m: any) => ({
+            id: m.id,
+            tournament_season: seasonSlug,
+            round: m.round || 1,
+            court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
+            match_type: 'group' as const,
+            slot: m.courtSlot || null,
+            team_a_id: m.teamA || null,
+            team_b_id: m.teamB || null,
+            score_a: m.scoreA != null ? m.scoreA : null,
+            score_b: m.scoreB != null ? m.scoreB : null,
+            status: m.status || 'upcoming',
+            winner_id: m.winner || null,
+            time: m.time || (m.courtName ? `Round ${m.round} · ${m.courtName}` : `Round ${m.round} · Court ${m.court}`),
+            sets_json: m.sets || null,
+            mvp_player_id: m.mvpPlayerId || null,
+            updated_at: nowIso,
+          }));
+
+          const { error: insErr } = await serverSupabase.from('matches').insert(matchRows as any);
+          if (insErr) {
+            console.error('Supabase schedule insert error:', insErr);
+          }
+        }
+
+        // Update court settings in registration_form_config
+        const { data: formCfg } = await serverSupabase
+          .from('registration_form_config')
+          .select('appearance_json')
+          .eq('season_slug', seasonSlug)
+          .single();
+
+        const appearance = formCfg?.appearance_json || {};
+        await serverSupabase
+          .from('registration_form_config')
+          .update({
+            appearance_json: {
+              ...appearance,
+              courts,
+              courtNames,
+            },
+            updated_at: nowIso,
+          } as any)
+          .eq('season_slug', seasonSlug);
+      } catch (err: any) {
+        console.error('Exception in /api/tournament/schedule/replace Supabase sync:', err);
+      }
+    }
+
+    // 2. Update persistent tournament server state atomically
+    current.matches = matches;
+    current.settings = {
+      ...(current.settings || {}),
+      courts,
+      courtNames,
+    };
+    current.lastUpdated = now;
+    writeJSON(TOURNAMENT_FILE, current);
+
+    // 3. Broadcast real-time SSE event to all connected devices immediately
+    broadcastSse('tournament_state', current);
+    broadcastSse('schedule_replaced', {
+      matches,
+      courts,
+      courtNames,
+      count: matches.length,
+      lastUpdated: now,
+    });
+
+    return res.json({
+      success: true,
+      count: matches.length,
+      courts,
+      courtNames,
+      matches,
+      lastUpdated: now,
+    });
+  });
+
+  // Delete Individual Match
+  app.delete('/api/tournament/matches/:id', async (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
+    const matchId = req.params.id;
+    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const prevMatchesCount = (current.matches || []).length;
+    current.matches = (current.matches || []).filter((m: any) => m.id !== matchId);
+    if (current.knockout && Array.isArray(current.knockout.matches)) {
+      current.knockout.matches = current.knockout.matches.filter((m: any) => m.id !== matchId);
+    }
+    const now = Date.now();
+    current.lastUpdated = now;
+    writeJSON(TOURNAMENT_FILE, current);
+
+    if (serverSupabase) {
+      try {
+        await serverSupabase.from('match_scores').delete().eq('match_id', matchId);
+        await serverSupabase.from('matches').delete().eq('id', matchId);
+      } catch (err) {
+        console.error('Error deleting individual match from Supabase:', err);
+      }
+    }
+
+    broadcastSse('tournament_state', current);
+    broadcastSse('match_deleted', { id: matchId, lastUpdated: now });
+    res.json({ success: true, deleted: prevMatchesCount !== current.matches.length });
   });
 
   // Bulk captain assignment persistent endpoint

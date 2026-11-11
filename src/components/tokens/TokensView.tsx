@@ -854,9 +854,13 @@ export const TokensView: React.FC = () => {
               </p>
             </div>
             <button
-              onClick={() => {
-                generateFixtures();
-                showNotice('Round-robin match schedule auto-generated for these teams!', 'success');
+              onClick={async () => {
+                const res = await generateFixtures();
+                if (res.success) {
+                  showNotice(`Round-robin match schedule generated with ${res.count || existingTeams.length} matches!`, 'success');
+                } else {
+                  showNotice(res.error || 'Failed to generate match schedule.', 'error');
+                }
               }}
               className="text-xs font-bold text-amber-400 hover:underline self-start sm:self-auto"
             >

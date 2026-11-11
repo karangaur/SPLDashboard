@@ -359,41 +359,99 @@ export function calculateStandings(
   });
 }
 
-// Round Robin Generator
-export function generateRoundRobinFixtures(teams: Team[], courtsCount = 2): Match[] {
-  const teamList = [...teams];
+// Intelligent Multi-Court Round Robin Generator
+export function generateRoundRobinFixtures(
+  teams: Team[],
+  courtsCount = 1,
+  courtNames?: string[]
+): Match[] {
+  const teamList = teams.filter((t) => t && t.id && t.name);
   if (teamList.length < 2) return [];
 
-  if (teamList.length % 2 === 1) {
-    teamList.push({ id: '__BYE__', name: 'BYE', players: [] });
+  const actualCourts = Math.max(1, Math.min(32, courtsCount || 1));
+  const normalizedCourtNames: string[] = Array.from({ length: actualCourts }, (_, i) => {
+    const custom = courtNames && courtNames[i]?.trim();
+    return custom && custom.length > 0 ? custom : `Court ${i + 1}`;
+  });
+
+  const workingTeams = [...teamList];
+  if (workingTeams.length % 2 === 1) {
+    workingTeams.push({ id: '__BYE__', name: 'BYE', players: [] });
   }
 
-  const n = teamList.length;
+  const n = workingTeams.length;
   const rounds = n - 1;
   const matchesPerRound = n / 2;
-  const teamIds = teamList.map((t) => t.id);
+  const teamIds = workingTeams.map((t) => t.id);
   const result: Match[] = [];
 
+  let globalSlot = 1;
+  let prevRoundLastSlotTeams = new Set<string>();
+
   for (let r = 0; r < rounds; r++) {
-    let court = 1;
+    // 1. Gather all valid matches for this round
+    const roundPairings: { teamA: string; teamB: string }[] = [];
     for (let m = 0; m < matchesPerRound; m++) {
       const a = teamIds[m];
       const b = teamIds[n - 1 - m];
       if (a !== '__BYE__' && b !== '__BYE__') {
-        result.push({
-          id: crypto.randomUUID(),
-          round: r + 1,
-          court: ((court - 1) % courtsCount) + 1,
-          teamA: a,
-          teamB: b,
-          status: 'upcoming',
-          time: `Round ${r + 1} · Match ${court}`,
-        });
-        court++;
+        roundPairings.push({ teamA: a, teamB: b });
       }
     }
 
-    // Rotate: keep first fixed, rotate remaining
+    // 2. Sort pairings to minimize consecutive back-to-back matches across round transitions
+    if (roundPairings.length > actualCourts && prevRoundLastSlotTeams.size > 0) {
+      roundPairings.sort((p1, p2) => {
+        const p1HasPrev = prevRoundLastSlotTeams.has(p1.teamA) || prevRoundLastSlotTeams.has(p1.teamB) ? 1 : 0;
+        const p2HasPrev = prevRoundLastSlotTeams.has(p2.teamA) || prevRoundLastSlotTeams.has(p2.teamB) ? 1 : 0;
+        return p1HasPrev - p2HasPrev; // pairs without previous round last slot teams play earlier
+      });
+    }
+
+    // 3. Partition round into time slots of size <= actualCourts
+    // Since all pairings within a round are mutually disjoint, each time slot has 0 team overlap
+    const slotsInRound = Math.ceil(roundPairings.length / actualCourts);
+    let roundLastSlotTeams = new Set<string>();
+
+    for (let s = 0; s < slotsInRound; s++) {
+      const slotMatches = roundPairings.slice(s * actualCourts, (s + 1) * actualCourts);
+      const isLastSlot = s === slotsInRound - 1;
+      if (isLastSlot) {
+        roundLastSlotTeams = new Set<string>();
+        slotMatches.forEach((pm) => {
+          roundLastSlotTeams.add(pm.teamA);
+          roundLastSlotTeams.add(pm.teamB);
+        });
+      }
+
+      // Distribute fairly across courts with round rotation offset
+      const courtOffset = (r + s) % actualCourts;
+
+      slotMatches.forEach((pair, idx) => {
+        const courtIndex0 = (courtOffset + idx) % actualCourts;
+        const courtNumber = courtIndex0 + 1;
+        const courtName = normalizedCourtNames[courtIndex0] || `Court ${courtNumber}`;
+
+        result.push({
+          id: crypto.randomUUID(),
+          round: r + 1,
+          court: courtNumber,
+          courtName,
+          courtSlot: globalSlot,
+          teamA: pair.teamA,
+          teamB: pair.teamB,
+          status: 'upcoming',
+          time: `Round ${r + 1} · Slot ${s + 1} · ${courtName}`,
+          version: 1,
+        });
+      });
+
+      globalSlot++;
+    }
+
+    prevRoundLastSlotTeams = roundLastSlotTeams;
+
+    // Rotate: keep first fixed, rotate remaining (standard Berger circle algorithm)
     const fixed = teamIds[0];
     const rest = teamIds.slice(1);
     rest.unshift(rest.pop()!);

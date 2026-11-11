@@ -100,7 +100,8 @@ interface TournamentContextType {
   // Matches & Fixtures
   updateMatch: (id: string, updates: Partial<Match>) => void;
   setMatches: (matches: Match[]) => void;
-  generateFixtures: () => void;
+  generateFixtures: (courtConfig?: { courts: number; courtNames?: string[] }) => Promise<{ success: boolean; count?: number; error?: string }>;
+  deleteMatch: (id: string) => Promise<boolean>;
   clearResults: () => void;
   clearAllMatches: () => void;
   
@@ -1790,25 +1791,93 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
-  const generateFixtures = () => {
-    if (state.teams.length < 2) return;
-    const fixtures = generateRoundRobinFixtures(state.teams, state.settings.courts);
+  const generateFixtures = async (
+    courtConfig?: { courts: number; courtNames?: string[] }
+  ): Promise<{ success: boolean; count?: number; error?: string }> => {
+    if (state.teams.length < 2) {
+      return { success: false, error: 'At least 2 teams are required to generate a match schedule.' };
+    }
+
+    const courts = courtConfig?.courts || state.settings.courts || 1;
+    const courtNames =
+      courtConfig?.courtNames ||
+      state.settings.courtNames ||
+      Array.from({ length: courts }, (_, i) => `Court ${i + 1}`);
+
+    const fixtures = generateRoundRobinFixtures(state.teams, courts, courtNames);
     const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
     lastServerScoreTime.current = Date.now();
-    setState((prev) => {
+
+    try {
+      // 1. Direct Supabase atomic replacement (delete old, insert new)
       if (SupabaseService.isAvailable()) {
-        SupabaseService.batchSaveMatches(fixtures, seasonSlug).catch(() => {});
+        const supRes = await SupabaseService.replaceSeasonMatches(fixtures, seasonSlug, { courts, courtNames });
+        if (!supRes.success) {
+          console.warn('Supabase schedule replacement error:', supRes.error);
+        }
       }
-      fetch('/api/tournament/state', {
+
+      // 2. Centralized server atomic replacement & SSE broadcast
+      const serverRes = await fetch('/api/tournament/schedule/replace', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches: fixtures }),
-      }).catch(() => {});
-      return {
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({
+          seasonSlug,
+          matches: fixtures,
+          courts,
+          courtNames,
+        }),
+      }).catch((err) => {
+        console.warn('Server schedule replacement call failed:', err);
+        return null;
+      });
+
+      if (serverRes && !serverRes.ok && !SupabaseService.isAvailable()) {
+        const errData = await serverRes.json().catch(() => ({}));
+        return { success: false, error: errData.error || 'Failed to replace match schedule on server.' };
+      }
+
+      // 3. Update React state immediately
+      setState((prev) => ({
         ...prev,
         matches: fixtures,
-      };
-    });
+        settings: {
+          ...prev.settings,
+          courts,
+          courtNames,
+        },
+      }));
+
+      return { success: true, count: fixtures.length };
+    } catch (err: any) {
+      console.error('Exception during schedule generation:', err);
+      return { success: false, error: err?.message || 'Unexpected error generating schedule' };
+    }
+  };
+
+  const deleteMatch = async (matchId: string): Promise<boolean> => {
+    try {
+      if (SupabaseService.isAvailable()) {
+        await SupabaseService.deleteMatch(matchId);
+      }
+      await fetch(`/api/tournament/matches/${matchId}`, {
+        method: 'DELETE',
+        headers: { ...AuthService.getAuthHeader() },
+      }).catch(() => {});
+
+      setState((prev) => ({
+        ...prev,
+        matches: prev.matches.filter((m) => m.id !== matchId),
+        knockout: {
+          ...prev.knockout,
+          matches: prev.knockout.matches.filter((m) => m.id !== matchId),
+        },
+      }));
+      return true;
+    } catch (err) {
+      console.error('Error deleting match:', err);
+      return false;
+    }
   };
 
   const clearResults = () => {
@@ -3004,6 +3073,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateMatch,
         setMatches,
         generateFixtures,
+        deleteMatch,
         clearResults,
         clearAllMatches,
         setKnockoutFormat,

@@ -893,13 +893,13 @@ export const TeamsView: React.FC = () => {
 
       {/* Create Team Modal */}
       {createModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md rounded-2xl glass-panel p-6 shadow-2xl border border-white/10 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-md rounded-2xl glass-panel p-5 sm:p-6 shadow-2xl border border-white/10 space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <h3 className="font-bold text-white text-lg">Create New Team</h3>
+              <h3 className="font-bold text-white text-base sm:text-lg">Create New Team</h3>
               <button
                 onClick={() => setCreateModalOpen(false)}
-                className="text-slate-400 hover:text-white"
+                className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                 aria-label="Close"
               >
                 ✕
@@ -983,17 +983,17 @@ export const TeamsView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-white/10">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setCreateModalOpen(false)}
-                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white"
+                  className="px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-colors text-center"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 transition-colors shadow"
+                  className="px-5 py-2.5 min-h-[44px] text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 transition-colors shadow flex items-center justify-center"
                 >
                   Create Team
                 </button>
@@ -1005,13 +1005,13 @@ export const TeamsView: React.FC = () => {
 
       {/* Edit Team Modal */}
       {editingTeam && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-md rounded-2xl glass-panel p-6 shadow-2xl border border-white/10 space-y-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto">
+          <div className="w-full max-w-md rounded-2xl glass-panel p-5 sm:p-6 shadow-2xl border border-white/10 space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <h3 className="font-bold text-white text-lg">Edit Team</h3>
+              <h3 className="font-bold text-white text-base sm:text-lg">Edit Team</h3>
               <button
                 onClick={() => setEditingTeam(null)}
-                className="text-slate-400 hover:text-white"
+                className="w-10 h-10 flex items-center justify-center rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
                 aria-label="Close"
               >
                 ✕
@@ -1055,11 +1055,11 @@ export const TeamsView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-white/10">
+              <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-end gap-2 pt-3 border-t border-white/10">
                 <button
                   type="button"
                   onClick={() => setEditingTeam(null)}
-                  className="px-4 py-2 text-xs font-medium text-slate-400 hover:text-white"
+                  className="px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-colors text-center"
                 >
                   Cancel
                 </button>
@@ -1071,7 +1071,7 @@ export const TeamsView: React.FC = () => {
                     showNotification(`Updated team "${editingTeam.name}".`);
                     setEditingTeam(null);
                   }}
-                  className="px-4 py-2 text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 transition-colors shadow"
+                  className="px-5 py-2.5 min-h-[44px] text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 transition-colors shadow flex items-center justify-center"
                 >
                   Save Changes
                 </button>

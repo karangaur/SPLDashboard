@@ -19,16 +19,19 @@ import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import { Match } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { LiveMatchScoringModal } from '../admin/LiveMatchScoringModal';
+import { GenerateScheduleModal } from './GenerateScheduleModal';
 import { evaluateSetStatus } from '../../utils/badmintonEngine';
 
 export const FixturesView: React.FC = () => {
-  const { state, updateMatch, generateFixtures, clearResults, setMatches } = useTournament();
+  const { state, updateMatch, clearResults, setMatches, deleteMatch, clearAllMatches } = useTournament();
 
   const [filterStatus, setFilterStatus] = useState<'all' | 'live' | 'upcoming' | 'completed'>('all');
   const [selectedCourt, setSelectedCourt] = useState<number | 'all'>('all');
   const [editingMatch, setEditingMatch] = useState<Match | null>(null);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
-  const [showGenerateConfirm, setShowGenerateConfirm] = useState(false);
+  const [showClearAllMatchesConfirm, setShowClearAllMatchesConfirm] = useState(false);
+  const [generateModalOpen, setGenerateModalOpen] = useState(false);
+  const [deleteConfirmMatchId, setDeleteConfirmMatchId] = useState<string | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [liveScoringMatchId, setLiveScoringMatchId] = useState<string | null>(null);
 
@@ -44,7 +47,12 @@ export const FixturesView: React.FC = () => {
     setTimeout(() => setToastMsg(null), 3500);
   };
 
-  const courtsList = Array.from({ length: state.settings.courts || 2 }, (_, i) => i + 1);
+  const courtsCount = Math.max(1, state.settings.courts || 1);
+  const courtsList = Array.from({ length: courtsCount }, (_, i) => i + 1);
+
+  const getCourtDisplayName = (courtNum: number) => {
+    return state.settings.courtNames?.[courtNum - 1]?.trim() || `Court ${courtNum}`;
+  };
 
   const filteredMatches = state.matches.filter((m) => {
     if (filterStatus !== 'all' && m.status !== filterStatus) return false;
@@ -149,14 +157,16 @@ export const FixturesView: React.FC = () => {
       return;
     }
 
+    const courtName = getCourtDisplayName(manualCourt);
     const newMatch: Match = {
       id: crypto.randomUUID(),
       round: manualRound,
       court: manualCourt,
+      courtName,
       teamA: manualTeamA,
       teamB: manualTeamB,
       status: 'upcoming',
-      time: `Round ${manualRound} · Court ${manualCourt}`,
+      time: `Round ${manualRound} · ${courtName}`,
     };
 
     setMatches([...state.matches, newMatch]);
@@ -220,7 +230,7 @@ export const FixturesView: React.FC = () => {
           </button>
 
           <button
-            onClick={() => setShowGenerateConfirm(true)}
+            onClick={() => setGenerateModalOpen(true)}
             className="flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
           >
             <RefreshCw className="w-4 h-4 shrink-0" />
@@ -246,9 +256,18 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setShowClearConfirm(true)}
+            className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-amber-400 bg-white/5 hover:bg-amber-500/10 rounded-xl transition-colors border border-white/5"
+            title="Reset All Match Scores to 0-0"
+            aria-label="Reset All Match Scores to 0-0"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+
+          <button
+            onClick={() => setShowClearAllMatchesConfirm(true)}
             className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5"
-            title="Clear All Match Scores"
-            aria-label="Clear All Match Scores"
+            title="Delete All Matches Permanently"
+            aria-label="Delete All Matches Permanently"
           >
             <Trash2 className="w-4 h-4" />
           </button>
@@ -312,7 +331,7 @@ export const FixturesView: React.FC = () => {
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Court {c}
+                {getCourtDisplayName(c)}
               </button>
             ))}
           </div>
@@ -354,7 +373,7 @@ export const FixturesView: React.FC = () => {
                       }`}
                     />
                     <span className="font-bold uppercase tracking-wider text-slate-300">
-                      Round {match.round} · Court {match.court}
+                      Round {match.round} · {match.courtName || getCourtDisplayName(match.court)}
                     </span>
                   </div>
 
@@ -384,9 +403,17 @@ export const FixturesView: React.FC = () => {
                       onClick={() => handleResetMatch(match.id)}
                       title="Reset score"
                       aria-label="Reset match score"
-                      className="text-slate-500 hover:text-slate-300 p-1 rounded transition-colors"
+                      className="text-slate-500 hover:text-amber-300 p-1 rounded transition-colors"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirmMatchId(match.id)}
+                      title="Delete this match permanently from Supabase"
+                      aria-label="Delete this match permanently"
+                      className="text-slate-500 hover:text-rose-400 p-1 rounded transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
                     </button>
                   </div>
                 </div>
@@ -564,7 +591,7 @@ export const FixturesView: React.FC = () => {
           </p>
           {state.teams.length >= 2 && (
             <button
-              onClick={() => setShowGenerateConfirm(true)}
+              onClick={() => setGenerateModalOpen(true)}
               className="px-4 py-2 text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 shadow transition-all"
             >
               Generate Round-Robin Schedule
@@ -631,16 +658,19 @@ export const FixturesView: React.FC = () => {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
-                    Court Number
+                    Badminton Court
                   </label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={state.settings.courts || 4}
+                  <select
                     value={manualCourt}
                     onChange={(e) => setManualCourt(parseInt(e.target.value, 10) || 1)}
-                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-white"
-                  />
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-white text-xs font-medium"
+                  >
+                    {courtsList.map((c) => (
+                      <option key={c} value={c}>
+                        {getCourtDisplayName(c)}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
@@ -676,32 +706,64 @@ export const FixturesView: React.FC = () => {
         </div>
       )}
 
-      {/* Confirm Schedule Generation */}
-      <ConfirmModal
-        isOpen={showGenerateConfirm}
-        title="Generate Round-Robin Schedule"
-        message={`This will generate round-robin fixtures for all ${state.teams.length} teams across ${state.settings.courts} courts. Any existing league match scores will be reset.`}
-        confirmLabel="Generate Schedule"
-        variant="warning"
-        onConfirm={() => {
-          generateFixtures();
-          setShowGenerateConfirm(false);
+      {/* Multi-Court Generate Schedule Modal with Real-Time Preview & Replacement */}
+      <GenerateScheduleModal
+        isOpen={generateModalOpen}
+        onClose={() => setGenerateModalOpen(false)}
+        onSuccess={(count) => {
+          showToast(`Tournament schedule regenerated with ${count} matches.`, 'success');
         }}
-        onCancel={() => setShowGenerateConfirm(false)}
       />
 
-      {/* Confirm Clear Results */}
+      {/* Confirm Delete Single Match Permanently */}
+      <ConfirmModal
+        isOpen={Boolean(deleteConfirmMatchId)}
+        title="Delete Match Permanently"
+        message="Are you sure you want to permanently delete this match? It will be removed from Supabase and the live schedule."
+        confirmLabel="Delete Match"
+        variant="danger"
+        onConfirm={async () => {
+          if (deleteConfirmMatchId) {
+            const success = await deleteMatch(deleteConfirmMatchId);
+            setDeleteConfirmMatchId(null);
+            if (success) {
+              showToast('Match permanently deleted.', 'success');
+            } else {
+              showToast('Failed to delete match.', 'error');
+            }
+          }
+        }}
+        onCancel={() => setDeleteConfirmMatchId(null)}
+      />
+
+      {/* Confirm Reset Scores Only (Scores to 0-0) */}
       <ConfirmModal
         isOpen={showClearConfirm}
-        title="Reset All Match Results"
-        message="Are you sure you want to clear all scores and winners? Fixtures will remain scheduled but all scores will return to 0-0."
-        confirmLabel="Reset Results"
-        variant="danger"
+        title="Reset All Match Scores"
+        message="Are you sure you want to clear all scores and winners? Scheduled fixtures will remain intact, but all scores will return to 0 - 0."
+        confirmLabel="Reset Scores"
+        variant="warning"
         onConfirm={() => {
           clearResults();
           setShowClearConfirm(false);
+          showToast('All match scores reset to 0 - 0.', 'success');
         }}
         onCancel={() => setShowClearConfirm(false)}
+      />
+
+      {/* Confirm Delete All Matches Permanently */}
+      <ConfirmModal
+        isOpen={showClearAllMatchesConfirm}
+        title="Delete All Matches from Database"
+        message="Are you sure you want to permanently delete all match fixtures and scores for this tournament? This will completely clear the schedule."
+        confirmLabel="Delete All Matches"
+        variant="danger"
+        onConfirm={() => {
+          clearAllMatches();
+          setShowClearAllMatchesConfirm(false);
+          showToast('All tournament matches deleted.', 'success');
+        }}
+        onCancel={() => setShowClearAllMatchesConfirm(false)}
       />
 
       {/* Live Badminton Scoring Modal (Umpire Console) */}

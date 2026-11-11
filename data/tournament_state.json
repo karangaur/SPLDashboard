@@ -16,7 +16,11 @@
       "deuceEnabled": true,
       "maxPointCap": 30,
       "changeEndsAtInterval": true
-    }
+    },
+    "courtNames": [
+      "Main Court",
+      "Side Court"
+    ]
   },
   "players": [
     {
@@ -152,36 +156,76 @@
   ],
   "matches": [
     {
-      "id": "match-live-01",
+      "id": "ee5c7caf-9234-4910-b3fd-1df1b467083f",
       "round": 1,
       "court": 1,
+      "courtName": "Main Court",
+      "courtSlot": 1,
       "teamA": "team-smash-strikers",
-      "teamB": "team-maharajganj-masters",
-      "scoreA": 12,
-      "scoreB": 8,
-      "status": "live",
-      "time": "Court 1 · In Progress",
-      "version": 2,
-      "sets": [
-        {
-          "scoreA": 11,
-          "scoreB": 8
-        }
-      ],
-      "lastUpdated": 1793854627991
+      "teamB": "team-royal-shuttlers",
+      "status": "upcoming",
+      "time": "Round 1 · Slot 1 · Main Court",
+      "version": 1
     },
     {
-      "id": "match-upcoming-02",
+      "id": "1fdf5cd1-a526-443a-8334-8b931ad6d505",
       "round": 1,
       "court": 2,
+      "courtName": "Side Court",
+      "courtSlot": 1,
+      "teamA": "team-maharajganj-masters",
+      "teamB": "team-shuttle-warriors",
+      "status": "upcoming",
+      "time": "Round 1 · Slot 1 · Side Court",
+      "version": 1
+    },
+    {
+      "id": "ffc0b4a4-2aae-418f-b07f-a21fe5cb963f",
+      "round": 2,
+      "court": 2,
+      "courtName": "Side Court",
+      "courtSlot": 2,
+      "teamA": "team-smash-strikers",
+      "teamB": "team-shuttle-warriors",
+      "status": "upcoming",
+      "time": "Round 2 · Slot 1 · Side Court",
+      "version": 1
+    },
+    {
+      "id": "d1980617-8010-432b-8f6b-e204c0c3b2e0",
+      "round": 2,
+      "court": 1,
+      "courtName": "Main Court",
+      "courtSlot": 2,
+      "teamA": "team-royal-shuttlers",
+      "teamB": "team-maharajganj-masters",
+      "status": "upcoming",
+      "time": "Round 2 · Slot 1 · Main Court",
+      "version": 1
+    },
+    {
+      "id": "aa66b158-94ed-4b28-997b-98796309bf46",
+      "round": 3,
+      "court": 1,
+      "courtName": "Main Court",
+      "courtSlot": 3,
+      "teamA": "team-smash-strikers",
+      "teamB": "team-maharajganj-masters",
+      "status": "upcoming",
+      "time": "Round 3 · Slot 1 · Main Court",
+      "version": 1
+    },
+    {
+      "id": "c1e283ac-9a4e-47af-8013-4b23638bd068",
+      "round": 3,
+      "court": 2,
+      "courtName": "Side Court",
+      "courtSlot": 3,
       "teamA": "team-shuttle-warriors",
       "teamB": "team-royal-shuttlers",
-      "scoreA": 0,
-      "scoreB": 0,
       "status": "upcoming",
-      "time": "Court 2 · Scheduled",
-      "version": 0,
-      "sets": []
+      "time": "Round 3 · Slot 1 · Side Court",
+      "version": 1
     }
   ],
   "knockout": {
@@ -190,5 +234,5 @@
   },
   "predefinedTeams": [],
   "teamFormationMode": "random",
-  "lastUpdated": 1793856356260
+  "lastUpdated": 1794429164408
 }

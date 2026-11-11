@@ -514,6 +514,100 @@ export class SupabaseService {
     }
   }
 
+  static async replaceSeasonMatches(
+    newMatches: Match[],
+    season = 'season-4',
+    courtSettings?: { courts: number; courtNames?: string[] }
+  ): Promise<{ success: boolean; error?: string }> {
+    if (!this.isAvailable()) return { success: true };
+    try {
+      // 1. Identify existing group matches to clear dependent match_scores
+      const { data: existingMatches } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('tournament_season', season)
+        .eq('match_type', 'group');
+
+      const existingIds = (existingMatches || []).map((m: any) => m.id);
+
+      // 2. Delete dependent match score rows
+      if (existingIds.length > 0) {
+        await supabase
+          .from('match_scores')
+          .delete()
+          .in('match_id', existingIds);
+      }
+
+      // 3. Delete existing group matches
+      const { error: delError } = await supabase
+        .from('matches')
+        .delete()
+        .eq('tournament_season', season)
+        .eq('match_type', 'group');
+
+      if (delError) {
+        console.error('Failed to delete existing matches in Supabase:', delError);
+        return { success: false, error: delError.message };
+      }
+
+      // 4. Insert new matches
+      if (newMatches.length > 0) {
+        const rows = newMatches.map((m) => ({
+          id: m.id,
+          tournament_season: season,
+          round: m.round,
+          court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
+          match_type: 'group' as const,
+          slot: m.courtSlot || null,
+          team_a_id: m.teamA || null,
+          team_b_id: m.teamB || null,
+          score_a: m.scoreA != null ? m.scoreA : null,
+          score_b: m.scoreB != null ? m.scoreB : null,
+          status: m.status || 'upcoming',
+          winner_id: m.winner || null,
+          time: m.time || (m.courtName ? `Round ${m.round} · ${m.courtName}` : `Round ${m.round} · Court ${m.court}`),
+          sets_json: m.sets || null,
+          mvp_player_id: m.mvpPlayerId || null,
+          updated_at: new Date().toISOString(),
+        }));
+
+        const { error: insError } = await supabase.from('matches').insert(rows as any);
+        if (insError) {
+          console.error('Failed to insert new matches in Supabase:', insError);
+          return { success: false, error: insError.message };
+        }
+      }
+
+      // 5. Update court configuration in registration_form_config
+      if (courtSettings) {
+        const { data: currentForm } = await (supabase
+          .from('registration_form_config') as any)
+          .select('appearance_json')
+          .eq('season_slug', season)
+          .maybeSingle();
+
+        const appearance = (currentForm as any)?.appearance_json || {};
+        await (supabase
+          .from('registration_form_config') as any)
+          .update({
+            appearance_json: {
+              ...appearance,
+              courts: courtSettings.courts,
+              courtNames: courtSettings.courtNames,
+            },
+            updated_at: new Date().toISOString(),
+          })
+          .eq('season_slug', season);
+      }
+
+      await this.logAudit('matches_schedule_regenerated', 'matches', `Generated ${newMatches.length} matches with ${courtSettings?.courts || 1} courts`);
+      return { success: true };
+    } catch (err: any) {
+      console.error('Exception in replaceSeasonMatches:', err);
+      return { success: false, error: err?.message || 'Failed to replace match schedule' };
+    }
+  }
+
   static async batchSaveMatches(
     matches: Match[],
     season = 'season-4'
@@ -526,6 +620,7 @@ export class SupabaseService {
         round: m.round,
         court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
         match_type: 'group' as const,
+        slot: m.courtSlot || null,
         team_a_id: m.teamA || null,
         team_b_id: m.teamB || null,
         score_a: m.scoreA != null ? m.scoreA : null,
@@ -548,6 +643,7 @@ export class SupabaseService {
   static async deleteMatch(id: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      await supabase.from('match_scores').delete().eq('match_id', id);
       const { error } = await supabase.from('matches').delete().eq('id', id);
       return !error;
     } catch {
@@ -558,7 +654,17 @@ export class SupabaseService {
   static async clearSeasonMatches(season = 'season-4'): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      const { error } = await supabase.from('matches').delete().eq('tournament_season', season);
+      const { data: existing } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('tournament_season', season)
+        .eq('match_type', 'group');
+
+      const ids = (existing || []).map((m: any) => m.id);
+      if (ids.length > 0) {
+        await supabase.from('match_scores').delete().in('match_id', ids);
+      }
+      const { error } = await supabase.from('matches').delete().eq('tournament_season', season).eq('match_type', 'group');
       return !error;
     } catch {
       return false;

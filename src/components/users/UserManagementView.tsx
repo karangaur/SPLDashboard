@@ -368,7 +368,8 @@ export const UserManagementView: React.FC = () => {
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
+          <>
+            <div className="hidden md:block overflow-x-auto">
             <table className="w-full text-left text-xs">
               <thead className="bg-white/5 border-b border-white/10 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                 <tr>
@@ -544,6 +545,127 @@ export const UserManagementView: React.FC = () => {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile Card Presentation for Smartphones */}
+          <div className="md:hidden divide-y divide-white/10">
+            {filteredUsers.map((user) => {
+              const isMasterAdmin = user.id === 'admin-spl-master-01' || user.username === 'admin';
+              const isCurrent = user.id === currentUserId;
+
+              return (
+                <div key={user.id} className="p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400/20 to-lime-500/20 border border-amber-400/30 flex items-center justify-center font-bold text-amber-400 text-sm shrink-0">
+                        {user.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-white text-sm">{user.name}</span>
+                          {isMasterAdmin && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-amber-400/20 text-amber-400 border border-amber-400/30">
+                              Master
+                            </span>
+                          )}
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-lime-400/20 text-lime-400">
+                              You
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1.5 text-slate-400 text-xs mt-0.5">
+                          <span className="font-mono text-slate-300">@{user.username}</span>
+                          <span>•</span>
+                          <span className="truncate max-w-[150px]">{user.email}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {user.role === 'super_admin' ? (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 shrink-0">
+                        <ShieldCheck className="w-3 h-3" />
+                        <span>Admin</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shrink-0">
+                        <Activity className="w-3 h-3" />
+                        <span>Scorer</span>
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs bg-white/[0.02] p-2.5 rounded-xl border border-white/5">
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Mobile</span>
+                      <span className="font-mono text-slate-200">{user.mobile || '—'}</span>
+                    </div>
+                    <div>
+                      <span className="text-slate-400 block text-[10px]">Status</span>
+                      {user.isActive ? (
+                        <span className="text-emerald-400 font-semibold inline-flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                          <span>Active</span>
+                        </span>
+                      ) : (
+                        <span className="text-rose-400 font-semibold inline-flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-rose-400" />
+                          <span>Inactive</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Touch Action Controls */}
+                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setEditingUser(user)}
+                      className="px-3 py-2 min-h-[44px] rounded-xl bg-white/5 hover:bg-white/10 text-slate-200 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <Edit2 className="w-3.5 h-3.5" />
+                      <span>Edit</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setResettingUser(user)}
+                      className="px-3 py-2 min-h-[44px] rounded-xl bg-amber-400/10 hover:bg-amber-400/20 text-amber-400 border border-amber-400/30 text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>Password</span>
+                    </button>
+
+                    {!isMasterAdmin && !isCurrent && (
+                      <button
+                        type="button"
+                        onClick={() => setStatusToggleUser(user)}
+                        className={`p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl border transition-colors ${
+                          user.isActive
+                            ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                            : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                        }`}
+                        title={user.isActive ? 'Deactivate' : 'Activate'}
+                      >
+                        <Power className="w-4 h-4" />
+                      </button>
+                    )}
+
+                    {!isMasterAdmin && !isCurrent && (
+                      <button
+                        type="button"
+                        onClick={() => setDeletingUser(user)}
+                        className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-rose-500/10 text-rose-400 border border-rose-500/20 transition-colors"
+                        title="Delete User"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
       </div>
 

@@ -104,22 +104,22 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
                 </span>
-                <span>🔴 LIVE COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
+                <span>🔴 LIVE · {(activeMatch?.courtName || `COURT ${String(activeMatch?.court || 1).padStart(2, '0')}`).toUpperCase()}</span>
               </div>
             ) : isPaused ? (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider">
                 <Clock className="w-3.5 h-3.5 text-amber-400" />
-                <span>PAUSED / TIMEOUT · COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
+                <span>PAUSED · {(activeMatch?.courtName || `COURT ${String(activeMatch?.court || 1).padStart(2, '0')}`).toUpperCase()}</span>
               </div>
             ) : isCompleted ? (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 text-xs font-black uppercase tracking-wider">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                <span>FINAL RESULT · COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
+                <span>FINAL RESULT · {(activeMatch?.courtName || `COURT ${String(activeMatch?.court || 1).padStart(2, '0')}`).toUpperCase()}</span>
               </div>
             ) : (
               <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-500/20 border border-slate-500/40 text-slate-300 text-xs font-black uppercase tracking-wider">
                 <Clock className="w-3.5 h-3.5 text-slate-400" />
-                <span>NEXT ON COURT {String(activeMatch?.court || 1).padStart(2, '0')}</span>
+                <span>NEXT ON {(activeMatch?.courtName || `COURT ${String(activeMatch?.court || 1).padStart(2, '0')}`).toUpperCase()}</span>
               </div>
             )}
 
@@ -239,7 +239,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
               {/* Badminton Shuttlecock Icon in motion */}
               <div className="flex items-center gap-1.5 text-xs text-slate-400 pt-0.5">
                 <span className="text-base animate-bounce">🏸</span>
-                <span className="text-[11px] font-mono">Court {activeMatch?.court || 1}</span>
+                <span className="text-[11px] font-mono">{activeMatch?.courtName || `Court ${activeMatch?.court || 1}`}</span>
               </div>
             </div>
 
