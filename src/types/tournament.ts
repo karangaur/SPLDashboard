@@ -41,6 +41,7 @@ export interface Team {
   players: string[]; // Player IDs
   captainId?: string;
   locked?: boolean;
+  lockedPlayerIds?: string[];
   avatarColor?: string;
   badge?: string;
   token?: string;

@@ -81,6 +81,7 @@ interface TournamentContextType {
   deleteTeamsBulk: (teamIds: string[]) => void;
   renameTeam: (id: string, newName: string) => void;
   toggleTeamLock: (id: string) => void;
+  togglePlayerLockInTeam: (teamId: string, playerId: string) => void;
   setTeamCaptain: (teamId: string, captainId: string) => void;
   setCaptainsBulk: (assignments: { teamId: string; captainId: string }[]) => void;
   setTeamPlayer: (teamId: string, playerIndex: number, newPlayerId: string) => void;
@@ -319,6 +320,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setTokens(tokData.tokens);
           setActiveToken(tokData.activeToken);
         }
+
+        // 7. Reconcile predefinedTeams & teamFormationMode from backend state
+        fetch('/api/tournament/state')
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const text = await res.text().catch(() => '');
+            try { return text ? JSON.parse(text) : null; } catch { return null; }
+          })
+          .then((serverState) => {
+            if (serverState) {
+              setState((prev) => ({
+                ...prev,
+                predefinedTeams: Array.isArray(serverState.predefinedTeams) ? serverState.predefinedTeams : prev.predefinedTeams,
+                teamFormationMode: serverState.teamFormationMode || prev.teamFormationMode,
+              }));
+            }
+          })
+          .catch(() => {});
       } else {
         // Fallback to local server state only if Supabase is not configured
         fetch('/api/tournament/state')
@@ -572,14 +591,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onTeamChange: () => {
-          // Re-fetch authoritative teams & rosters to keep state synchronized
+          // Ignore immediate self-echoes from our own local bulk team updates
+          if (Date.now() - lastServerScoreTime.current < 1500) return;
           SupabaseService.fetchTeams().then((teams) => {
             if (teams && teams.length >= 0) {
               setState((prev) => {
                 const prevTokenMap = new Map(prev.teams.map((t) => [t.id, t.token]));
+                const prevLockedPlayersMap = new Map(prev.teams.map((t) => [t.id, t.lockedPlayerIds]));
                 const merged = teams.map((t) => ({
                   ...t,
                   token: t.token || prevTokenMap.get(t.id),
+                  lockedPlayerIds:
+                    t.lockedPlayerIds && t.lockedPlayerIds.length > 0
+                      ? t.lockedPlayerIds
+                      : prevLockedPlayersMap.get(t.id) || [],
                 }));
                 return { ...prev, teams: merged };
               });
@@ -588,14 +613,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onTeamPlayerChange: () => {
-          // Player assigned or transferred - refresh team rosters
+          // Ignore immediate self-echoes from our own local bulk team updates
+          if (Date.now() - lastServerScoreTime.current < 1500) return;
           SupabaseService.fetchTeams().then((teams) => {
             if (teams && teams.length >= 0) {
               setState((prev) => {
                 const prevTokenMap = new Map(prev.teams.map((t) => [t.id, t.token]));
+                const prevLockedPlayersMap = new Map(prev.teams.map((t) => [t.id, t.lockedPlayerIds]));
                 const merged = teams.map((t) => ({
                   ...t,
                   token: t.token || prevTokenMap.get(t.id),
+                  lockedPlayerIds:
+                    t.lockedPlayerIds && t.lockedPlayerIds.length > 0
+                      ? t.lockedPlayerIds
+                      : prevLockedPlayersMap.get(t.id) || [],
                 }));
                 return { ...prev, teams: merged };
               });
@@ -1395,6 +1426,34 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const togglePlayerLockInTeam = (teamId: string, playerId: string) => {
+    setState((prev) => {
+      let updatedTarget: Team | undefined;
+      const nextTeams = prev.teams.map((t) => {
+        if (t.id !== teamId) return t;
+        const currentLocked = Array.isArray(t.lockedPlayerIds) ? t.lockedPlayerIds : [];
+        const isLocked = currentLocked.includes(playerId);
+        const nextLocked = isLocked
+          ? currentLocked.filter((id) => id !== playerId)
+          : [...currentLocked, playerId];
+        updatedTarget = { ...t, lockedPlayerIds: nextLocked };
+        return updatedTarget;
+      });
+      if (updatedTarget && SupabaseService.isAvailable()) {
+        SupabaseService.saveTeam(updatedTarget).catch(() => {});
+      }
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ teams: nextTeams }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        teams: nextTeams,
+      };
+    });
+  };
+
   const setTeamCaptain = (teamId: string, captainId: string) => {
     lastServerScoreTime.current = Date.now();
     setState((prev) => {
@@ -1545,17 +1604,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     const uniqueTeams = Array.from(uniqueMap.values());
 
+    setState((prev) => ({ ...prev, teams: uniqueTeams }));
+
     if (SupabaseService.isAvailable()) {
       SupabaseService.saveTeamsBulk(uniqueTeams).catch(() => {});
     }
-    setState((prev) => {
-      fetch('/api/tournament/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: uniqueTeams }),
-      }).catch(() => {});
-      return { ...prev, teams: uniqueTeams };
-    });
+    fetch('/api/tournament/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+      body: JSON.stringify({ teams: uniqueTeams }),
+    }).catch(() => {});
   };
 
   const clearTeams = () => {
@@ -1576,7 +1634,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Pre-decided teams
   const setTeamFormationMode = (mode: 'random' | 'predefined' | 'mixed') => {
-    setState((prev) => ({ ...prev, teamFormationMode: mode }));
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ teamFormationMode: mode }),
+      }).catch(() => {});
+      return { ...prev, teamFormationMode: mode };
+    });
   };
 
   const addPredefinedTeam = (name: string, p1: string, p2: string) => {
@@ -1591,7 +1656,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ];
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ predefinedTeams: updated }),
       }).catch(() => {});
       return {
@@ -1602,21 +1667,44 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updatePredefinedTeam = (id: string, updates: Partial<PredefinedTeam>) => {
-    setState((prev) => ({
-      ...prev,
-      predefinedTeams: prev.predefinedTeams.map((pt) => (pt.id === id ? { ...pt, ...updates } : pt)),
-    }));
+    setState((prev) => {
+      const updated = prev.predefinedTeams.map((pt) => (pt.id === id ? { ...pt, ...updates } : pt));
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ predefinedTeams: updated }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        predefinedTeams: updated,
+      };
+    });
   };
 
   const deletePredefinedTeam = (id: string) => {
-    setState((prev) => ({
-      ...prev,
-      predefinedTeams: prev.predefinedTeams.filter((pt) => pt.id !== id),
-    }));
+    setState((prev) => {
+      const updated = prev.predefinedTeams.filter((pt) => pt.id !== id);
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ predefinedTeams: updated }),
+      }).catch(() => {});
+      return {
+        ...prev,
+        predefinedTeams: updated,
+      };
+    });
   };
 
   const clearPredefinedTeams = () => {
-    setState((prev) => ({ ...prev, predefinedTeams: [] }));
+    setState((prev) => {
+      fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ predefinedTeams: [] }),
+      }).catch(() => {});
+      return { ...prev, predefinedTeams: [] };
+    });
   };
 
   // Matches
@@ -2887,6 +2975,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         deleteTeamsBulk,
         renameTeam,
         toggleTeamLock,
+        togglePlayerLockInTeam,
         setTeamCaptain,
         setCaptainsBulk,
         setTeamPlayer,

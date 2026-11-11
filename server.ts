@@ -796,28 +796,60 @@ async function startServer() {
             await serverSupabase.from('team_players').delete().neq('id', '___none___');
             await serverSupabase.from('teams').delete().neq('id', '___none___');
           } else {
-            for (const t of deduplicatedBody.teams) {
-              await serverSupabase.from('teams').upsert({
+            const keepIds = deduplicatedBody.teams.map((t: any) => String(t.id)).filter(Boolean);
+            const keepIdSet = new Set<string>(keepIds);
+
+            const teamRows = deduplicatedBody.teams.map((t: any) => {
+              const cleanLocked = Array.from(new Set<string>((t.lockedPlayerIds || []).filter(Boolean)));
+              const encodedShortName =
+                cleanLocked.length > 0
+                  ? `${t.token || ''}::LOCKED:${cleanLocked.join(',')}`
+                  : t.token || null;
+
+              return {
                 id: t.id,
                 name: t.name,
-                short_name: t.token || null,
+                short_name: encodedShortName,
                 captain_id: t.captainId || null,
                 avatar_color: t.avatarColor || 'from-amber-500 to-orange-600',
                 badge: t.badge || '🏸',
                 locked: Boolean(t.locked),
                 updated_at: nowIso,
-              } as any, { onConflict: 'id' });
+              };
+            });
 
-              await serverSupabase.from('team_players').delete().eq('team_id', t.id);
+            const allRosterRows: any[] = [];
+            for (const t of deduplicatedBody.teams) {
               if (Array.isArray(t.players) && t.players.length > 0) {
                 const uniquePlayers = Array.from(new Set<string>(t.players.filter(Boolean)));
-                const rosterRows = uniquePlayers.map((pid: string, idx: number) => ({
-                  team_id: t.id,
-                  player_id: pid,
-                  slot_index: idx,
-                  is_captain: t.captainId === pid,
-                }));
-                await serverSupabase.from('team_players').insert(rosterRows as any);
+                uniquePlayers.forEach((pid: string, idx: number) => {
+                  allRosterRows.push({
+                    team_id: t.id,
+                    player_id: pid,
+                    slot_index: idx,
+                    is_captain: t.captainId === pid,
+                  });
+                });
+              }
+            }
+
+            const [, { data: existingRows }] = await Promise.all([
+              serverSupabase.from('teams').upsert(teamRows as any, { onConflict: 'id' }),
+              serverSupabase.from('teams').select('id'),
+            ]);
+
+            await serverSupabase.from('team_players').delete().in('team_id', keepIds);
+            if (allRosterRows.length > 0) {
+              await serverSupabase.from('team_players').insert(allRosterRows as any);
+            }
+
+            if (existingRows && existingRows.length > 0) {
+              const orphanIds = existingRows
+                .map((r: any) => String(r.id))
+                .filter((id: string) => id && !keepIdSet.has(id));
+              if (orphanIds.length > 0) {
+                await serverSupabase.from('team_players').delete().in('team_id', orphanIds);
+                await serverSupabase.from('teams').delete().in('id', orphanIds);
               }
             }
           }

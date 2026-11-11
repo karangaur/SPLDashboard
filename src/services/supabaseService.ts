@@ -160,6 +160,29 @@ export class SupabaseService {
     }
   }
 
+  private static encodeShortName(token?: string, lockedPlayerIds?: string[]): string | null {
+    const cleanLocked = Array.from(new Set((lockedPlayerIds || []).filter(Boolean)));
+    if (cleanLocked.length > 0) {
+      return `${token || ''}::LOCKED:${cleanLocked.join(',')}`;
+    }
+    return token || null;
+  }
+
+  private static decodeShortName(shortName?: string | null): {
+    token?: string;
+    lockedPlayerIds: string[];
+  } {
+    if (!shortName) return { token: undefined, lockedPlayerIds: [] };
+    if (shortName.includes('::LOCKED:')) {
+      const [tokPart, lockedPart] = shortName.split('::LOCKED:');
+      return {
+        token: tokPart ? tokPart : undefined,
+        lockedPlayerIds: lockedPart ? lockedPart.split(',').filter(Boolean) : [],
+      };
+    }
+    return { token: shortName, lockedPlayerIds: [] };
+  }
+
   // ============================================================================
   // 2. TEAMS & ROSTERS
   // ============================================================================
@@ -169,7 +192,7 @@ export class SupabaseService {
       const { data: teamsData, error: teamsErr } = await supabase
         .from('teams')
         .select('*')
-        .order('name', { ascending: true });
+        .order('created_at', { ascending: true });
 
       if (teamsErr || !teamsData) return null;
 
@@ -192,10 +215,12 @@ export class SupabaseService {
       for (const t of teamsData as DbTeam[]) {
         if (!t.id || seenIds.has(t.id)) continue;
         seenIds.add(t.id);
+        const decoded = this.decodeShortName(t.short_name);
         uniqueTeams.push({
           id: t.id,
           name: t.name,
-          token: t.short_name || undefined,
+          token: decoded.token,
+          lockedPlayerIds: decoded.lockedPlayerIds,
           captainId: t.captain_id || undefined,
           avatarColor: t.avatar_color || 'from-amber-500 to-orange-600',
           badge: t.badge || '🏸',
@@ -215,7 +240,7 @@ export class SupabaseService {
       const teamPayload = {
         id: team.id,
         name: team.name,
-        short_name: team.token || null,
+        short_name: this.encodeShortName(team.token, team.lockedPlayerIds),
         captain_id: team.captainId || null,
         avatar_color: team.avatarColor || 'from-amber-500 to-orange-600',
         badge: team.badge || '🏸',
@@ -255,13 +280,20 @@ export class SupabaseService {
         }
       }
       const uniqueTeams = Array.from(uniqueMap.values());
-      if (uniqueTeams.length === 0) return true;
+      if (uniqueTeams.length === 0) {
+        await supabase.from('team_players').delete().neq('id', '___none___');
+        await supabase.from('teams').delete().neq('id', '___none___');
+        return true;
+      }
 
+      const keepIds = uniqueTeams.map((t) => t.id);
+      const keepIdSet = new Set(keepIds);
       const nowIso = new Date().toISOString();
+
       const teamPayloads = uniqueTeams.map((team) => ({
         id: team.id,
         name: team.name,
-        short_name: team.token || null,
+        short_name: this.encodeShortName(team.token, team.lockedPlayerIds),
         captain_id: team.captainId || null,
         avatar_color: team.avatarColor || 'from-amber-500 to-orange-600',
         badge: team.badge || '🏸',
@@ -269,21 +301,51 @@ export class SupabaseService {
         updated_at: nowIso,
       }));
 
-      await supabase.from('teams').upsert(teamPayloads as any, { onConflict: 'id' });
+      // Build all team_players rows in a single flat array
+      const allRosterRows: {
+        team_id: string;
+        player_id: string;
+        slot_index: number;
+        is_captain: boolean;
+      }[] = [];
 
       for (const t of uniqueTeams) {
-        await supabase.from('team_players').delete().eq('team_id', t.id);
         if (t.players && t.players.length > 0) {
           const uniquePlayers = Array.from(new Set(t.players.filter(Boolean)));
-          const rows = uniquePlayers.map((playerId, idx) => ({
-            team_id: t.id,
-            player_id: playerId,
-            slot_index: idx,
-            is_captain: t.captainId === playerId,
-          }));
-          await supabase.from('team_players').insert(rows as any);
+          uniquePlayers.forEach((playerId, idx) => {
+            allRosterRows.push({
+              team_id: t.id,
+              player_id: playerId,
+              slot_index: idx,
+              is_captain: t.captainId === playerId,
+            });
+          });
         }
       }
+
+      // Run team upsert and existing ID check in parallel
+      const [, { data: existingRows }] = await Promise.all([
+        supabase.from('teams').upsert(teamPayloads as any, { onConflict: 'id' }),
+        supabase.from('teams').select('id'),
+      ]);
+
+      // Replace all roster rows in 1 bulk delete + 1 bulk insert
+      await supabase.from('team_players').delete().in('team_id', keepIds);
+      if (allRosterRows.length > 0) {
+        await supabase.from('team_players').insert(allRosterRows as any);
+      }
+
+      // Clean up any stale/orphan teams in background if present
+      if (existingRows && existingRows.length > 0) {
+        const orphanIds = existingRows
+          .map((r: any) => String(r.id))
+          .filter((id: string) => id && !keepIdSet.has(id));
+        if (orphanIds.length > 0) {
+          await supabase.from('team_players').delete().in('team_id', orphanIds);
+          await supabase.from('teams').delete().in('id', orphanIds);
+        }
+      }
+
       return true;
     } catch {
       return false;
