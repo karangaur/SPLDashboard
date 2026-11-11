@@ -24,7 +24,6 @@ import {
   LayoutDashboard,
   Swords,
   TrendingUp,
-  Trophy,
   Dices,
   UserPlus,
 } from 'lucide-react';
@@ -33,10 +32,12 @@ const RESERVED_PATHS = new Set([
   '',
   'home',
   'admin',
+  'admin-spl',
   'login',
   'api',
   'dashboard',
   'fixtures',
+  'matches',
   'standings',
   'teams',
   'players',
@@ -50,24 +51,66 @@ const RESERVED_PATHS = new Set([
   'users',
 ]);
 
-function getRouteInfo(): { mode: 'home' | 'admin' | 'login' | 'register'; season?: string } {
+const VALID_ADMIN_TABS: Record<string, NavTab> = {
+  dashboard: 'dashboard',
+  fixtures: 'fixtures',
+  matches: 'fixtures',
+  standings: 'standings',
+  teams: 'teams',
+  players: 'players',
+  knockout: 'knockout',
+  tokens: 'tokens',
+  registration: 'registration',
+  registered: 'registered',
+  statistics: 'statistics',
+  champion: 'champion',
+  settings: 'settings',
+  users: 'users',
+};
+
+export type AppRouteMode = 'home' | 'admin-login' | 'admin-dashboard' | 'register';
+
+export interface RouteInfo {
+  mode: AppRouteMode;
+  tab?: NavTab;
+  season?: string;
+}
+
+function parseCurrentRoute(isAuthenticated: boolean): RouteInfo {
   if (typeof window === 'undefined') return { mode: 'home' };
-  const path = window.location.pathname;
-  const search = window.location.search;
-  const hash = window.location.hash;
+  const rawPath = window.location.pathname;
+  const path = rawPath.replace(/\/+$/, '') || '/';
+  const search = window.location.search || '';
+  const hash = window.location.hash || '';
   const searchParams = new URLSearchParams(search);
 
-  // 1. Check login
-  if (path === '/login' || hash === '#/login' || searchParams.has('login')) {
-    return { mode: 'login' };
+  // 1. Dedicated Admin Routes: /admin-spl
+  if (path === '/admin-spl' || hash === '#/admin-spl') {
+    if (isAuthenticated) {
+      return { mode: 'admin-dashboard', tab: 'dashboard' };
+    }
+    return { mode: 'admin-login' };
   }
 
-  // 2. Check admin
-  if (path === '/admin' || hash === '#/admin') {
-    return { mode: 'admin' };
+  // 1b. Dedicated Admin Sub-routes: /admin-spl/:subpath
+  if (path.startsWith('/admin-spl/')) {
+    const rawSubpath = path.slice('/admin-spl/'.length).split('/')[0]?.toLowerCase() || 'dashboard';
+    const mappedTab = VALID_ADMIN_TABS[rawSubpath] || 'dashboard';
+    if (isAuthenticated) {
+      return { mode: 'admin-dashboard', tab: mappedTab };
+    }
+    return { mode: 'admin-login' };
   }
 
-  // 3. Check query triggers
+  // 2. Legacy admin / login entry points -> map to admin-spl
+  if (path === '/login' || path === '/admin' || hash === '#/login' || hash === '#/admin' || searchParams.has('login')) {
+    if (isAuthenticated) {
+      return { mode: 'admin-dashboard', tab: 'dashboard' };
+    }
+    return { mode: 'admin-login' };
+  }
+
+  // 3. Public registration query triggers
   if (
     searchParams.has('register') ||
     searchParams.has('slug') ||
@@ -80,7 +123,7 @@ function getRouteInfo(): { mode: 'home' | 'admin' | 'login' | 'register'; season
     return { mode: 'register', season: slug };
   }
 
-  // 4. Check clean custom URL slugs (e.g. /spl-maharajganj-2026, /spl-season-3, /register)
+  // 4. Clean custom URL slugs (e.g. /spl-maharajganj-2026, /spl-season-4, /register)
   const cleanPath = path.replace(/^\/+|\/+$/g, '');
   if (cleanPath.length > 0) {
     const segments = cleanPath.split('/');
@@ -93,7 +136,7 @@ function getRouteInfo(): { mode: 'home' | 'admin' | 'login' | 'register'; season
     }
   }
 
-  // 5. Check hash-based custom slugs (e.g. #/spl-maharajganj-2026)
+  // 5. Hash-based custom slugs (e.g. #/spl-maharajganj-2026)
   if (hash.startsWith('#/')) {
     const hashClean = hash.replace(/^#\/+/, '').split('/')[0]?.toLowerCase();
     if (hashClean && !RESERVED_PATHS.has(hashClean)) {
@@ -101,36 +144,80 @@ function getRouteInfo(): { mode: 'home' | 'admin' | 'login' | 'register'; season
     }
   }
 
+  // 6. Default: Main Public SPL Website
   return { mode: 'home' };
 }
 
 export default function App() {
-  const [currentTab, setCurrentTab] = useState<NavTab>('dashboard');
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => AuthService.isAuthenticated());
 
-  // Determine initial view from URL
-  const [viewMode, setViewMode] = useState<'home' | 'admin' | 'login' | 'register'>(() => {
-    return getRouteInfo().mode;
-  });
+  const initialRoute = parseCurrentRoute(AuthService.isAuthenticated());
+  const [currentTab, setCurrentTab] = useState<NavTab>(initialRoute.tab || 'dashboard');
+  const [viewMode, setViewMode] = useState<AppRouteMode>(initialRoute.mode);
+  const [publicSeason, setPublicSeason] = useState<string | undefined>(initialRoute.season);
 
-  const [publicSeason, setPublicSeason] = useState<string | undefined>(() => {
-    return getRouteInfo().season;
-  });
-
-  // Listen for browser popstate / back button
+  // Initial URL cleanup on mount (ensure browser address bar matches canonical route)
   useEffect(() => {
-    const checkRoute = () => {
-      const route = getRouteInfo();
+    const authed = AuthService.isAuthenticated();
+    setIsAuthenticated(authed);
+    const route = parseCurrentRoute(authed);
+
+    if (route.mode === 'admin-login') {
+      if (window.location.pathname !== '/admin-spl') {
+        try {
+          window.history.replaceState({}, '', '/admin-spl');
+        } catch {}
+      }
+    } else if (route.mode === 'admin-dashboard') {
+      const canonical = route.tab && route.tab !== 'dashboard' ? `/admin-spl/${route.tab}` : '/admin-spl/dashboard';
+      if (window.location.pathname === '/admin-spl' || window.location.pathname === '/admin-spl/' || window.location.pathname === '/admin' || window.location.pathname === '/login') {
+        try {
+          window.history.replaceState({}, '', canonical);
+        } catch {}
+      }
+    }
+  }, []);
+
+  // Listen for browser popstate / back & forward navigation
+  useEffect(() => {
+    const handlePopState = () => {
+      const authed = AuthService.isAuthenticated();
+      setIsAuthenticated(authed);
+      const route = parseCurrentRoute(authed);
       setViewMode(route.mode);
+      if (route.tab) {
+        setCurrentTab(route.tab);
+      }
       if (route.season !== undefined) {
         setPublicSeason(route.season);
       }
     };
 
-    window.addEventListener('popstate', checkRoute);
-    return () => window.removeEventListener('popstate', checkRoute);
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
+  // Tab navigation in Admin Portal (updates active tab and browser URL)
+  const handleSelectAdminTab = (tab: NavTab) => {
+    setCurrentTab(tab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    try {
+      const targetPath = tab === 'dashboard' ? '/admin-spl/dashboard' : `/admin-spl/${tab}`;
+      if (window.location.pathname !== targetPath) {
+        window.history.pushState({}, '', targetPath);
+      }
+    } catch {}
+  };
+
+  // Navigate to Public Website from anywhere
+  const handleGoToPublicHome = () => {
+    setViewMode('home');
+    try {
+      window.history.pushState({}, '', '/');
+    } catch {}
+  };
+
+  // Open Public Player Registration Form
   const handleOpenPublicForm = (season?: string) => {
     setPublicSeason(season);
     setViewMode('register');
@@ -140,23 +227,30 @@ export default function App() {
     } catch {}
   };
 
-  const handleBackToDashboard = () => {
-    setViewMode('home');
-    try {
-      window.history.pushState({}, '', '/');
-    } catch {}
-  };
-
+  // Admin Logout: clears session and redirects to /admin-spl
   const handleLogout = () => {
     AuthService.logout();
     setIsAuthenticated(false);
-    setViewMode('home');
+    setViewMode('admin-login');
+    try {
+      window.history.pushState({}, '', '/admin-spl');
+    } catch {}
+  };
+
+  // Successful Login: activates session and redirects to /admin-spl/dashboard
+  const handleLoginSuccess = () => {
+    setIsAuthenticated(true);
+    setViewMode('admin-dashboard');
+    setCurrentTab('dashboard');
+    try {
+      window.history.pushState({}, '', '/admin-spl/dashboard');
+    } catch {}
   };
 
   const renderActiveView = () => {
     switch (currentTab) {
       case 'dashboard':
-        return <DashboardView onSelectTab={setCurrentTab} />;
+        return <DashboardView onSelectTab={handleSelectAdminTab} />;
       case 'fixtures':
         return <FixturesView />;
       case 'standings':
@@ -172,7 +266,7 @@ export default function App() {
       case 'registration':
         return (
           <RegistrationView
-            onSelectTab={setCurrentTab}
+            onSelectTab={handleSelectAdminTab}
             onOpenPublicForm={handleOpenPublicForm}
           />
         );
@@ -187,7 +281,7 @@ export default function App() {
       case 'users':
         return <UserManagementView />;
       default:
-        return <DashboardView onSelectTab={setCurrentTab} />;
+        return <DashboardView onSelectTab={handleSelectAdminTab} />;
     }
   };
 
@@ -197,46 +291,39 @@ export default function App() {
         /* Standalone Public Player Registration Form */
         <PublicRegistrationPage
           seasonParam={publicSeason}
-          onBackToApp={handleBackToDashboard}
+          onBackToApp={handleGoToPublicHome}
         />
-      ) : viewMode === 'login' ? (
-        /* Modern Badminton-Sporty Admin Login Page */
+      ) : viewMode === 'admin-login' ? (
+        /* Dedicated Admin Login Portal at /admin-spl */
         <AdminLoginPage
-          onLoginSuccess={() => {
-            setIsAuthenticated(true);
-            setViewMode('admin');
-          }}
+          onLoginSuccess={handleLoginSuccess}
           onGoToPublicRegister={() => handleOpenPublicForm()}
-          onBackToHome={() => setViewMode('home')}
+          onBackToHome={handleGoToPublicHome}
         />
-      ) : viewMode === 'admin' ? (
+      ) : viewMode === 'admin-dashboard' ? (
         !isAuthenticated ? (
+          /* Guard: unauthenticated attempts to view admin dashboard redirect to login */
           <AdminLoginPage
-            onLoginSuccess={() => {
-              setIsAuthenticated(true);
-              setViewMode('admin');
-            }}
+            onLoginSuccess={handleLoginSuccess}
             onGoToPublicRegister={() => handleOpenPublicForm()}
-            onBackToHome={() => setViewMode('home')}
+            onBackToHome={handleGoToPublicHome}
           />
         ) : AuthService.isScoreOperator() ? (
           /* Normal User (Score Operator) Dedicated Console */
           <ScoreOperatorDashboard
             user={AuthService.getCurrentUser()!}
             onLogout={handleLogout}
+            onViewPublicHome={handleGoToPublicHome}
           />
         ) : (
-          /* Super Admin Tournament Dashboard Shell */
+          /* Super Admin Tournament Dashboard Shell at /admin-spl/* */
           <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans pb-20 lg:pb-0">
             {/* Main Header with 3-Zone Contract, View Public Site & Logout */}
             <Header
               currentTab={currentTab}
-              onSelectTab={(tab) => {
-                setCurrentTab(tab);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
+              onSelectTab={handleSelectAdminTab}
               onLogout={handleLogout}
-              onViewPublicHome={() => setViewMode('home')}
+              onViewPublicHome={handleGoToPublicHome}
             />
 
             {/* Viewport Content Area */}
@@ -246,10 +333,7 @@ export default function App() {
 
             {/* Global Footer with Persistence info */}
             <Footer
-              onSelectTab={(tab) => {
-                setCurrentTab(tab);
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
+              onSelectTab={handleSelectAdminTab}
             />
 
             {/* Mobile Fixed Bottom Navigation Bar */}
@@ -258,10 +342,7 @@ export default function App() {
               className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-white/10 px-1.5 pt-1.5 pb-safe flex items-center justify-around shadow-2xl"
             >
               <button
-                onClick={() => {
-                  setCurrentTab('dashboard');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleSelectAdminTab('dashboard')}
                 aria-label="Live Dashboard"
                 aria-current={currentTab === 'dashboard' ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
@@ -273,10 +354,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => {
-                  setCurrentTab('fixtures');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleSelectAdminTab('fixtures')}
                 aria-label="Matches and Fixtures"
                 aria-current={currentTab === 'fixtures' ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
@@ -288,10 +366,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => {
-                  setCurrentTab('standings');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleSelectAdminTab('standings')}
                 aria-label="Standings Table"
                 aria-current={currentTab === 'standings' ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
@@ -303,10 +378,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => {
-                  setCurrentTab('registration');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleSelectAdminTab('registration')}
                 aria-label="Player Registration"
                 aria-current={currentTab === 'registration' ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
@@ -318,10 +390,7 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => {
-                  setCurrentTab('tokens');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
-                }}
+                onClick={() => handleSelectAdminTab('tokens')}
                 aria-label="Token Lottery Draw"
                 aria-current={currentTab === 'tokens' ? 'page' : undefined}
                 className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
@@ -335,17 +404,9 @@ export default function App() {
           </div>
         )
       ) : (
-        /* Premium Badminton Tournament Hero Homepage */
+        /* Main Public SPL Website at / (Accessible to everyone, zero admin controls) */
         <HeroHomePage
-          onOpenLogin={() => {
-            if (isAuthenticated) {
-              setViewMode('admin');
-            } else {
-              setViewMode('login');
-            }
-          }}
           onOpenPublicRegister={() => handleOpenPublicForm()}
-          onGoToAdmin={() => setViewMode('admin')}
         />
       )}
     </TournamentProvider>

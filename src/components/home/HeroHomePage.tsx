@@ -33,18 +33,17 @@ import { AuthService } from '../../services/authService';
 const SPL_LOGO_SRC = '/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png';
 
 interface HeroHomePageProps {
-  onOpenLogin: () => void;
   onOpenPublicRegister: () => void;
-  onGoToAdmin: () => void;
+  onOpenLogin?: () => void;
+  onGoToAdmin?: () => void;
 }
 
 export const HeroHomePage: React.FC<HeroHomePageProps> = ({
-  onOpenLogin,
   onOpenPublicRegister,
+  onOpenLogin,
   onGoToAdmin,
 }) => {
   const { state, standings } = useTournament();
-  const isAdmin = AuthService.isAuthenticated();
 
   const [activeMatchFilter, setActiveMatchFilter] = useState<'all' | 'live' | 'upcoming' | 'completed'>('all');
   const [selectedCourtFilter, setSelectedCourtFilter] = useState<number | 'all'>('all');
@@ -200,25 +199,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               <span className="sm:hidden">Register</span>
             </button>
 
-            {/* Authentication Connection Button */}
-            {isAdmin ? (
-              <button
-                onClick={onGoToAdmin}
-                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl shadow-sm transition-all whitespace-nowrap"
-              >
-                <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                <span className="hidden sm:inline">Admin Panel</span>
-                <span className="sm:hidden">Admin</span>
-              </button>
-            ) : (
-              <button
-                onClick={onOpenLogin}
-                className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl transition-all"
-              >
-                <LogIn className="w-3.5 h-3.5 text-amber-400" />
-                <span>LOGIN</span>
-              </button>
-            )}
+
 
             {/* Mobile Hamburger Toggle */}
             <button
@@ -288,29 +269,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <span>Register as an Athlete</span>
               </button>
 
-              {isAdmin ? (
-                <button
-                  onClick={() => {
-                    setMobileNavOpen(false);
-                    onGoToAdmin();
-                  }}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30"
-                >
-                  <Shield className="w-4 h-4 text-emerald-400" />
-                  <span>Open Admin / Scorer Console</span>
-                </button>
-              ) : (
-                <button
-                  onClick={() => {
-                    setMobileNavOpen(false);
-                    onOpenLogin();
-                  }}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-slate-200 bg-white/5 border border-white/15"
-                >
-                  <LogIn className="w-4 h-4 text-amber-400" />
-                  <span>Admin & Scorer Login</span>
-                </button>
-              )}
+
             </div>
           </div>
         )}
@@ -641,26 +600,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </div>
           )}
 
-          {/* Quick link to admin dashboard for full scoring */}
-          {isAdmin && (
-            <div className="mt-8 p-4 rounded-2xl bg-slate-900 border border-white/10 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div className="p-2 rounded-xl bg-lime-400/10 text-lime-400">
-                  <Sliders className="w-5 h-5" />
-                </div>
-                <div>
-                  <p className="text-sm font-bold text-white">Administrator Match Management</p>
-                  <p className="text-xs text-slate-400">Update scores, change serving order, and advance knockout brackets.</p>
-                </div>
-              </div>
-              <button
-                onClick={onGoToAdmin}
-                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-950 bg-lime-400 hover:bg-lime-300 transition-all shrink-0"
-              >
-                Open Admin Scorer Desk
-              </button>
-            </div>
-          )}
+
         </section>
 
         {/* 5. THE TEAMS SECTION */}
@@ -1067,16 +1007,6 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               <button onClick={onOpenPublicRegister} className="hover:text-lime-400 transition-colors">
                 Athlete Entry Form
               </button>
-              <span>•</span>
-              {isAdmin ? (
-                <button onClick={onGoToAdmin} className="text-emerald-400 hover:underline font-bold">
-                  Admin Console
-                </button>
-              ) : (
-                <button onClick={onOpenLogin} className="hover:text-lime-400 transition-colors">
-                  Organizer Login
-                </button>
-              )}
             </div>
           </div>
 

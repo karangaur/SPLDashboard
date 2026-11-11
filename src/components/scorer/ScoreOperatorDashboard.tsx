@@ -24,6 +24,7 @@ import {
   ChevronRight,
   Shield,
   Sparkles,
+  ExternalLink,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { AuthService, AdminUser } from '../../services/authService';
@@ -34,11 +35,13 @@ import { sportsAudio } from '../../context/TournamentContext';
 interface ScoreOperatorDashboardProps {
   user: AdminUser;
   onLogout: () => void;
+  onViewPublicHome?: () => void;
 }
 
 export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
   user,
   onLogout,
+  onViewPublicHome,
 }) => {
   const { state, updateMatch, updateKnockoutMatch } = useTournament();
 
@@ -229,6 +232,18 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
           {/* User info & Actions */}
           <div className="flex items-center gap-2 sm:gap-3">
+            {onViewPublicHome && (
+              <button
+                type="button"
+                onClick={onViewPublicHome}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 border border-lime-400/30 text-xs font-semibold transition-colors"
+                title="View Public Tournament Home"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Public Site</span>
+              </button>
+            )}
+
             {/* Operator Account Button */}
             <button
               type="button"
