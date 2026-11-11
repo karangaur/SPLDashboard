@@ -47,6 +47,12 @@ export const SettingsView: React.FC = () => {
   const [importJsonText, setImportJsonText] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showClearResultsConfirm, setShowClearResultsConfirm] = useState(false);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const showNotice = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMsg({ text, type });
+    setTimeout(() => setToastMsg(null), 4000);
+  };
 
   const handleSaveSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,10 +66,10 @@ export const SettingsView: React.FC = () => {
     if (!importJsonText.trim()) return;
     const ok = importStateJSON(importJsonText);
     if (ok) {
-      alert('Tournament data restored successfully!');
+      showNotice('Tournament data restored successfully!', 'success');
       setImportJsonText('');
     } else {
-      alert('Invalid backup JSON. Please check file format.');
+      showNotice('Invalid backup JSON. Please check file format.', 'error');
     }
   };
 
@@ -76,9 +82,9 @@ export const SettingsView: React.FC = () => {
       if (content) {
         const ok = importStateJSON(content);
         if (ok) {
-          alert('Tournament backup imported successfully!');
+          showNotice('Tournament backup imported successfully!', 'success');
         } else {
-          alert('Failed to parse backup JSON file.');
+          showNotice('Failed to parse backup JSON file.', 'error');
         }
       }
     };
@@ -87,10 +93,30 @@ export const SettingsView: React.FC = () => {
 
   return (
     <div className="max-w-4xl mx-auto space-y-8 animate-fade-in pb-12">
+      {toastMsg && (
+        <div
+          role="status"
+          className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-xs font-semibold animate-fade-in border ${
+            toastMsg.type === 'success'
+              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+          }`}
+        >
+          <span>{toastMsg.text}</span>
+          <button
+            onClick={() => setToastMsg(null)}
+            className="text-current opacity-75 hover:opacity-100 px-1"
+            aria-label="Dismiss notification"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div>
         <div className="flex items-center gap-2.5">
-          <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-slate-800 text-amber-400 font-bold text-xl">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-800 text-amber-400 font-bold text-xl">
             ⚙️
           </span>
           <h1 className="font-display text-2xl sm:text-3xl font-black text-white">
@@ -176,7 +202,7 @@ export const SettingsView: React.FC = () => {
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
                 Active Courts
@@ -622,7 +648,7 @@ export const SettingsView: React.FC = () => {
         onConfirm={() => {
           resetToDefault();
           setShowResetConfirm(false);
-          alert('Tournament reset to default state.');
+          showNotice('Tournament reset to default state.', 'success');
         }}
         onCancel={() => setShowResetConfirm(false)}
       />
@@ -637,7 +663,7 @@ export const SettingsView: React.FC = () => {
         onConfirm={() => {
           clearResults();
           setShowClearResultsConfirm(false);
-          alert('All scores have been reset.');
+          showNotice('All scores have been reset.', 'success');
         }}
         onCancel={() => setShowClearResultsConfirm(false)}
       />

@@ -35,6 +35,7 @@ export const KnockoutView: React.FC = () => {
   const [copied, setCopied] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [liveScoringMatchId, setLiveScoringMatchId] = useState<string | null>(null);
+  const [toastError, setToastError] = useState<string | null>(null);
 
   const requiredTeams =
     state.knockout.format === 'top2' ? 2 : state.knockout.format === 'top4' ? 4 : 8;
@@ -68,7 +69,8 @@ export const KnockoutView: React.FC = () => {
     if (isNaN(sA) || isNaN(sB)) return;
 
     if (sA === sB) {
-      alert("A knockout match cannot end in a tie!");
+      setToastError('A knockout match cannot end in a tie! Please enter a winning score.');
+      setTimeout(() => setToastError(null), 3500);
       return;
     }
 
@@ -142,11 +144,28 @@ export const KnockoutView: React.FC = () => {
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {toastError && (
+        <div
+          role="alert"
+          className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold flex items-center justify-between animate-fade-in"
+        >
+          <span>{toastError}</span>
+          <button
+            type="button"
+            onClick={() => setToastError(null)}
+            aria-label="Dismiss error"
+            className="ml-3 opacity-70 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 font-bold text-xl">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 font-bold text-xl shrink-0">
               🏆
             </span>
             <h1 className="font-display text-2xl sm:text-3xl font-black text-white">
@@ -180,7 +199,7 @@ export const KnockoutView: React.FC = () => {
       </div>
 
       {/* Format Selector & Bracket Generator Toolbar */}
-      <div className="rounded-2xl glass-panel p-5 border border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
+      <div className="rounded-2xl glass-panel p-4 sm:p-5 border border-white/10 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="space-y-1.5">
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-400">
             Championship Qualification Format
@@ -292,13 +311,13 @@ export const KnockoutView: React.FC = () => {
 
       {/* Grand Champion Celebration Card if Grand Final is complete */}
       {grandChampion && (
-        <div className="rounded-3xl p-8 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-600/15 to-orange-500/20 text-center space-y-3 relative overflow-hidden shadow-2xl gold-glow">
+        <div className="rounded-3xl p-6 sm:p-8 border border-amber-500/40 bg-gradient-to-r from-amber-500/20 via-amber-600/15 to-orange-500/20 text-center space-y-3 relative overflow-hidden shadow-2xl gold-glow">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-400/20 via-transparent to-transparent" />
-          <Crown className="w-16 h-16 text-amber-400 mx-auto animate-bounce drop-shadow" />
+          <Crown className="w-14 h-14 sm:w-16 sm:h-16 text-amber-400 mx-auto animate-bounce drop-shadow" />
           <span className="text-xs font-bold uppercase tracking-[0.25em] text-amber-300 block">
             Smash Premier League Champion
           </span>
-          <h2 className="font-display text-4xl sm:text-5xl font-black text-white">
+          <h2 className="font-display text-3xl sm:text-5xl font-black text-white">
             {grandChampion.name}
           </h2>
           {runnerUp && (
@@ -311,7 +330,7 @@ export const KnockoutView: React.FC = () => {
 
       {/* Visual Bracket Grid */}
       {state.knockout.matches.length > 0 ? (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-6">
           {/* Column 1: Eliminator Round (if top 8) */}
           {elimMatches.length > 0 && (
             <div className="space-y-4">
@@ -384,7 +403,7 @@ export const KnockoutView: React.FC = () => {
           )}
         </div>
       ) : (
-        <div className="rounded-3xl glass-card p-12 text-center border border-dashed border-white/10 space-y-4">
+        <div className="rounded-3xl glass-card p-10 sm:p-12 text-center border border-dashed border-white/10 space-y-4">
           <Trophy className="w-12 h-12 text-slate-600 mx-auto" />
           <h3 className="text-lg font-bold text-white">Championship Bracket Not Yet Formed</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
@@ -501,8 +520,8 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
             : 'bg-white/5 border-transparent text-slate-300'
         }`}
       >
-        <div className="flex items-center gap-2 truncate">
-          <span>{teamA?.badge || '🏸'}</span>
+        <div className="flex items-center gap-2 min-w-0 truncate">
+          <span className="shrink-0">{teamA?.badge || '🏸'}</span>
           <span className="truncate">{teamA?.name || 'Awaiting Winner...'}</span>
         </div>
         {isAWinner && <Crown className="w-4 h-4 text-amber-400 shrink-0" />}
@@ -520,8 +539,8 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
             : 'bg-white/5 border-transparent text-slate-300'
         }`}
       >
-        <div className="flex items-center gap-2 truncate">
-          <span>{teamB?.badge || '🏸'}</span>
+        <div className="flex items-center gap-2 min-w-0 truncate">
+          <span className="shrink-0">{teamB?.badge || '🏸'}</span>
           <span className="truncate">{teamB?.name || 'Awaiting Winner...'}</span>
         </div>
         {isBWinner && <Crown className="w-4 h-4 text-amber-400 shrink-0" />}
@@ -529,11 +548,12 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
 
       {/* Score input form */}
       {teamA && teamB && (
-        <form onSubmit={handleSubmit} className="pt-2 border-t border-white/5 flex items-center gap-2">
+        <form onSubmit={handleSubmit} className="pt-2 border-t border-white/5 flex flex-wrap items-center gap-2">
           <input
             type="number"
             min={0}
             placeholder="Score A"
+            aria-label={`Score for ${teamA.name}`}
             value={scoreA}
             onChange={(e) => setScoreA(e.target.value)}
             className="w-16 bg-slate-900 border border-white/10 rounded-lg p-1.5 text-center font-mono text-xs text-white"
@@ -544,6 +564,7 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
             type="number"
             min={0}
             placeholder="Score B"
+            aria-label={`Score for ${teamB.name}`}
             value={scoreB}
             onChange={(e) => setScoreB(e.target.value)}
             className="w-16 bg-slate-900 border border-white/10 rounded-lg p-1.5 text-center font-mono text-xs text-white"

@@ -21,6 +21,8 @@ export interface SecuritySettingsMetadata {
   securityQuestion?: string;
   securityAnswerHash?: string;
   securityAnswerSalt?: string;
+  passwordHash?: string;
+  passwordSalt?: string;
   avatar?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -42,6 +44,44 @@ export class SecurityService {
     return Array.from(array)
       .map((b) => b.toString(16).padStart(2, '0'))
       .join('');
+  }
+
+  /**
+   * Hash a password with a salt using SHA-256 (case-sensitive).
+   * Plain-text passwords are never stored in the database.
+   */
+  static async hashPassword(password: string, salt: string): Promise<string> {
+    const clean = password.trim();
+    const payload = `pwd:${salt}:${clean}`;
+
+    if (typeof crypto !== 'undefined' && crypto.subtle) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(payload);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    let hash = 0;
+    for (let i = 0; i < payload.length; i++) {
+      const char = payload.charCodeAt(i);
+      hash = (hash << 5) - hash + char;
+      hash |= 0;
+    }
+    return `fb_pwd_${Math.abs(hash).toString(16)}`;
+  }
+
+  /**
+   * Verify an entered password against stored salt and SHA-256 hash
+   */
+  static async verifyPassword(
+    enteredPassword: string,
+    storedSalt?: string,
+    storedHash?: string
+  ): Promise<boolean> {
+    if (!enteredPassword || !storedSalt || !storedHash) return false;
+    const computed = await this.hashPassword(enteredPassword, storedSalt);
+    return computed === storedHash;
   }
 
   /**

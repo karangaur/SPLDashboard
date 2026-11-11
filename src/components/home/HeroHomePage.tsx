@@ -22,6 +22,7 @@ import {
   X,
   Play,
   Sliders,
+  Menu,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { BadmintonHeroVisual } from './BadmintonHeroVisual';
@@ -49,6 +50,18 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const [selectedCourtFilter, setSelectedCourtFilter] = useState<number | 'all'>('all');
   const [detailMatch, setDetailMatch] = useState<Match | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  React.useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileNavOpen(false);
+        setDetailMatch(null);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // Helper lookups
   const getTeam = (teamId?: string) => state.teams.find((t) => t.id === teamId);
@@ -66,6 +79,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const upcomingCount = state.matches.filter((m) => m.status === 'upcoming').length;
 
   const scrollToSection = (id: string) => {
+    setMobileNavOpen(false);
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
@@ -101,12 +115,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
       {/* 1. HEADER / NAVIGATION BAR */}
       <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-[#060813]/90 backdrop-blur-md">
-        <div className="mx-auto flex h-16 sm:h-20 max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+        <div className="mx-auto flex h-16 sm:h-20 max-w-7xl items-center justify-between gap-2 sm:gap-4 px-3.5 sm:px-6 lg:px-8">
           
           {/* Brand Wordmark with Official 3D Logo */}
           <div className="flex items-center gap-2 sm:gap-3 shrink min-w-0">
             <button
-              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+              onClick={() => {
+                setMobileNavOpen(false);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
               className="flex items-center gap-2 sm:gap-3 text-left group min-w-0"
             >
               <img
@@ -131,7 +148,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           </div>
 
           {/* Center Navigation Links (Desktop) */}
-          <nav className="hidden md:flex items-center gap-1 lg:gap-2 text-xs sm:text-sm font-semibold text-slate-300">
+          <nav aria-label="Main Tournament Sections" className="hidden md:flex items-center gap-1 lg:gap-2 text-xs sm:text-sm font-semibold text-slate-300">
             <button
               onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
               className="px-3 py-1.5 rounded-lg hover:text-white hover:bg-white/5 transition-colors"
@@ -172,120 +189,213 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           </nav>
 
           {/* Right Action Buttons */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Athlete Registration Button */}
             <button
               onClick={onOpenPublicRegister}
-              className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95"
+              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95 whitespace-nowrap"
             >
-              <PlusCircle className="w-3.5 h-3.5" />
-              <span>Register Player</span>
+              <PlusCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="hidden sm:inline">Register Player</span>
+              <span className="sm:hidden">Register</span>
             </button>
 
             {/* Authentication Connection Button */}
             {isAdmin ? (
               <button
                 onClick={onGoToAdmin}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl shadow-sm transition-all"
+                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 rounded-xl shadow-sm transition-all whitespace-nowrap"
               >
-                <Shield className="w-3.5 h-3.5 text-emerald-400" />
+                <Shield className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                 <span className="hidden sm:inline">Admin Panel</span>
                 <span className="sm:hidden">Admin</span>
               </button>
             ) : (
               <button
                 onClick={onOpenLogin}
-                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl transition-all"
+                className="hidden sm:flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 border border-white/15 rounded-xl transition-all"
               >
                 <LogIn className="w-3.5 h-3.5 text-amber-400" />
                 <span>LOGIN</span>
               </button>
             )}
+
+            {/* Mobile Hamburger Toggle */}
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen((prev) => !prev)}
+              aria-label="Toggle public navigation menu"
+              aria-expanded={mobileNavOpen}
+              className="md:hidden p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-colors"
+            >
+              {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
 
         </div>
+
+        {/* Mobile Navigation Drawer */}
+        {mobileNavOpen && (
+          <div className="md:hidden border-t border-white/10 bg-[#060813]/98 backdrop-blur-xl px-4 py-4 space-y-3 animate-fade-in shadow-2xl">
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                onClick={() => scrollToSection('live-match')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-left"
+              >
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+                <span>Live Scoreboard</span>
+              </button>
+              <button
+                onClick={() => scrollToSection('matches-schedule')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+              >
+                <Swords className="w-3.5 h-3.5 text-lime-400 shrink-0" />
+                <span>Match Schedule</span>
+              </button>
+              <button
+                onClick={() => scrollToSection('teams-roster')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+              >
+                <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                <span>The Teams ({state.teams.length})</span>
+              </button>
+              <button
+                onClick={() => scrollToSection('standings-table')}
+                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+              >
+                <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                <span>Points Table</span>
+              </button>
+            </div>
+
+            <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
+              <button
+                onClick={() => scrollToSection('tournament-info')}
+                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/10 text-slate-300 text-xs font-semibold"
+              >
+                <span>Venue & Tournament Rules</span>
+                <MapPin className="w-4 h-4 text-amber-400" />
+              </button>
+
+              <button
+                onClick={() => {
+                  setMobileNavOpen(false);
+                  onOpenPublicRegister();
+                }}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Register as an Athlete</span>
+              </button>
+
+              {isAdmin ? (
+                <button
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    onGoToAdmin();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-emerald-300 bg-emerald-500/15 border border-emerald-500/30"
+                >
+                  <Shield className="w-4 h-4 text-emerald-400" />
+                  <span>Open Admin / Scorer Console</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    onOpenLogin();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-xs font-bold text-slate-200 bg-white/5 border border-white/15"
+                >
+                  <LogIn className="w-4 h-4 text-amber-400" />
+                  <span>Admin & Scorer Login</span>
+                </button>
+              )}
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Main Content Sections */}
-      <main className="relative z-10 space-y-16 sm:space-y-24 pb-20">
+      <main className="relative z-10 space-y-14 sm:space-y-24 pb-20">
         
         {/* 2. HERO SECTION */}
-        <section className="relative pt-8 sm:pt-14 lg:pt-20">
+        <section className="relative pt-6 sm:pt-14 lg:pt-20">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-8 items-center">
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-8 items-center">
               
               {/* LEFT Column: Tournament Identity & CTAs */}
-              <div className="lg:col-span-7 space-y-6 sm:space-y-8 text-center lg:text-left">
+              <div className="lg:col-span-7 space-y-5 sm:space-y-8 text-center lg:text-left">
                 
-                <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/30 text-sky-300 text-xs font-black uppercase tracking-wider">
-                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
-                  <span>Maharajganj Badminton Association Presents</span>
+                <div className="inline-flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/30 text-sky-300 text-[10px] sm:text-xs font-black uppercase tracking-wider max-w-full">
+                  <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping shrink-0" />
+                  <span className="truncate">Maharajganj Badminton Association Presents</span>
                 </div>
 
-                <div className="space-y-3">
-                  <h1 className="text-4xl sm:text-6xl lg:text-7xl font-black font-display tracking-tight text-white uppercase leading-[1.05]">
+                <div className="space-y-2.5 sm:space-y-3">
+                  <h1 className="text-[clamp(2.15rem,7.5vw,4.5rem)] font-black font-display tracking-tight text-white uppercase leading-[1.06]">
                     Smash Premier <br />
                     <span className="bg-gradient-to-r from-sky-400 via-blue-400 to-amber-300 bg-clip-text text-transparent">
                       League
                     </span>
                   </h1>
 
-                  <p className="text-xl sm:text-3xl font-extrabold uppercase tracking-wide text-slate-200 font-display">
+                  <p className="text-lg sm:text-2xl lg:text-3xl font-extrabold uppercase tracking-wide text-slate-200 font-display">
                     Maharajganj Badminton Championship
                   </p>
 
-                  <p className="text-2xl sm:text-3xl lg:text-4xl font-black text-amber-400 italic tracking-tight drop-shadow-sm">
+                  <p className="text-xl sm:text-3xl lg:text-4xl font-black text-amber-400 italic tracking-tight drop-shadow-sm">
                     “Every Smash. Every Point. Every Victory.”
                   </p>
 
-                  <p className="text-base sm:text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed pt-1">
+                  <p className="text-sm sm:text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed pt-1">
                     The premier tournament uniting Maharajganj’s top shuttlers. Follow the teams, track live court scores, and watch the championship unfold in real time.
                   </p>
                 </div>
 
                 {/* Hero Action Buttons */}
-                <div className="flex flex-wrap items-center justify-center lg:justify-start gap-3 sm:gap-4 pt-2">
+                <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center lg:justify-start gap-3 sm:gap-4 pt-2">
                   <button
                     onClick={() => scrollToSection('live-match')}
-                    className="flex items-center gap-2 px-6 py-3.5 rounded-2xl font-display font-black text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-rose-500 via-rose-400 to-amber-400 hover:from-rose-400 hover:to-amber-300 shadow-xl shadow-rose-500/25 transition-all active:scale-95 cursor-pointer"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 min-h-[48px] rounded-2xl font-display font-black text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-rose-500 via-rose-400 to-amber-400 hover:from-rose-400 hover:to-amber-300 shadow-xl shadow-rose-500/25 transition-all active:scale-95 cursor-pointer"
                   >
-                    <span className="w-2.5 h-2.5 rounded-full bg-slate-950 animate-ping" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-slate-950 animate-ping shrink-0" />
                     <span>View Live Matches</span>
                   </button>
 
                   <button
                     onClick={() => scrollToSection('standings-table')}
-                    className="flex items-center gap-2 px-6 py-3.5 rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-white bg-blue-600/20 hover:bg-blue-600/30 border border-blue-400/30 transition-all cursor-pointer"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3.5 min-h-[48px] rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-white bg-blue-600/20 hover:bg-blue-600/30 border border-blue-400/30 transition-all cursor-pointer"
                   >
-                    <Trophy className="w-4 h-4 text-amber-400" />
+                    <Trophy className="w-4 h-4 text-amber-400 shrink-0" />
                     <span>Tournament Standings</span>
                   </button>
 
                   <button
                     onClick={onOpenPublicRegister}
-                    className="flex items-center gap-2 px-5 py-3.5 rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 shadow-lg shadow-amber-400/20 transition-all cursor-pointer"
+                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3.5 min-h-[48px] rounded-2xl font-display font-bold text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 shadow-lg shadow-amber-400/20 transition-all cursor-pointer"
                   >
-                    <PlusCircle className="w-4 h-4 text-slate-950" />
+                    <PlusCircle className="w-4 h-4 text-slate-950 shrink-0" />
                     <span>Register to Play</span>
                   </button>
                 </div>
 
                 {/* Athletic Live Highlight Strip */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-4 border-t border-white/10 text-left">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 pt-4 border-t border-white/10 text-left">
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                    <span className="text-[11px] text-slate-400 font-semibold uppercase block">Competing Teams</span>
-                    <span className="text-xl sm:text-2xl font-black text-white font-mono">{state.teams.length} Teams</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Competing Teams</span>
+                    <span className="text-lg sm:text-2xl font-black text-white font-mono">{state.teams.length} Teams</span>
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                    <span className="text-[11px] text-slate-400 font-semibold uppercase block">Total Fixtures</span>
-                    <span className="text-xl sm:text-2xl font-black text-lime-400 font-mono">{state.matches.length} Matches</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Total Fixtures</span>
+                    <span className="text-lg sm:text-2xl font-black text-lime-400 font-mono">{state.matches.length} Matches</span>
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                    <span className="text-[11px] text-slate-400 font-semibold uppercase block">Championship Venue</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Championship Venue</span>
                     <span className="text-xs sm:text-sm font-bold text-slate-200 truncate block mt-1">Indoor Stadium</span>
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
-                    <span className="text-[11px] text-slate-400 font-semibold uppercase block">Match Rules</span>
+                    <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Match Rules</span>
                     <span className="text-xs sm:text-sm font-bold text-amber-400 truncate block mt-1">BWF 21 Rally</span>
                   </div>
                 </div>
@@ -714,7 +824,63 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </div>
           ) : (
             <div className="rounded-3xl border border-white/10 bg-slate-900/80 shadow-2xl overflow-hidden">
-              <div className="overflow-x-auto">
+              {/* Mobile Standings Card View (< 640px) */}
+              <div className="sm:hidden divide-y divide-white/5">
+                {standings.map((row, idx) => {
+                  const isTop4 = idx < 4;
+                  return (
+                    <div
+                      key={row.team.id}
+                      className={`p-4 space-y-2.5 ${
+                        idx === 3 ? 'border-b-2 border-lime-400/40' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-6 text-center font-mono font-bold text-sm shrink-0">
+                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                          </span>
+                          <span className="text-lg shrink-0">{row.team.badge || '🏸'}</span>
+                          <span className="font-bold text-white text-sm truncate">{row.team.name}</span>
+                          {isTop4 && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-lime-400/15 text-lime-400 border border-lime-400/30 shrink-0">
+                              Top 4
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="font-mono font-black text-base text-lime-400">{row.points}</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold ml-1">PTS</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2 pt-1 text-center font-mono text-xs bg-white/[0.02] rounded-xl p-2 border border-white/5">
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Played</span>
+                          <span className="font-bold text-slate-200">{row.played}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Won</span>
+                          <span className="font-bold text-emerald-400">{row.won}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Lost</span>
+                          <span className="font-bold text-rose-400">{row.lost}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Net Diff</span>
+                          <span className="font-bold text-slate-200">
+                            {row.diff > 0 ? `+${row.diff}` : row.diff}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Tablet & Desktop Table View (>= 640px) */}
+              <div className="hidden sm:block overflow-x-auto">
                 <table className="w-full text-left text-sm text-slate-300">
                   <thead className="text-[11px] uppercase font-bold text-slate-400 bg-slate-950/80 border-b border-white/10 tracking-wider">
                     <tr>
@@ -790,9 +956,9 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               </div>
 
               {/* Table Footer Cutoff Note */}
-              <div className="px-6 py-3.5 bg-slate-950/90 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2">
+              <div className="px-4 sm:px-6 py-3.5 bg-slate-950/90 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2 text-center sm:text-left">
                 <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-lime-400" />
+                  <span className="w-2.5 h-2.5 rounded-full bg-lime-400 shrink-0" />
                   <span>Green line signifies Top 4 Knockout Qualification Cutoff</span>
                 </div>
                 <span>BWF Badminton Standard Tiebreak Applied</span>
@@ -803,7 +969,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
         {/* 7. TOURNAMENT VENUE & MAHARAJGANJ COMMUNITY SECTION */}
         <section id="tournament-info" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24">
-          <div className="rounded-3xl border border-white/15 bg-gradient-to-br from-slate-900 via-[#0a0f1d] to-[#04060e] p-6 sm:p-10 shadow-2xl relative overflow-hidden">
+          <div className="rounded-3xl border border-white/15 bg-gradient-to-br from-slate-900 via-[#0a0f1d] to-[#04060e] p-5 sm:p-10 shadow-2xl relative overflow-hidden">
             
             {/* Background Floodlight Beam */}
             <div className="absolute top-0 right-0 w-96 h-96 bg-lime-400/10 rounded-full blur-3xl pointer-events-none" />
@@ -816,7 +982,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   <span>Official Venue & Match Location</span>
                 </div>
 
-                <h2 className="text-3xl sm:text-4xl font-black text-white font-display uppercase tracking-tight">
+                <h2 className="text-2xl sm:text-4xl font-black text-white font-display uppercase tracking-tight">
                   Maharajganj Indoor Badminton Stadium
                 </h2>
 
@@ -824,7 +990,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   Featuring two tournament-grade synthetic badminton courts, calibrated arena lighting, referee observation towers, and live audience seating.
                 </p>
 
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 pt-2 sm:pt-4">
                   <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5">
                     <span className="text-[11px] text-slate-400 font-bold uppercase block">Official Date</span>
                     <span className="text-sm font-bold text-white mt-1 block">
@@ -847,7 +1013,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               </div>
 
               {/* Call to action card */}
-              <div className="lg:col-span-4 p-6 rounded-2xl bg-slate-950/80 border border-white/10 text-center space-y-4 shadow-xl">
+              <div className="lg:col-span-4 p-5 sm:p-6 rounded-2xl bg-slate-950/80 border border-white/10 text-center space-y-4 shadow-xl">
                 <span className="text-4xl">🏆</span>
                 <h3 className="font-display font-black text-lg text-white uppercase">
                   Ready to Compete?
@@ -857,7 +1023,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 </p>
                 <button
                   onClick={onOpenPublicRegister}
-                  className="w-full py-3 px-4 rounded-xl font-display font-black uppercase tracking-wider text-xs text-slate-950 bg-gradient-to-r from-lime-400 to-emerald-400 hover:from-lime-300 hover:to-emerald-300 shadow-lg shadow-lime-400/25 active:scale-95 transition-all"
+                  className="w-full py-3 px-4 min-h-[44px] rounded-xl font-display font-black uppercase tracking-wider text-xs text-slate-950 bg-gradient-to-r from-lime-400 to-emerald-400 hover:from-lime-300 hover:to-emerald-300 shadow-lg shadow-lime-400/25 active:scale-95 transition-all"
                 >
                   Register as an Athlete Now
                 </button>
@@ -872,11 +1038,12 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       {/* 8. FOOTER */}
       <footer className="relative z-10 w-full border-t border-white/10 bg-[#03050c] text-xs text-slate-400 py-10">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-8">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 text-center sm:text-left">
+            <div className="flex flex-col sm:flex-row items-center gap-3">
               <img
                 src={SPL_LOGO_SRC}
                 alt="Smash Premier League Logo"
+                loading="lazy"
                 className="h-10 w-auto object-contain shrink-0 drop-shadow-md"
               />
               <div>
@@ -889,7 +1056,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               </div>
             </div>
 
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
               <button
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
                 className="hover:text-lime-400 transition-colors"
@@ -913,7 +1080,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </div>
           </div>
 
-          <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400">
+          <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400 text-center sm:text-left">
             <span>© 2026 Smash Premier League Maharajganj. All rights reserved.</span>
             <span>BWF Badminton Rally Scoring System • Maharajganj Sports Arena</span>
           </div>
@@ -922,11 +1089,16 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
       {/* 9. MATCH DETAIL MODAL */}
       {detailMatch && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in">
-          <div className="w-full max-w-lg bg-slate-900 border border-white/15 rounded-3xl p-6 sm:p-8 shadow-2xl relative">
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in"
+        >
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/15 rounded-3xl p-5 sm:p-8 shadow-2xl relative">
             <button
               onClick={() => setDetailMatch(null)}
-              className="absolute top-5 right-5 p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              aria-label="Close match details"
+              className="absolute top-4 right-4 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>

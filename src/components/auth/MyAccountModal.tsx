@@ -23,6 +23,7 @@ interface MyAccountModalProps {
   onClose: () => void;
   currentUser?: AdminUser | null;
   onUserUpdated?: () => void;
+  onLogout?: () => void;
 }
 
 export const MyAccountModal: React.FC<MyAccountModalProps> = ({
@@ -30,8 +31,12 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
   onClose,
   currentUser: propUser,
   onUserUpdated,
+  onLogout,
 }) => {
   const activeUser = propUser || AuthService.getCurrentUser();
+  const activeUserId = activeUser?.id || '';
+  const activeUserEmail = activeUser?.email || '';
+  const activeUserUsername = activeUser?.username || '';
 
   const [activeTab, setActiveTab] = useState<'profile' | 'password' | 'security'>('profile');
 
@@ -56,9 +61,30 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
   const [securityError, setSecurityError] = useState<string | null>(null);
   const [securitySuccess, setSecuritySuccess] = useState<string | null>(null);
 
-  // Load existing user metadata on open
+  // Handle Escape key & background scroll lock while modal is open
   useEffect(() => {
-    if (isOpen && activeUser) {
+    if (!isOpen) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isOpen, onClose]);
+
+  // Load existing user metadata ONLY when modal opens or user identity changes
+  useEffect(() => {
+    if (isOpen && (activeUserEmail || activeUserUsername)) {
       setPassError(null);
       setPassSuccess(null);
       setSecurityError(null);
@@ -68,7 +94,7 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
       setConfirmPassword('');
       setSecurityAnswer('');
 
-      UserService.getUserByEmailOrUsername(activeUser.email || activeUser.username).then((dbUser) => {
+      UserService.getUserByEmailOrUsername(activeUserEmail || activeUserUsername).then((dbUser) => {
         if (dbUser) {
           if (dbUser.mobile) setMobile(dbUser.mobile);
           if (dbUser.dob) setDob(dbUser.dob);
@@ -88,9 +114,19 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
         }
       });
     }
-  }, [isOpen, activeUser]);
+  }, [isOpen, activeUserId, activeUserEmail, activeUserUsername]);
 
   if (!isOpen || !activeUser) return null;
+
+  const handleSignOut = async () => {
+    onClose();
+    if (onLogout) {
+      onLogout();
+    } else {
+      await AuthService.logout();
+      window.location.href = '/';
+    }
+  };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,7 +152,7 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
     try {
       const res = await UserService.changePassword(currentPassword, newPassword);
       if (res.success) {
-        setPassSuccess('Your password has been securely updated in Supabase Authentication.');
+        setPassSuccess('Your password has been securely updated in Supabase across all devices.');
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
@@ -176,73 +212,95 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
   const roleBadge = () => {
     if (activeUser.role === 'super_admin') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/40">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-wider bg-amber-400/20 text-amber-300 border border-amber-400/40 shrink-0">
           Super Admin
         </span>
       );
     }
     if (activeUser.role === 'scorer') {
       return (
-        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-black uppercase tracking-wider bg-emerald-400/20 text-emerald-300 border border-emerald-400/40">
+        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-black uppercase tracking-wider bg-emerald-400/20 text-emerald-300 border border-emerald-400/40 shrink-0">
           Score Operator
         </span>
       );
     }
     return (
-      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-bold uppercase tracking-wider bg-blue-400/20 text-blue-300 border border-blue-400/40">
+      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-wider bg-blue-400/20 text-blue-300 border border-blue-400/40 shrink-0">
         Tournament Official
       </span>
     );
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-2xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/80 backdrop-blur-md animate-fade-in overflow-y-auto"
+      onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="my-account-modal-title"
+    >
+      <div
+        className="relative w-full max-w-2xl bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92dvh] my-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-white/10 bg-slate-950/60">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+        <div className="flex items-center justify-between gap-2 px-4 sm:px-6 py-4 border-b border-white/10 bg-slate-950/60 shrink-0">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+            <div className="p-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 shrink-0">
               <Shield className="w-5 h-5" />
             </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-black uppercase tracking-wide text-white">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3
+                  id="my-account-modal-title"
+                  className="text-sm sm:text-base font-black uppercase tracking-wide text-white truncate"
+                >
                   My Account & Security
                 </h3>
                 {roleBadge()}
               </div>
-              <p className="text-xs text-slate-400">
+              <p className="text-xs text-slate-400 truncate">
                 {activeUser.name} ({activeUser.email || activeUser.username})
               </p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleSignOut}
+              className="px-2.5 py-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 text-rose-300 text-xs font-bold transition-colors"
+            >
+              Logout
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close My Account modal"
+              className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex items-center border-b border-white/10 bg-slate-950/40 px-6 gap-2">
+        <div className="flex items-center border-b border-white/10 bg-slate-950/40 px-3 sm:px-6 gap-1 sm:gap-2 overflow-x-auto no-scrollbar shrink-0">
           <button
             type="button"
             onClick={() => setActiveTab('profile')}
-            className={`px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
+            className={`px-3 sm:px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 ${
               activeTab === 'profile'
                 ? 'border-amber-400 text-amber-300'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <User className="w-3.5 h-3.5" />
-            <span>Profile Details</span>
+            <span>Profile</span>
           </button>
           <button
             type="button"
             onClick={() => setActiveTab('password')}
-            className={`px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
+            className={`px-3 sm:px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 ${
               activeTab === 'password'
                 ? 'border-amber-400 text-amber-300'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
@@ -254,19 +312,19 @@ export const MyAccountModal: React.FC<MyAccountModalProps> = ({
           <button
             type="button"
             onClick={() => setActiveTab('security')}
-            className={`px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-2 ${
+            className={`px-3 sm:px-4 py-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-all flex items-center gap-1.5 sm:gap-2 whitespace-nowrap shrink-0 ${
               activeTab === 'security'
                 ? 'border-amber-400 text-amber-300'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
             <HelpCircle className="w-3.5 h-3.5" />
-            <span>Security Questions & Recovery</span>
+            <span>Security & Recovery</span>
           </button>
         </div>
 
         {/* Content Area */}
-        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+        <div className="p-4 sm:p-6 overflow-y-auto flex-1 space-y-6">
           {activeTab === 'profile' && (
             <div className="space-y-4">
               <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5 space-y-3">

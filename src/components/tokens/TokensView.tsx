@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Dices,
   Users2,
@@ -33,6 +33,9 @@ const GRADIENT_PALETTES = [
   'from-indigo-500 to-blue-600',
 ];
 
+const getTokenLabel = (index: number): string =>
+  index < TOKEN_LETTERS.length ? TOKEN_LETTERS[index] : `${index + 1}`;
+
 export const TokensView: React.FC = () => {
   const {
     state,
@@ -47,12 +50,47 @@ export const TokensView: React.FC = () => {
     triggerCelebration,
   } = useTournament();
 
+  // Deduplicated existing registered teams (authoritative eligible team list)
+  const existingTeams = useMemo(() => {
+    const map = new Map<string, Team>();
+    for (const t of state.teams) {
+      if (t && t.id && !map.has(t.id)) {
+        map.set(t.id, t);
+      }
+    }
+    return Array.from(map.values());
+  }, [state.teams]);
+
+  const eligibleTeamCount = existingTeams.length;
+
   const [soundEnabled, setSoundEnabled] = useState(true);
-  const [numTeams, setNumTeams] = useState(4);
+  const [numTeams, setNumTeams] = useState<number>(() => Math.max(1, state.teams.length || 4));
   const [playersPerTeam, setPlayersPerTeam] = useState(2);
   const [isDrawing, setIsDrawing] = useState(false);
   const [spinningSlotNames, setSpinningSlotNames] = useState<string[]>([]);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
+
+  // Synchronous ref locks to prevent duplicate/concurrent spin executions
+  const isSpinningRef = useRef(false);
+  const spinIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Keep numTeams synchronized with actual registered teams count
+  useEffect(() => {
+    if (eligibleTeamCount > 0) {
+      setNumTeams(eligibleTeamCount);
+    }
+  }, [eligibleTeamCount]);
+
+  // Cleanup any active spin interval on unmount
+  useEffect(() => {
+    return () => {
+      if (spinIntervalRef.current) {
+        clearInterval(spinIntervalRef.current);
+        spinIntervalRef.current = null;
+      }
+      isSpinningRef.current = false;
+    };
+  }, []);
 
   // Pre-decided pairs form
   const [pairName, setPairName] = useState('');
@@ -62,174 +100,220 @@ export const TokensView: React.FC = () => {
   // Captain slots & selection modal
   const [selectedCaptains, setSelectedCaptains] = useState<string[]>([]);
   const [isCaptainModalOpen, setIsCaptainModalOpen] = useState(false);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const showNotice = (text: string, type: 'success' | 'error' = 'error') => {
+    setToastMsg({ text, type });
+    setTimeout(() => setToastMsg(null), 4000);
+  };
 
   const eligiblePlayers = state.players;
   const maxPossibleTeams = Math.max(2, Math.floor(eligiblePlayers.length / playersPerTeam));
 
   // Open interactive Random Captains Modal with preview, draw again, and edit controls
   const handleRandomCaptains = () => {
-    if (eligiblePlayers.length < numTeams) {
-      alert(`Need at least ${numTeams} registered players to draw captains, but only ${eligiblePlayers.length} are available.`);
+    const requiredCaptains = eligibleTeamCount > 0 ? eligibleTeamCount : numTeams;
+    if (eligiblePlayers.length < requiredCaptains) {
+      showNotice(
+        `Need at least ${requiredCaptains} registered players to draw captains, but only ${eligiblePlayers.length} are available.`,
+        'error'
+      );
       return;
     }
     setIsCaptainModalOpen(true);
   };
 
   const handleConfirmCaptainsFromModal = (assignments: { teamId: string; captainId: string }[]) => {
-    // If teams already exist in state, update captains directly
-    if (state.teams.length > 0) {
+    if (existingTeams.length > 0) {
       setCaptainsBulk(assignments);
+      showNotice(`Updated captains for ${assignments.length} registered team(s).`, 'success');
     }
-    // Also save captain IDs so future token generations honor these selected captains
     setSelectedCaptains(assignments.map((a) => a.captainId));
     setIsCaptainModalOpen(false);
   };
 
-  // Run lottery draw animation
+  // Run lottery draw animation exclusively for existing registered teams
   const handleRunLotteryDraw = () => {
-    if (state.teamFormationMode === 'random') {
-      if (eligiblePlayers.length < numTeams * playersPerTeam) {
-        alert(
-          `Need at least ${numTeams * playersPerTeam} players for ${numTeams} teams of ${playersPerTeam} players.`
-        );
-        return;
-      }
+    // Prevent concurrent/duplicate spins
+    if (isSpinningRef.current || isDrawing) {
+      return;
     }
 
-    setIsDrawing(true);
-    let iterations = 0;
-    const maxIterations = 25;
+    if (eligibleTeamCount === 0) {
+      showNotice(
+        'No eligible teams found. Please register or create teams first before generating tokens.',
+        'error'
+      );
+      return;
+    }
 
-    const interval = setInterval(() => {
+    isSpinningRef.current = true;
+    setIsDrawing(true);
+
+    const snapshotTeams = [...existingTeams];
+    const totalCount = snapshotTeams.length;
+    const tokenPool = Array.from({ length: totalCount }, (_, i) => getTokenLabel(i));
+
+    let iterations = 0;
+    const maxIterations = 20;
+
+    if (spinIntervalRef.current) {
+      clearInterval(spinIntervalRef.current);
+    }
+
+    spinIntervalRef.current = setInterval(() => {
       iterations++;
       if (soundEnabled) sportsAudio.playScorePing();
 
-      // Generate random mock names for slot ticker
-      const randSample = Array.from({ length: 4 }).map(
-        () => eligiblePlayers[Math.floor(Math.random() * eligiblePlayers.length)]?.name || 'Player'
-      );
-      setSpinningSlotNames(randSample);
+      // Show spinning preview of existing teams and candidate tokens
+      const previewSlots = snapshotTeams.slice(0, 4).map((t) => {
+        const randTok = tokenPool[Math.floor(Math.random() * tokenPool.length)] || 'A';
+        return `Token ${randTok} · ${t.name}`;
+      });
+      setSpinningSlotNames(previewSlots);
 
       if (iterations >= maxIterations) {
-        clearInterval(interval);
-        finalizeTeams();
+        if (spinIntervalRef.current) {
+          clearInterval(spinIntervalRef.current);
+          spinIntervalRef.current = null;
+        }
+        finalizeTokenAssignment(snapshotTeams);
       }
-    }, 100);
+    }, 90);
   };
 
-  const finalizeTeams = () => {
-    setIsDrawing(false);
+  // Strictly assign 1 unique token per existing eligible team without ever changing team count or IDs
+  const finalizeTokenAssignment = (fallbackTeams?: Team[]) => {
+    try {
+      const targetTeams = existingTeams.length > 0 ? existingTeams : fallbackTeams || [];
+      const count = targetTeams.length;
 
-    if (state.teamFormationMode === 'predefined') {
-      // Create teams from predefined pairs
-      const newTeams: Team[] = state.predefinedTeams.map((pt, idx) => ({
-        id: crypto.randomUUID(),
-        name: pt.name || `Team ${TOKEN_LETTERS[idx]}`,
-        players: [...pt.players],
-        captainId: pt.players[0],
-        locked: true,
-        badge: '🏸',
-        avatarColor: GRADIENT_PALETTES[idx % GRADIENT_PALETTES.length],
-      }));
-      setTeams(newTeams);
-      triggerCelebration();
-      return;
-    }
-
-    // CRITICAL: Keep locked / pre-decided teams and their captains/players completely UNTOUCHED
-    const lockedTeams = state.teams.filter((t) => t.locked);
-    const lockedPlayerIds = new Set<string>();
-    lockedTeams.forEach((t) => {
-      t.players.forEach((pid) => lockedPlayerIds.add(pid));
-      if (t.captainId) lockedPlayerIds.add(t.captainId);
-    });
-
-    // In mixed mode, also preserve any predefined teams that haven't been turned into teams yet
-    const predefinedLockedTeams: Team[] = [];
-    if (state.teamFormationMode === 'mixed') {
-      state.predefinedTeams.forEach((pt, idx) => {
-        const teamPlayers = pt.players.filter((pid) => !lockedPlayerIds.has(pid));
-        if (teamPlayers.length > 0) {
-          teamPlayers.forEach((pid) => lockedPlayerIds.add(pid));
-          predefinedLockedTeams.push({
-            id: crypto.randomUUID(),
-            name: pt.name || `Team ${TOKEN_LETTERS[lockedTeams.length + idx]}`,
-            players: teamPlayers,
-            captainId: teamPlayers[0],
-            locked: true,
-            badge: '🏸',
-            avatarColor: GRADIENT_PALETTES[(lockedTeams.length + idx) % GRADIENT_PALETTES.length],
-          });
-        }
-      });
-    }
-
-    const preservedTeams = [...lockedTeams, ...predefinedLockedTeams];
-
-    // Filter unassigned eligible players (strictly excluding any player locked into preserved teams)
-    const availablePlayers = eligiblePlayers.filter((p) => !lockedPlayerIds.has(p.id));
-    const availablePlayerIds = availablePlayers.map((p) => p.id);
-
-    // Number of new random teams needed
-    const remainingTeamsNeeded = Math.max(0, numTeams - preservedTeams.length);
-
-    if (remainingTeamsNeeded === 0) {
-      setTeams(preservedTeams);
-      triggerCelebration();
-      return;
-    }
-
-    // Select captains for the new teams from selectedCaptains or unassigned players
-    const availableCaptains = selectedCaptains.filter((cid) => availablePlayerIds.includes(cid));
-    const nonCaptains = availablePlayerIds.filter((id) => !availableCaptains.includes(id));
-
-    // Fisher-Yates unbiased shuffle of non-captains
-    for (let i = nonCaptains.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [nonCaptains[i], nonCaptains[j]] = [nonCaptains[j], nonCaptains[i]];
-    }
-
-    const finalCaptainsForNew = [...availableCaptains];
-    while (finalCaptainsForNew.length < remainingTeamsNeeded && nonCaptains.length > 0) {
-      finalCaptainsForNew.push(nonCaptains.shift()!);
-    }
-
-    const createdNewTeams: Team[] = [];
-    for (let i = 0; i < remainingTeamsNeeded; i++) {
-      const capId = finalCaptainsForNew[i];
-      const capPlayer = eligiblePlayers.find((p) => p.id === capId);
-      const teamPlayers = capId ? [capId] : [];
-
-      while (teamPlayers.length < playersPerTeam && nonCaptains.length > 0) {
-        teamPlayers.push(nonCaptains.shift()!);
+      if (count === 0) {
+        setIsDrawing(false);
+        isSpinningRef.current = false;
+        showNotice('No eligible teams available for token generation.', 'error');
+        return;
       }
 
-      const teamIndex = preservedTeams.length + i;
-      createdNewTeams.push({
-        id: crypto.randomUUID(),
-        name: capPlayer ? `Team ${capPlayer.name.split(' ')[0]}` : `Team ${TOKEN_LETTERS[teamIndex] || teamIndex + 1}`,
-        players: teamPlayers,
-        captainId: capId,
-        locked: false,
-        badge: '🏸',
-        avatarColor: GRADIENT_PALETTES[teamIndex % GRADIENT_PALETTES.length],
+      // Generate exact N unique tokens for the N existing teams
+      const allTokens = Array.from({ length: count }, (_, idx) => getTokenLabel(idx));
+      const validTokenSet = new Set(allTokens);
+
+      // Check if there is a partial lock (some teams locked with valid unique tokens, some unlocked)
+      const hasUnlockedTeams = targetTeams.some((t) => !t.locked);
+      const reservedTokens = new Set<string>();
+      const lockedTokenByTeamId = new Map<string, string>();
+
+      if (hasUnlockedTeams) {
+        for (const t of targetTeams) {
+          if (t.locked && t.token && validTokenSet.has(t.token) && !reservedTokens.has(t.token)) {
+            reservedTokens.add(t.token);
+            lockedTokenByTeamId.set(t.id, t.token);
+          }
+        }
+      }
+
+      // Remaining tokens to shuffle across unlocked (or all) teams
+      const availableTokens = allTokens.filter((tok) => !reservedTokens.has(tok));
+
+      // Unbiased Fisher-Yates shuffle
+      for (let i = availableTokens.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [availableTokens[i], availableTokens[j]] = [availableTokens[j], availableTokens[i]];
+      }
+
+      // Guarantee that when regenerating with 2+ unlocked teams, the token order changes if possible
+      if (availableTokens.length > 1) {
+        const unlockedTeams = targetTeams.filter((t) => !lockedTokenByTeamId.has(t.id));
+        const isIdenticalToCurrent = unlockedTeams.every(
+          (t, i) => t.token && t.token === availableTokens[i]
+        );
+        if (isIdenticalToCurrent) {
+          // Rotate by 1 position so regeneration produces a fresh permutation
+          const first = availableTokens.shift()!;
+          availableTokens.push(first);
+        }
+      }
+
+      let cursor = 0;
+      const updatedTeams: Team[] = targetTeams.map((team, idx) => {
+        const assignedToken = lockedTokenByTeamId.get(team.id) || availableTokens[cursor++];
+        const tokenIndex = Math.max(0, TOKEN_LETTERS.indexOf(assignedToken));
+        return {
+          ...team,
+          id: team.id, // Strictly preserve existing team ID
+          name: team.name, // Strictly preserve existing team name
+          players: [...team.players], // Strictly preserve existing team roster
+          captainId: team.captainId,
+          locked: Boolean(team.locked),
+          badge: team.badge || '🏸',
+          avatarColor:
+            team.avatarColor || GRADIENT_PALETTES[(tokenIndex >= 0 ? tokenIndex : idx) % GRADIENT_PALETTES.length],
+          token: assignedToken,
+        };
       });
+
+      setTeams(updatedTeams);
+      triggerCelebration();
+      showNotice(
+        `Successfully generated ${updatedTeams.length} unique token${
+          updatedTeams.length === 1 ? '' : 's'
+        } for ${updatedTeams.length} existing team${updatedTeams.length === 1 ? '' : 's'}.`,
+        'success'
+      );
+    } catch (err) {
+      showNotice('Failed to generate tokens. Please try again.', 'error');
+    } finally {
+      setIsDrawing(false);
+      isSpinningRef.current = false;
+    }
+  };
+
+  // Apply Pre-Decided Locked Pairs without creating duplicate teams
+  const handleApplyLockedPairs = () => {
+    if (state.predefinedTeams.length === 0) {
+      showNotice('No locked pairs to apply.', 'error');
+      return;
     }
 
-    // Preserve pre-decided / locked teams untouched, append newly generated teams
-    const finalAllTeams = [...preservedTeams, ...createdNewTeams];
-    setTeams(finalAllTeams);
+    const updatedTeams: Team[] = state.predefinedTeams.map((pt, idx) => {
+      // Reuse existing team ID if this predefined pair was already applied
+      const existingMatch = existingTeams.find(
+        (t) =>
+          t.id === pt.id ||
+          (t.players.length === pt.players.length &&
+            pt.players.every((pid) => t.players.includes(pid)))
+      );
+      return {
+        id: existingMatch?.id || pt.id,
+        name: pt.name || existingMatch?.name || `Team ${getTokenLabel(idx)}`,
+        players: [...pt.players],
+        captainId: existingMatch?.captainId || pt.players[0],
+        locked: true,
+        badge: existingMatch?.badge || '🏸',
+        avatarColor: existingMatch?.avatarColor || GRADIENT_PALETTES[idx % GRADIENT_PALETTES.length],
+        token: existingMatch?.token || getTokenLabel(idx),
+      };
+    });
+
+    setTeams(updatedTeams);
     triggerCelebration();
+    showNotice(
+      `Applied ${updatedTeams.length} locked pair${updatedTeams.length === 1 ? '' : 's'} with ${
+        updatedTeams.length
+      } assigned token${updatedTeams.length === 1 ? '' : 's'}.`,
+      'success'
+    );
   };
 
   const handleAddPredefinedPair = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pairP1 || !pairP2) {
-      alert('Please select both players for the doubles pair.');
+      showNotice('Please select both players for the doubles pair.', 'error');
       return;
     }
     if (pairP1 === pairP2) {
-      alert('A player cannot pair with themselves.');
+      showNotice('A player cannot pair with themselves.', 'error');
       return;
     }
 
@@ -250,7 +334,7 @@ export const TokensView: React.FC = () => {
       '----------------------------------------',
     ];
 
-    state.teams.forEach((t, idx) => {
+    existingTeams.forEach((t, idx) => {
       const pNames = t.players
         .map((pid) => {
           const p = state.players.find((item) => item.id === pid);
@@ -258,8 +342,9 @@ export const TokensView: React.FC = () => {
         })
         .join(' + ');
 
-      lines.push(`Token ${TOKEN_LETTERS[idx] || idx + 1}: ${t.name}`);
-      lines.push(`  Squad: ${pNames}`);
+      const tokenLabel = t.token || getTokenLabel(idx);
+      lines.push(`Token ${tokenLabel}: ${t.name}`);
+      lines.push(`  Squad: ${pNames || 'Unassigned'}`);
     });
 
     return lines.join('\n');
@@ -274,12 +359,32 @@ export const TokensView: React.FC = () => {
   const handleCopy = async () => {
     try {
       await navigator.clipboard.writeText(formatTeamsShareText());
-      alert('Teams copied to clipboard!');
+      showNotice('Teams copied to clipboard!', 'success');
     } catch {}
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {toastMsg && (
+        <div
+          role="status"
+          className={`flex items-center justify-between gap-3 px-4 py-3 rounded-xl text-xs font-semibold animate-fade-in border ${
+            toastMsg.type === 'success'
+              ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+              : 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+          }`}
+        >
+          <span>{toastMsg.text}</span>
+          <button
+            onClick={() => setToastMsg(null)}
+            className="text-current opacity-75 hover:opacity-100 px-1"
+            aria-label="Dismiss notification"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -296,7 +401,7 @@ export const TokensView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setSoundEnabled((s) => !s)}
             className="p-2 text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/5"
@@ -379,42 +484,23 @@ export const TokensView: React.FC = () => {
       {state.teamFormationMode === 'random' && (
         <div className="rounded-2xl glass-card p-6 border border-white/10 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-            {/* Num Teams */}
+            {/* Eligible Registered Teams Count (Strict 1:1 with Registered Teams) */}
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider text-slate-300 mb-1.5">
-                Number of Teams
+                Registered Eligible Teams
               </label>
               <input
                 type="number"
-                min={2}
-                max={16}
-                value={numTeams}
-                onChange={(e) => setNumTeams(Math.max(2, parseInt(e.target.value, 10) || 2))}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-white font-mono font-bold"
+                readOnly
+                value={eligibleTeamCount}
+                aria-label="Registered Eligible Teams"
+                className="w-full bg-slate-900/80 border border-white/10 rounded-xl px-3 py-2 text-amber-400 font-mono font-bold cursor-not-allowed"
               />
-              <div className="flex flex-wrap gap-1.5 mt-2">
-                {[4, 6, 8, 10].map((count) => (
-                  <button
-                    key={count}
-                    type="button"
-                    onClick={() => setNumTeams(count)}
-                    className={`px-2 py-0.5 text-xs rounded-lg transition-colors font-mono ${
-                      numTeams === count
-                        ? 'bg-amber-400 text-slate-950 font-bold'
-                        : 'bg-white/5 text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    {count}
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setNumTeams(maxPossibleTeams)}
-                  className="px-2 py-0.5 text-xs rounded-lg bg-white/5 text-amber-400 hover:text-amber-300 font-mono"
-                >
-                  Max ({maxPossibleTeams})
-                </button>
-              </div>
+              <p className="text-[11px] text-slate-400 mt-2">
+                {eligibleTeamCount > 0
+                  ? `${eligibleTeamCount} existing team${eligibleTeamCount === 1 ? '' : 's'} → generates ${eligibleTeamCount} unique token${eligibleTeamCount === 1 ? '' : 's'}`
+                  : 'No registered teams yet — add teams in Teams tab first'}
+              </p>
             </div>
 
             {/* Players Per Team */}
@@ -431,7 +517,7 @@ export const TokensView: React.FC = () => {
                 <option value={3}>3 (Triples Squad)</option>
               </select>
               <p className="text-[11px] text-slate-400 mt-2">
-                Requires {numTeams * playersPerTeam} players · {eligiblePlayers.length} available
+                {eligibleTeamCount} team{eligibleTeamCount === 1 ? '' : 's'} registered · {eligiblePlayers.length} players in pool
               </p>
             </div>
 
@@ -440,7 +526,8 @@ export const TokensView: React.FC = () => {
               <button
                 type="button"
                 onClick={handleRandomCaptains}
-                className="w-full py-2 px-3 text-xs font-semibold text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors flex items-center justify-center gap-1.5"
+                disabled={isDrawing || eligibleTeamCount === 0}
+                className="w-full py-2 px-3 text-xs font-semibold text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors flex items-center justify-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Crown className="w-3.5 h-3.5 text-amber-400" />
                 <span>Draw Random Captains</span>
@@ -450,10 +537,14 @@ export const TokensView: React.FC = () => {
                 type="button"
                 onClick={handleRunLotteryDraw}
                 disabled={isDrawing}
-                className="w-full py-2.5 px-4 text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-lg shadow-amber-500/25 active:scale-95 transition-all flex items-center justify-center gap-2"
+                className="w-full py-2.5 px-4 text-sm font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-lg shadow-amber-500/25 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                <Dices className="w-4 h-4" />
-                <span>{isDrawing ? 'Drawing Tokens...' : 'Spin & Generate Tokens'}</span>
+                <Dices className={`w-4 h-4 ${isDrawing ? 'animate-spin' : ''}`} />
+                <span>
+                  {isDrawing
+                    ? `Drawing ${eligibleTeamCount} Token${eligibleTeamCount === 1 ? '' : 's'}...`
+                    : 'Spin & Generate Tokens'}
+                </span>
               </button>
             </div>
           </div>
@@ -563,15 +654,31 @@ export const TokensView: React.FC = () => {
               <p className="text-xs text-slate-500 italic">No locked pairs yet.</p>
             )}
 
-            <div className="pt-3">
+            <div className="pt-3 flex flex-wrap items-center gap-3">
               <button
                 type="button"
-                onClick={finalizeTeams}
-                disabled={state.predefinedTeams.length === 0}
+                onClick={handleApplyLockedPairs}
+                disabled={state.predefinedTeams.length === 0 || isDrawing}
                 className="px-5 py-2.5 text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 rounded-xl shadow transition-all disabled:opacity-50"
               >
                 Apply Locked Pairs as Tournament Teams
               </button>
+
+              {eligibleTeamCount > 0 && (
+                <button
+                  type="button"
+                  onClick={handleRunLotteryDraw}
+                  disabled={isDrawing}
+                  className="px-5 py-2.5 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow transition-all flex items-center gap-2 disabled:opacity-50"
+                >
+                  <Dices className={`w-4 h-4 ${isDrawing ? 'animate-spin' : ''}`} />
+                  <span>
+                    {isDrawing
+                      ? `Drawing ${eligibleTeamCount} Token${eligibleTeamCount === 1 ? '' : 's'}...`
+                      : `Spin & Generate Tokens (${eligibleTeamCount} Team${eligibleTeamCount === 1 ? '' : 's'})`}
+                  </span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -581,7 +688,7 @@ export const TokensView: React.FC = () => {
       {isDrawing && (
         <div className="rounded-3xl glass-card p-8 border border-amber-500/40 text-center space-y-4 gold-glow animate-pulse">
           <span className="text-xs font-bold uppercase tracking-[0.25em] text-amber-400 block">
-            Spinning Tournament Lottery Wheels
+            Spinning Tournament Lottery Wheels ({eligibleTeamCount} Eligible Team{eligibleTeamCount === 1 ? '' : 's'})
           </span>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 max-w-xl mx-auto">
             {spinningSlotNames.map((name, idx) => (
@@ -598,28 +705,27 @@ export const TokensView: React.FC = () => {
       )}
 
       {/* Generated Teams Grid */}
-      {state.teams.length > 0 && !isDrawing && (
+      {existingTeams.length > 0 && !isDrawing && (
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
             <h3 className="font-display text-xl font-bold text-white flex items-center gap-2">
               <span>🏸</span>
-              <span>Generated Tournament Tokens ({state.teams.length} Teams)</span>
+              <span>Generated Tournament Tokens ({existingTeams.length} Teams)</span>
             </h3>
             <button
               onClick={() => {
                 generateFixtures();
-                alert('Round-robin match schedule auto-generated for these teams!');
+                showNotice('Round-robin match schedule auto-generated for these teams!', 'success');
               }}
-              className="text-xs font-bold text-amber-400 hover:underline"
+              className="text-xs font-bold text-amber-400 hover:underline self-start sm:self-auto"
             >
               Generate Match Schedule from These Teams →
             </button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {state.teams.map((team, idx) => {
-              const cap = state.players.find((p) => p.id === team.captainId);
-              const letter = TOKEN_LETTERS[idx] || `${idx + 1}`;
+            {existingTeams.map((team, idx) => {
+              const letter = team.token || getTokenLabel(idx);
               const gradient = team.avatarColor || GRADIENT_PALETTES[idx % GRADIENT_PALETTES.length];
 
               return (

@@ -227,29 +227,45 @@ export default function App() {
           />
         ) : (
           /* Super Admin Tournament Dashboard Shell */
-          <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans">
+          <div className="min-h-screen flex flex-col bg-[#070a13] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans pb-20 lg:pb-0">
             {/* Main Header with 3-Zone Contract, View Public Site & Logout */}
             <Header
               currentTab={currentTab}
-              onSelectTab={setCurrentTab}
+              onSelectTab={(tab) => {
+                setCurrentTab(tab);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
               onLogout={handleLogout}
               onViewPublicHome={() => setViewMode('home')}
             />
 
             {/* Viewport Content Area */}
-            <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
+            <main className="flex-1 w-full max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-5 sm:py-8 overflow-x-hidden">
               {renderActiveView()}
             </main>
 
             {/* Global Footer with Persistence info */}
-            <Footer onSelectTab={setCurrentTab} />
+            <Footer
+              onSelectTab={(tab) => {
+                setCurrentTab(tab);
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              }}
+            />
 
             {/* Mobile Fixed Bottom Navigation Bar */}
-            <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/90 backdrop-blur-lg border-t border-white/10 px-2 py-1.5 flex items-center justify-around shadow-2xl">
+            <nav
+              aria-label="Mobile Primary Navigation"
+              className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-slate-950/95 backdrop-blur-xl border-t border-white/10 px-1.5 pt-1.5 pb-safe flex items-center justify-around shadow-2xl"
+            >
               <button
-                onClick={() => setCurrentTab('dashboard')}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                  currentTab === 'dashboard' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                onClick={() => {
+                  setCurrentTab('dashboard');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Live Dashboard"
+                aria-current={currentTab === 'dashboard' ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
+                  currentTab === 'dashboard' ? 'text-amber-400 font-bold bg-amber-400/10' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <LayoutDashboard className="w-4 h-4" />
@@ -257,9 +273,14 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentTab('fixtures')}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                  currentTab === 'fixtures' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                onClick={() => {
+                  setCurrentTab('fixtures');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Matches and Fixtures"
+                aria-current={currentTab === 'fixtures' ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
+                  currentTab === 'fixtures' ? 'text-amber-400 font-bold bg-amber-400/10' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <Swords className="w-4 h-4" />
@@ -267,9 +288,14 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentTab('standings')}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                  currentTab === 'standings' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                onClick={() => {
+                  setCurrentTab('standings');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Standings Table"
+                aria-current={currentTab === 'standings' ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
+                  currentTab === 'standings' ? 'text-amber-400 font-bold bg-amber-400/10' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <TrendingUp className="w-4 h-4" />
@@ -277,9 +303,14 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentTab('registration')}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                  currentTab === 'registration' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                onClick={() => {
+                  setCurrentTab('registration');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Player Registration"
+                aria-current={currentTab === 'registration' ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
+                  currentTab === 'registration' ? 'text-amber-400 font-bold bg-amber-400/10' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <UserPlus className="w-4 h-4" />
@@ -287,15 +318,20 @@ export default function App() {
               </button>
 
               <button
-                onClick={() => setCurrentTab('tokens')}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[44px] ${
-                  currentTab === 'tokens' ? 'text-amber-400 font-bold' : 'text-slate-400 hover:text-white'
+                onClick={() => {
+                  setCurrentTab('tokens');
+                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                }}
+                aria-label="Token Lottery Draw"
+                aria-current={currentTab === 'tokens' ? 'page' : undefined}
+                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition-colors min-w-[56px] min-h-[48px] ${
+                  currentTab === 'tokens' ? 'text-amber-400 font-bold bg-amber-400/10' : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <Dices className="w-4 h-4" />
                 <span className="text-[10px] mt-0.5">Tokens</span>
               </button>
-            </div>
+            </nav>
           </div>
         )
       ) : (

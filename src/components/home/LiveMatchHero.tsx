@@ -130,8 +130,8 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
 
           {/* If there are multiple live/upcoming matches, show quick court switchers */}
           {matches.length > 1 && (
-            <div className="flex items-center gap-1.5 overflow-x-auto py-1">
-              {matches.slice(0, 4).map((m, idx) => {
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-1 max-w-full">
+              {matches.slice(0, 4).map((m) => {
                 const tA = getTeam(m.teamA);
                 const tB = getTeam(m.teamB);
                 const isSelected = activeMatch?.id === m.id;
@@ -139,7 +139,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
                   <button
                     key={m.id}
                     onClick={() => setSelectedMatchId(m.id)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 ${
                       isSelected
                         ? 'bg-lime-400 text-slate-950 shadow-md'
                         : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/5'
@@ -159,27 +159,27 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
         </div>
 
         {/* Main Live Scoreboard Grid */}
-        <div className="py-6 sm:py-8">
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+        <div className="py-5 sm:py-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-center">
             
             {/* Team A Card */}
-            <div className="lg:col-span-5 flex items-center justify-between lg:justify-start gap-4 p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-lime-400/30 transition-all">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-400 text-slate-950 font-black text-2xl shadow-lg shadow-amber-500/20">
+            <div className="lg:col-span-5 flex items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-lime-400/30 transition-all">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
+                <div className="relative flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-400 text-slate-950 font-black text-xl sm:text-2xl shadow-lg shadow-amber-500/20">
                   <span>{teamA?.badge || '🏸'}</span>
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-lg sm:text-xl font-black text-white font-display truncate">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                    <h3 className="text-base sm:text-xl font-black text-white font-display truncate">
                       {teamA?.name || 'Team Alpha'}
                     </h3>
                     {activeMatch?.winner === activeMatch?.teamA && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                         Winner
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-slate-400 mt-1 truncate">
+                  <div className="text-xs text-slate-400 mt-0.5 truncate">
                     {teamAPlayers.length > 0
                       ? teamAPlayers.map((p) => p.name).join(' & ')
                       : 'Doubles Pair'}
@@ -193,9 +193,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
               </div>
 
               {/* Large Score Digit */}
-              <div className="text-right">
+              <div className="text-right shrink-0 pl-2">
                 <div
-                  className={`text-4xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight ${
+                  className={`text-3xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums ${
                     scoreA > scoreB ? 'text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,0.4)]' : 'text-white'
                   }`}
                 >
@@ -206,8 +206,8 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
             </div>
 
             {/* Middle Match Broadcast Status & VS Divider */}
-            <div className="lg:col-span-2 flex flex-col items-center justify-center text-center space-y-2 py-2">
-              <div className="inline-flex items-center justify-center w-10 h-10 rounded-full bg-white/5 border border-white/10 text-slate-400 font-black text-xs font-mono">
+            <div className="lg:col-span-2 flex flex-col items-center justify-center text-center space-y-1.5 py-1 sm:py-2">
+              <div className="inline-flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/5 border border-white/10 text-slate-400 font-black text-xs font-mono">
                 VS
               </div>
               <div className="space-y-0.5">
@@ -237,18 +237,18 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
               </div>
 
               {/* Badminton Shuttlecock Icon in motion */}
-              <div className="flex items-center gap-1.5 text-xs text-slate-400 pt-1">
+              <div className="flex items-center gap-1.5 text-xs text-slate-400 pt-0.5">
                 <span className="text-base animate-bounce">🏸</span>
                 <span className="text-[11px] font-mono">Court {activeMatch?.court || 1}</span>
               </div>
             </div>
 
             {/* Team B Card */}
-            <div className="lg:col-span-5 flex items-center justify-between lg:justify-end gap-4 p-4 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-lime-400/30 transition-all">
-              {/* Score Digit (Left on desktop for symmetry) */}
-              <div className="text-left order-2 lg:order-1">
+            <div className="lg:col-span-5 flex items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-5 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-lime-400/30 transition-all">
+              {/* Score Digit (Left on desktop for symmetry, right on mobile) */}
+              <div className="text-right lg:text-left order-2 lg:order-1 shrink-0 pl-2 lg:pl-0 lg:pr-2">
                 <div
-                  className={`text-4xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight ${
+                  className={`text-3xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums ${
                     scoreB > scoreA ? 'text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,0.4)]' : 'text-white'
                   }`}
                 >
@@ -257,19 +257,23 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
                 <span className="text-[10px] uppercase font-bold text-slate-400">Points</span>
               </div>
 
-              <div className="flex items-center gap-3 min-w-0 order-1 lg:order-2 text-left lg:text-right">
-                <div className="min-w-0">
-                  <div className="flex items-center justify-start lg:justify-end gap-2">
+              <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 order-1 lg:order-2 text-left lg:text-right justify-start lg:justify-end">
+                <div className="relative flex lg:hidden h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-500 text-white font-black text-xl sm:text-2xl shadow-lg shadow-cyan-500/20">
+                  <span>{teamB?.badge || '🏸'}</span>
+                </div>
+
+                <div className="min-w-0 flex-1 lg:flex-initial">
+                  <div className="flex flex-wrap items-center justify-start lg:justify-end gap-1.5 sm:gap-2">
                     {activeMatch?.winner === activeMatch?.teamB && (
-                      <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                      <span className="px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 shrink-0">
                         Winner
                       </span>
                     )}
-                    <h3 className="text-lg sm:text-xl font-black text-white font-display truncate">
+                    <h3 className="text-base sm:text-xl font-black text-white font-display truncate">
                       {teamB?.name || 'Team Beta'}
                     </h3>
                   </div>
-                  <div className="text-xs text-slate-400 mt-1 truncate">
+                  <div className="text-xs text-slate-400 mt-0.5 truncate">
                     {teamBPlayers.length > 0
                       ? teamBPlayers.map((p) => p.name).join(' & ')
                       : 'Doubles Pair'}
@@ -281,7 +285,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = ({
                   )}
                 </div>
 
-                <div className="relative flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-500 text-white font-black text-2xl shadow-lg shadow-cyan-500/20">
+                <div className="relative hidden lg:flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-500 text-white font-black text-2xl shadow-lg shadow-cyan-500/20">
                   <span>{teamB?.badge || '🏸'}</span>
                 </div>
               </div>

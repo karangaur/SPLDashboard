@@ -825,7 +825,7 @@ export const TeamsView: React.FC = () => {
                           <span className="font-bold text-white text-sm truncate">{team.name}</span>
                         </div>
 
-                        <div className="flex items-center gap-2 min-w-[220px]">
+                        <div className="flex items-center gap-2 w-full sm:w-auto sm:min-w-[220px]">
                           <Crown className="w-4 h-4 text-amber-400 shrink-0" />
                           <select
                             value={assignment.captainId}
@@ -943,7 +943,7 @@ export const TeamsView: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-300 mb-1">
                     Player 1 (Captain)

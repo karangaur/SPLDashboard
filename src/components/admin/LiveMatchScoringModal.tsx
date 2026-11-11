@@ -75,6 +75,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
 
   // Server state
   const [serverSide, setServerSide] = useState<'A' | 'B'>('A');
+  const [confirmReset, setConfirmReset] = useState(false);
 
   if (!isOpen || !currentMatch) return null;
 
@@ -194,7 +195,6 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   };
 
   const handleResetCurrentSet = () => {
-    if (!window.confirm('Reset score to 0 - 0 for this match?')) return;
     const payload = {
       scoreA: 0,
       scoreB: 0,
@@ -204,6 +204,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
     };
     if (isKnockout) updateKnockoutMatch(currentMatch.id, payload);
     else updateMatch(currentMatch.id, payload);
+    setConfirmReset(false);
   };
 
   const handleSaveScoringRules = (e: React.FormEvent) => {
@@ -218,8 +219,8 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   const courtNum = ('court' in currentMatch && currentMatch.court) ? currentMatch.court : 1;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
-      <div className="relative w-full max-w-4xl bg-gradient-to-b from-[#0a0f24] via-[#070b1a] to-[#04060f] border border-amber-500/30 rounded-3xl shadow-2xl shadow-amber-500/10 overflow-hidden my-auto animate-fade-in">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2.5 sm:p-5 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
+      <div className="relative w-full max-w-4xl max-h-[92dvh] overflow-y-auto bg-gradient-to-b from-[#0a0f24] via-[#070b1a] to-[#04060f] border border-amber-500/30 rounded-3xl shadow-2xl shadow-amber-500/10 my-auto animate-fade-in">
         
         {/* Top Control Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3 p-4 sm:p-6 border-b border-white/10 bg-white/[0.02]">
@@ -459,9 +460,24 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Declare Winner</span>
               </button>
+            ) : confirmReset ? (
+              <div className="flex items-center gap-1.5">
+                <button
+                  onClick={handleResetCurrentSet}
+                  className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-rose-500 text-white hover:bg-rose-400 transition-colors"
+                >
+                  Confirm Reset (0-0)
+                </button>
+                <button
+                  onClick={() => setConfirmReset(false)}
+                  className="px-2 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-white/5"
+                >
+                  Cancel
+                </button>
+              </div>
             ) : (
               <button
-                onClick={handleResetCurrentSet}
+                onClick={() => setConfirmReset(true)}
                 className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs text-slate-400 hover:text-white bg-white/5 hover:bg-white/10"
                 title="Reset Match"
               >

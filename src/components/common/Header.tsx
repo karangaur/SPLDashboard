@@ -56,6 +56,17 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
     setMoreDropdownOpen(false);
   };
 
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileMenuOpen(false);
+        setMoreDropdownOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-slate-950/85 backdrop-blur-md">
       {/* 3-Zone Top Bar Contract */}
@@ -160,6 +171,8 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
           <div className="relative">
             <button
               onClick={() => setMoreDropdownOpen((prev) => !prev)}
+              aria-expanded={moreDropdownOpen}
+              aria-haspopup="true"
               className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 ${
                 ['tokens', 'registered', 'statistics', 'champion', 'settings', 'users'].includes(currentTab)
                   ? 'bg-white/10 text-amber-400 font-semibold'
@@ -238,12 +251,12 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
         </nav>
 
         {/* Zone 3: 1 Primary Action (Register Player) + Admin Logout + Mobile Toggle */}
-        <div className="flex items-center gap-2.5 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           <button
             onClick={() => handleNav('registration')}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all whitespace-nowrap shrink-0"
+            className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all whitespace-nowrap shrink-0"
           >
-            <PlusCircle className="w-4 h-4" />
+            <PlusCircle className="w-4 h-4 shrink-0" />
             <span className="hidden sm:inline">Register Player</span>
             <span className="sm:hidden">Register</span>
           </button>
@@ -288,7 +301,8 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
             type="button"
             onClick={() => setMobileMenuOpen((o) => !o)}
             aria-label="Toggle navigation menu"
-            className="lg:hidden p-2 text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
+            aria-expanded={mobileMenuOpen}
+            className="lg:hidden p-2 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
@@ -298,7 +312,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
 
       {/* Mobile Drawer Navigation */}
       {mobileMenuOpen && (
-        <div className="lg:hidden border-t border-white/10 bg-slate-950/95 backdrop-blur-xl px-4 py-4 space-y-1 animate-fade-in shadow-2xl">
+        <div className="lg:hidden border-t border-white/10 bg-slate-950/98 backdrop-blur-xl px-4 py-4 pb-24 max-h-[calc(100dvh-4rem)] overflow-y-auto space-y-1 animate-fade-in shadow-2xl">
           <div className="grid grid-cols-2 gap-2 pb-2">
             <button
               onClick={() => handleNav('dashboard')}

@@ -187,26 +187,35 @@ export class SupabaseService {
         }
       }
 
-      return (teamsData as DbTeam[]).map((t) => ({
-        id: t.id,
-        name: t.name,
-        captainId: t.captain_id || undefined,
-        avatarColor: t.avatar_color || 'from-amber-500 to-orange-600',
-        badge: t.badge || '🏸',
-        locked: t.locked,
-        players: rosterMap.get(t.id) || [],
-      }));
+      const seenIds = new Set<string>();
+      const uniqueTeams: Team[] = [];
+      for (const t of teamsData as DbTeam[]) {
+        if (!t.id || seenIds.has(t.id)) continue;
+        seenIds.add(t.id);
+        uniqueTeams.push({
+          id: t.id,
+          name: t.name,
+          token: t.short_name || undefined,
+          captainId: t.captain_id || undefined,
+          avatarColor: t.avatar_color || 'from-amber-500 to-orange-600',
+          badge: t.badge || '🏸',
+          locked: t.locked,
+          players: rosterMap.get(t.id) || [],
+        });
+      }
+      return uniqueTeams;
     } catch {
       return null;
     }
   }
 
   static async saveTeam(team: Team): Promise<boolean> {
-    if (!this.isAvailable()) return false;
+    if (!this.isAvailable() || !team?.id) return false;
     try {
       const teamPayload = {
         id: team.id,
         name: team.name,
+        short_name: team.token || null,
         captain_id: team.captainId || null,
         avatar_color: team.avatarColor || 'from-amber-500 to-orange-600',
         badge: team.badge || '🏸',
@@ -214,13 +223,14 @@ export class SupabaseService {
         updated_at: new Date().toISOString(),
       };
 
-      await supabase.from('teams').upsert(teamPayload as any);
+      await supabase.from('teams').upsert(teamPayload as any, { onConflict: 'id' });
 
       // Replace roster junction
       await supabase.from('team_players').delete().eq('team_id', team.id);
 
       if (team.players && team.players.length > 0) {
-        const rows = team.players.map((playerId, idx) => ({
+        const uniquePlayers = Array.from(new Set(team.players.filter(Boolean)));
+        const rows = uniquePlayers.map((playerId, idx) => ({
           team_id: team.id,
           player_id: playerId,
           slot_index: idx,
@@ -237,8 +247,42 @@ export class SupabaseService {
   static async saveTeamsBulk(teams: Team[]): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      // Deduplicate by team.id to strictly prevent duplicate records
+      const uniqueMap = new Map<string, Team>();
       for (const t of teams) {
-        await this.saveTeam(t);
+        if (t && t.id) {
+          uniqueMap.set(t.id, t);
+        }
+      }
+      const uniqueTeams = Array.from(uniqueMap.values());
+      if (uniqueTeams.length === 0) return true;
+
+      const nowIso = new Date().toISOString();
+      const teamPayloads = uniqueTeams.map((team) => ({
+        id: team.id,
+        name: team.name,
+        short_name: team.token || null,
+        captain_id: team.captainId || null,
+        avatar_color: team.avatarColor || 'from-amber-500 to-orange-600',
+        badge: team.badge || '🏸',
+        locked: Boolean(team.locked),
+        updated_at: nowIso,
+      }));
+
+      await supabase.from('teams').upsert(teamPayloads as any, { onConflict: 'id' });
+
+      for (const t of uniqueTeams) {
+        await supabase.from('team_players').delete().eq('team_id', t.id);
+        if (t.players && t.players.length > 0) {
+          const uniquePlayers = Array.from(new Set(t.players.filter(Boolean)));
+          const rows = uniquePlayers.map((playerId, idx) => ({
+            team_id: t.id,
+            player_id: playerId,
+            slot_index: idx,
+            is_captain: t.captainId === playerId,
+          }));
+          await supabase.from('team_players').insert(rows as any);
+        }
       }
       return true;
     } catch {

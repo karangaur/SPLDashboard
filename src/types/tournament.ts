@@ -43,6 +43,7 @@ export interface Team {
   locked?: boolean;
   avatarColor?: string;
   badge?: string;
+  token?: string;
 }
 
 export interface MatchSet {

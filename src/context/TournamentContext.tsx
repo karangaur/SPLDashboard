@@ -575,7 +575,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           // Re-fetch authoritative teams & rosters to keep state synchronized
           SupabaseService.fetchTeams().then((teams) => {
             if (teams && teams.length >= 0) {
-              setState((prev) => ({ ...prev, teams }));
+              setState((prev) => {
+                const prevTokenMap = new Map(prev.teams.map((t) => [t.id, t.token]));
+                const merged = teams.map((t) => ({
+                  ...t,
+                  token: t.token || prevTokenMap.get(t.id),
+                }));
+                return { ...prev, teams: merged };
+              });
             }
           });
         },
@@ -584,7 +591,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           // Player assigned or transferred - refresh team rosters
           SupabaseService.fetchTeams().then((teams) => {
             if (teams && teams.length >= 0) {
-              setState((prev) => ({ ...prev, teams }));
+              setState((prev) => {
+                const prevTokenMap = new Map(prev.teams.map((t) => [t.id, t.token]));
+                const merged = teams.map((t) => ({
+                  ...t,
+                  token: t.token || prevTokenMap.get(t.id),
+                }));
+                return { ...prev, teams: merged };
+              });
             }
           });
         },
@@ -1276,7 +1290,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: updatedTeams }),
       }).catch(() => {});
       return {
@@ -1296,7 +1310,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const nextTeams = prev.teams.filter((t) => t.id !== id);
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
 
@@ -1325,7 +1339,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const nextTeams = prev.teams.filter((t) => !idSet.has(t.id));
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
 
@@ -1352,7 +1366,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
       return {
@@ -1371,7 +1385,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
       return {
@@ -1459,7 +1473,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams }),
       }).catch(() => {});
       return { ...prev, teams };
@@ -1487,7 +1501,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
 
@@ -1512,7 +1526,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
 
@@ -1522,16 +1536,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const setTeams = (teams: Team[]) => {
     lastServerScoreTime.current = Date.now();
+    // Deduplicate by team.id to guarantee no duplicate team entries
+    const uniqueMap = new Map<string, Team>();
+    for (const t of teams) {
+      if (t && t.id && !uniqueMap.has(t.id)) {
+        uniqueMap.set(t.id, t);
+      }
+    }
+    const uniqueTeams = Array.from(uniqueMap.values());
+
     if (SupabaseService.isAvailable()) {
-      SupabaseService.saveTeamsBulk(teams).catch(() => {});
+      SupabaseService.saveTeamsBulk(uniqueTeams).catch(() => {});
     }
     setState((prev) => {
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teams }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ teams: uniqueTeams }),
       }).catch(() => {});
-      return { ...prev, teams };
+      return { ...prev, teams: uniqueTeams };
     });
   };
 

@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { ShieldCheck, HardDriveDownload, RefreshCw, MapPin, Calendar } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { NavTab } from './Header';
+import { ConfirmModal } from './ConfirmModal';
 
 interface FooterProps {
   onSelectTab: (tab: NavTab) => void;
@@ -9,13 +10,14 @@ interface FooterProps {
 
 export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
   const { state, exportStateJSON, resetToDefault } = useTournament();
+  const [showResetModal, setShowResetModal] = useState(false);
 
   return (
-    <footer className="mt-20 border-t border-white/10 bg-slate-950/80 py-12 text-slate-400">
+    <footer className="mt-12 sm:mt-20 border-t border-white/10 bg-slate-950/80 py-10 sm:py-12 text-slate-400">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
           {/* Brand & Tournament Bio */}
-          <div className="md:col-span-2 space-y-3">
+          <div className="sm:col-span-2 space-y-3">
             <div className="flex items-center gap-2.5">
               <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-amber-500/20 text-amber-400 font-black text-lg">
                 🏸
@@ -49,7 +51,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               <li>
                 <button
                   onClick={() => onSelectTab('fixtures')}
-                  className="hover:text-amber-400 transition-colors"
+                  className="hover:text-amber-400 transition-colors text-left"
                 >
                   Match Centre & Live Scores
                 </button>
@@ -57,7 +59,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               <li>
                 <button
                   onClick={() => onSelectTab('standings')}
-                  className="hover:text-amber-400 transition-colors"
+                  className="hover:text-amber-400 transition-colors text-left"
                 >
                   Points Table & Net Run Rate
                 </button>
@@ -65,7 +67,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               <li>
                 <button
                   onClick={() => onSelectTab('knockout')}
-                  className="hover:text-amber-400 transition-colors"
+                  className="hover:text-amber-400 transition-colors text-left"
                 >
                   Knockout Championship Bracket
                 </button>
@@ -73,7 +75,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               <li>
                 <button
                   onClick={() => onSelectTab('tokens')}
-                  className="hover:text-amber-400 transition-colors"
+                  className="hover:text-amber-400 transition-colors text-left"
                 >
                   Live Token Lottery Draw
                 </button>
@@ -81,7 +83,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               <li>
                 <button
                   onClick={() => onSelectTab('registered')}
-                  className="hover:text-amber-400 transition-colors"
+                  className="hover:text-amber-400 transition-colors text-left"
                 >
                   Registered Players & Fees
                 </button>
@@ -91,35 +93,31 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
 
           {/* Data Persistence & Utilities */}
           <div className="space-y-2 text-sm">
-            <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wider">Offline Persistence</h4>
+            <h4 className="font-bold text-slate-200 text-xs uppercase tracking-wider">Cloud & Offline Sync</h4>
             <div className="flex items-center gap-2 text-xs text-emerald-400 font-medium bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
               <ShieldCheck className="w-4 h-4 shrink-0" />
-              <span>All changes automatically saved to device</span>
+              <span>All changes synchronized automatically</span>
             </div>
             <div className="pt-2 flex flex-col gap-2">
               <button
                 onClick={exportStateJSON}
-                className="inline-flex items-center gap-2 text-xs text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-2 rounded-lg transition-colors border border-white/5"
+                className="inline-flex items-center gap-2 text-xs text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 px-3 py-2.5 rounded-lg transition-colors border border-white/5"
               >
-                <HardDriveDownload className="w-3.5 h-3.5 text-blue-400" />
+                <HardDriveDownload className="w-3.5 h-3.5 text-blue-400 shrink-0" />
                 <span>Export State Backup (.json)</span>
               </button>
               <button
-                onClick={() => {
-                  if (window.confirm('Reset tournament to default starter tournament state?')) {
-                    resetToDefault();
-                  }
-                }}
-                className="inline-flex items-center gap-2 text-xs text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 px-3 py-2 rounded-lg transition-colors border border-white/5"
+                onClick={() => setShowResetModal(true)}
+                className="inline-flex items-center gap-2 text-xs text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 px-3 py-2.5 rounded-lg transition-colors border border-white/5"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
+                <RefreshCw className="w-3.5 h-3.5 shrink-0" />
                 <span>Reset to Default State</span>
               </button>
             </div>
           </div>
         </div>
 
-        <div className="mt-8 border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400">
+        <div className="mt-8 border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 text-center sm:text-left">
           <div>
             © {new Date().getFullYear()} {state.settings.name}. Built for professional badminton tournament operations.
           </div>
@@ -138,6 +136,19 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
           </div>
         </div>
       </div>
+
+      <ConfirmModal
+        isOpen={showResetModal}
+        title="Reset Tournament to Default State"
+        message="Are you sure you want to reset the tournament to the default starter state? This will replace current teams and matches with starter data."
+        confirmLabel="Reset Tournament"
+        variant="danger"
+        onConfirm={() => {
+          resetToDefault();
+          setShowResetModal(false);
+        }}
+        onCancel={() => setShowResetModal(false)}
+      />
     </footer>
   );
 };

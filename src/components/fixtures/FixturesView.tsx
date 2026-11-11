@@ -37,6 +37,12 @@ export const FixturesView: React.FC = () => {
   const [manualTeamB, setManualTeamB] = useState('');
   const [manualCourt, setManualCourt] = useState(1);
   const [manualRound, setManualRound] = useState(1);
+  const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMsg({ text, type });
+    setTimeout(() => setToastMsg(null), 3500);
+  };
 
   const courtsList = Array.from({ length: state.settings.courts || 2 }, (_, i) => i + 1);
 
@@ -90,13 +96,14 @@ export const FixturesView: React.FC = () => {
     const curA = match.scoreA ?? 0;
     const curB = match.scoreB ?? 0;
     if (curA === curB) {
-      alert("Match cannot end in a tie. Please record the winning point.");
+      showToast('Match cannot end in a tie. Please record the winning point.', 'error');
       return;
     }
     updateMatch(match.id, {
       status: 'completed',
       winner: curA > curB ? match.teamA : match.teamB,
     });
+    showToast('Match marked as completed!', 'success');
   };
 
   const handleResetMatch = (matchId: string) => {
@@ -107,6 +114,7 @@ export const FixturesView: React.FC = () => {
       winner: undefined,
       sets: [],
     });
+    showToast('Match score reset to 0 - 0.', 'success');
   };
 
   const handleShareSchedule = () => {
@@ -126,18 +134,18 @@ export const FixturesView: React.FC = () => {
     const text = lines.join('\n');
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
-      alert('Match schedule copied to clipboard!');
+      showToast('Match schedule copied to clipboard!', 'success');
     }
   };
 
   const handleCreateManualMatch = (e: React.FormEvent) => {
     e.preventDefault();
     if (!manualTeamA || !manualTeamB) {
-      alert('Please select two distinct teams.');
+      showToast('Please select two distinct teams.', 'error');
       return;
     }
     if (manualTeamA === manualTeamB) {
-      alert('Team A and Team B must be different.');
+      showToast('Team A and Team B must be different.', 'error');
       return;
     }
 
@@ -155,15 +163,38 @@ export const FixturesView: React.FC = () => {
     setManualModalOpen(false);
     setManualTeamA('');
     setManualTeamB('');
+    showToast('Custom match added to schedule.', 'success');
   };
 
   return (
     <div className="space-y-6 animate-fade-in">
+      {toastMsg && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`p-3.5 rounded-2xl border text-xs font-bold flex items-center justify-between animate-fade-in ${
+            toastMsg.type === 'error'
+              ? 'bg-rose-500/15 border-rose-500/30 text-rose-300'
+              : 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+          }`}
+        >
+          <span>{toastMsg.text}</span>
+          <button
+            type="button"
+            onClick={() => setToastMsg(null)}
+            aria-label="Dismiss notification"
+            className="ml-3 opacity-70 hover:opacity-100"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* Top Header & Action Strip */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 font-bold text-xl">
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-amber-500/20 text-amber-400 font-bold text-xl shrink-0">
               🏸
             </span>
             <h1 className="font-display text-2xl sm:text-3xl font-black text-white">
@@ -175,38 +206,38 @@ export const FixturesView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <button
             onClick={() => {
               const liveOrFirst = state.matches.find((m) => m.status === 'live') || state.matches[0];
               if (liveOrFirst) setLiveScoringMatchId(liveOrFirst.id);
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-lime-400 hover:from-emerald-300 rounded-xl shadow-md transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-lime-400 hover:from-emerald-300 rounded-xl shadow-md transition-all active:scale-95"
             title="Open Live Badminton Scoreboard and Umpire Console"
           >
-            <SlidersHorizontal className="w-4 h-4" />
+            <SlidersHorizontal className="w-4 h-4 shrink-0" />
             <span>Live Umpire Console</span>
           </button>
 
           <button
             onClick={() => setShowGenerateConfirm(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4 shrink-0" />
             <span>Generate Schedule</span>
           </button>
 
           <button
             onClick={() => setManualModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[38px] text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10"
           >
-            <Plus className="w-4 h-4 text-emerald-400" />
+            <Plus className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>Add Match</span>
           </button>
 
           <button
             onClick={handleShareSchedule}
-            className="p-2 text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/5"
+            className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/5"
             title="Share Schedule"
             aria-label="Share Schedule"
           >
@@ -215,7 +246,7 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setShowClearConfirm(true)}
-            className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5"
+            className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5"
             title="Clear All Match Scores"
             aria-label="Clear All Match Scores"
           >
@@ -227,7 +258,7 @@ export const FixturesView: React.FC = () => {
       {/* Interactive Filters: Status segmented control + Court filter */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 rounded-2xl glass-panel">
         {/* Status Tabs */}
-        <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl overflow-x-auto">
+        <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl overflow-x-auto no-scrollbar">
           {(['all', 'live', 'upcoming', 'completed'] as const).map((st) => {
             const count =
               st === 'all'
@@ -258,12 +289,12 @@ export const FixturesView: React.FC = () => {
         </div>
 
         {/* Court Filter */}
-        <div className="flex items-center gap-2 px-2">
+        <div className="flex items-center gap-2 px-1 sm:px-2 overflow-x-auto no-scrollbar">
           <span className="text-xs font-medium text-slate-400 shrink-0">Court:</span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => setSelectedCourt('all')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
+              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                 selectedCourt === 'all'
                   ? 'bg-white/20 text-white font-bold'
                   : 'text-slate-400 hover:text-white'
@@ -275,7 +306,7 @@ export const FixturesView: React.FC = () => {
               <button
                 key={c}
                 onClick={() => setSelectedCourt(c)}
-                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors ${
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
                   selectedCourt === c
                     ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
                     : 'text-slate-400 hover:text-white'
@@ -302,7 +333,7 @@ export const FixturesView: React.FC = () => {
             return (
               <div
                 key={match.id}
-                className={`rounded-2xl glass-card p-5 border transition-all space-y-4 ${
+                className={`rounded-2xl glass-card p-3.5 sm:p-5 border transition-all space-y-3.5 sm:space-y-4 ${
                   isLive
                     ? 'border-amber-500/40 royal-glow bg-amber-500/5'
                     : isCompleted
@@ -311,10 +342,10 @@ export const FixturesView: React.FC = () => {
                 }`}
               >
                 {/* Match Header info */}
-                <div className="flex items-center justify-between text-xs pb-3 border-b border-white/10">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-3 border-b border-white/10">
                   <div className="flex items-center gap-2">
                     <span
-                      className={`h-2 w-2 rounded-full ${
+                      className={`h-2 w-2 rounded-full shrink-0 ${
                         isLive
                           ? 'bg-rose-500 animate-ping'
                           : isCompleted
@@ -327,14 +358,14 @@ export const FixturesView: React.FC = () => {
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 sm:gap-2">
                     <button
                       onClick={() => setLiveScoringMatchId(match.id)}
-                      className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
+                      className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
                       title="Open full badminton umpire scoring console"
                     >
-                      <Maximize2 className="w-3 h-3" />
-                      <span>Umpire Console</span>
+                      <Maximize2 className="w-3 h-3 shrink-0" />
+                      <span>Umpire</span>
                     </button>
                     <span
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
@@ -353,7 +384,7 @@ export const FixturesView: React.FC = () => {
                       onClick={() => handleResetMatch(match.id)}
                       title="Reset score"
                       aria-label="Reset match score"
-                      className="text-slate-500 hover:text-slate-300 p-0.5 rounded transition-colors"
+                      className="text-slate-500 hover:text-slate-300 p-1 rounded transition-colors"
                     >
                       <RotateCcw className="w-3.5 h-3.5" />
                     </button>
@@ -361,56 +392,56 @@ export const FixturesView: React.FC = () => {
                 </div>
 
                 {/* Scoreboard Layout */}
-                <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:gap-3">
                   {/* Team A */}
-                  <div className={`space-y-1.5 ${isAWinner ? 'text-amber-400' : 'text-white'}`}>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xl">{tA?.badge || '🏸'}</span>
-                      <span className="font-bold text-sm sm:text-base truncate block max-w-[130px] sm:max-w-[160px]">
+                  <div className={`space-y-1 min-w-0 ${isAWinner ? 'text-amber-400' : 'text-white'}`}>
+                    <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
+                      <span className="text-lg sm:text-xl shrink-0">{tA?.badge || '🏸'}</span>
+                      <span className="font-bold text-xs sm:text-base truncate block">
                         {tA?.name || 'Team A'}
                       </span>
                     </div>
                     {tA?.captainId && (
-                      <p className="text-[11px] text-slate-400 truncate">
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
                         C: {getPlayer(tA.captainId)?.name || 'Captain'}
                       </p>
                     )}
                   </div>
 
                   {/* Score Display */}
-                  <div className="text-center px-3">
-                    <div className="flex items-center justify-center gap-2 bg-black/50 px-4 py-2 rounded-xl border border-white/10 shadow-inner">
+                  <div className="text-center px-1 sm:px-2 shrink-0">
+                    <div className="flex items-center justify-center gap-1.5 sm:gap-2 bg-black/50 px-3 sm:px-4 py-1.5 sm:py-2 rounded-xl border border-white/10 shadow-inner">
                       <span
-                        className={`font-mono text-2xl sm:text-3xl font-black tabular-nums ${
+                        className={`font-mono text-xl sm:text-3xl font-black tabular-nums ${
                           isAWinner ? 'text-amber-400' : 'text-white'
                         }`}
                       >
                         {match.scoreA ?? 0}
                       </span>
-                      <span className="text-slate-500 font-bold text-sm">-</span>
+                      <span className="text-slate-500 font-bold text-xs sm:text-sm">-</span>
                       <span
-                        className={`font-mono text-2xl sm:text-3xl font-black tabular-nums ${
+                        className={`font-mono text-xl sm:text-3xl font-black tabular-nums ${
                           isBWinner ? 'text-amber-400' : 'text-white'
                         }`}
                       >
                         {match.scoreB ?? 0}
                       </span>
                     </div>
-                    <span className="block text-[10px] text-slate-400 uppercase tracking-widest mt-1">
+                    <span className="block text-[9px] sm:text-[10px] text-slate-400 uppercase tracking-widest mt-1">
                       Target: {state.settings.format}
                     </span>
                   </div>
 
                   {/* Team B */}
-                  <div className={`space-y-1.5 text-right ${isBWinner ? 'text-amber-400' : 'text-white'}`}>
-                    <div className="flex items-center justify-end gap-2">
-                      <span className="font-bold text-sm sm:text-base truncate block max-w-[130px] sm:max-w-[160px]">
+                  <div className={`space-y-1 min-w-0 text-right ${isBWinner ? 'text-amber-400' : 'text-white'}`}>
+                    <div className="flex items-center justify-end gap-1.5 sm:gap-2 min-w-0">
+                      <span className="font-bold text-xs sm:text-base truncate block">
                         {tB?.name || 'Team B'}
                       </span>
-                      <span className="text-xl">{tB?.badge || '🏸'}</span>
+                      <span className="text-lg sm:text-xl shrink-0">{tB?.badge || '🏸'}</span>
                     </div>
                     {tB?.captainId && (
-                      <p className="text-[11px] text-slate-400 truncate">
+                      <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
                         C: {getPlayer(tB.captainId)?.name || 'Captain'}
                       </p>
                     )}
@@ -418,23 +449,25 @@ export const FixturesView: React.FC = () => {
                 </div>
 
                 {/* Live Scoring Clicker Controls */}
-                <div className="pt-2 border-t border-white/5 flex flex-wrap items-center justify-between gap-2">
+                <div className="pt-2.5 border-t border-white/5 flex flex-wrap items-center justify-between gap-2">
                   {/* Team A controls */}
                   <div className="flex items-center gap-1.5">
-                    <span className="text-xs text-slate-400 font-medium mr-1 truncate max-w-[60px]">
+                    <span className="text-[11px] sm:text-xs text-slate-400 font-medium mr-0.5 truncate max-w-[56px]">
                       {tA?.name?.split(' ')[0]}
                     </span>
                     <button
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'A', -1)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
+                      aria-label={`Decrease score for ${tA?.name || 'Team A'}`}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
                     >
                       -
                     </button>
                     <button
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'A', 1)}
-                      className="px-2.5 h-7 flex items-center justify-center rounded-lg bg-amber-400 text-slate-950 font-bold text-xs hover:bg-amber-300 active:scale-95 transition-all shadow"
+                      aria-label={`Add point for ${tA?.name || 'Team A'}`}
+                      className="px-2.5 h-8 flex items-center justify-center rounded-lg bg-amber-400 text-slate-950 font-bold text-xs hover:bg-amber-300 active:scale-95 transition-all shadow"
                     >
                       +1 Pt
                     </button>
@@ -446,7 +479,7 @@ export const FixturesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => updateMatch(match.id, { status: 'live' })}
-                        className="px-2 py-1 text-[11px] font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg flex items-center gap-1 transition-all shadow-sm active:scale-95"
                         title="Start match"
                       >
                         <Play className="w-3 h-3 fill-current" />
@@ -457,7 +490,7 @@ export const FixturesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => updateMatch(match.id, { status: 'paused' })}
-                        className="px-2 py-1 text-[11px] font-bold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
                         title="Pause match"
                       >
                         <Pause className="w-3 h-3" />
@@ -468,7 +501,7 @@ export const FixturesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => updateMatch(match.id, { status: 'live' })}
-                        className="px-2 py-1 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
                         title="Resume match"
                       >
                         <Play className="w-3 h-3 fill-current" />
@@ -479,14 +512,14 @@ export const FixturesView: React.FC = () => {
                     {!isCompleted ? (
                       <button
                         onClick={() => handleMarkComplete(match)}
-                        className="px-2.5 py-1 text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-colors"
+                        className="px-2.5 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-colors"
                       >
-                        Finish Match
+                        Finish
                       </button>
                     ) : (
-                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-1">
-                        <CheckCircle className="w-3.5 h-3.5" />
-                        <span>Winner: {isAWinner ? tA?.name : tB?.name}</span>
+                      <span className="text-xs font-bold text-emerald-400 flex items-center gap-1 truncate max-w-[140px]">
+                        <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span className="truncate">{isAWinner ? tA?.name : tB?.name}</span>
                       </span>
                     )}
                   </div>
@@ -496,18 +529,20 @@ export const FixturesView: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'B', 1)}
-                      className="px-2.5 h-7 flex items-center justify-center rounded-lg bg-blue-500 text-white font-bold text-xs hover:bg-blue-400 active:scale-95 transition-all shadow"
+                      aria-label={`Add point for ${tB?.name || 'Team B'}`}
+                      className="px-2.5 h-8 flex items-center justify-center rounded-lg bg-blue-500 text-white font-bold text-xs hover:bg-blue-400 active:scale-95 transition-all shadow"
                     >
                       +1 Pt
                     </button>
                     <button
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'B', -1)}
-                      className="w-7 h-7 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
+                      aria-label={`Decrease score for ${tB?.name || 'Team B'}`}
+                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
                     >
                       -
                     </button>
-                    <span className="text-xs text-slate-400 font-medium ml-1 truncate max-w-[60px]">
+                    <span className="text-[11px] sm:text-xs text-slate-400 font-medium ml-0.5 truncate max-w-[56px]">
                       {tB?.name?.split(' ')[0]}
                     </span>
                   </div>

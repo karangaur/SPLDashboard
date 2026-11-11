@@ -748,9 +748,18 @@ async function startServer() {
     }
     const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
     const now = Date.now();
+    const deduplicatedBody = { ...req.body };
+    if (Array.isArray(deduplicatedBody.teams)) {
+      const seen = new Map<string, any>();
+      for (const t of deduplicatedBody.teams) {
+        if (t && t.id) seen.set(t.id, t);
+      }
+      deduplicatedBody.teams = Array.from(seen.values());
+    }
+
     const updated = {
       ...current,
-      ...req.body,
+      ...deduplicatedBody,
       lastUpdated: now,
     };
     writeJSON(TOURNAMENT_FILE, updated);
@@ -760,13 +769,13 @@ async function startServer() {
       const nowIso = new Date(now).toISOString();
       try {
         // 1. Sync Players if provided
-        if (Array.isArray(req.body.players)) {
-          if (req.body.players.length === 0) {
+        if (Array.isArray(deduplicatedBody.players)) {
+          if (deduplicatedBody.players.length === 0) {
             await serverSupabase.from('team_players').delete().neq('id', '___none___');
             await serverSupabase.from('teams').update({ captain_id: null } as any).neq('id', '___none___');
             await serverSupabase.from('players').delete().neq('id', '___none___');
           } else {
-            const playerRows = req.body.players.map((p: any) => ({
+            const playerRows = deduplicatedBody.players.map((p: any) => ({
               id: p.id,
               name: String(p.name || '').trim(),
               mobile: p.mobile ? String(p.mobile).trim() : null,
@@ -782,25 +791,27 @@ async function startServer() {
         }
 
         // 2. Sync Teams if provided
-        if (Array.isArray(req.body.teams)) {
-          if (req.body.teams.length === 0) {
+        if (Array.isArray(deduplicatedBody.teams)) {
+          if (deduplicatedBody.teams.length === 0) {
             await serverSupabase.from('team_players').delete().neq('id', '___none___');
             await serverSupabase.from('teams').delete().neq('id', '___none___');
           } else {
-            for (const t of req.body.teams) {
+            for (const t of deduplicatedBody.teams) {
               await serverSupabase.from('teams').upsert({
                 id: t.id,
                 name: t.name,
+                short_name: t.token || null,
                 captain_id: t.captainId || null,
                 avatar_color: t.avatarColor || 'from-amber-500 to-orange-600',
                 badge: t.badge || '🏸',
                 locked: Boolean(t.locked),
                 updated_at: nowIso,
-              } as any);
+              } as any, { onConflict: 'id' });
 
               await serverSupabase.from('team_players').delete().eq('team_id', t.id);
               if (Array.isArray(t.players) && t.players.length > 0) {
-                const rosterRows = t.players.map((pid: string, idx: number) => ({
+                const uniquePlayers = Array.from(new Set<string>(t.players.filter(Boolean)));
+                const rosterRows = uniquePlayers.map((pid: string, idx: number) => ({
                   team_id: t.id,
                   player_id: pid,
                   slot_index: idx,
