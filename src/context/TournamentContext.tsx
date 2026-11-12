@@ -75,8 +75,8 @@ interface TournamentContextType {
   clearPlayers: () => void;
   
   // Teams
-  addTeam: (name: string, players?: string[], captainId?: string) => Team;
-  updateTeam: (id: string, updates: Partial<Team>) => void;
+  addTeam: (name: string, players?: string[], captainId?: string, badge?: string) => Team;
+  updateTeam: (id: string, updates: Partial<Team>) => Promise<boolean>;
   deleteTeam: (id: string) => void;
   deleteTeamsBulk: (teamIds: string[]) => void;
   renameTeam: (id: string, newName: string) => void;
@@ -591,10 +591,50 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           }
         },
 
-        onTeamChange: () => {
-          // Ignore immediate self-echoes from our own local bulk team updates
-          if (Date.now() - lastServerScoreTime.current < 1500) return;
+        onTeamChange: (payload) => {
+          // Ignore immediate self-echoes from our own local team mutations
+          if (Date.now() - lastServerScoreTime.current < 2500) return;
+
+          // Targeted single-team update by unique database ID (prevents full-list race conditions)
+          if (payload?.eventType === 'UPDATE' && payload.new?.id) {
+            const row = payload.new;
+            const decoded = SupabaseService.decodeShortName(row.short_name);
+            setState((prev) => {
+              const exists = prev.teams.some((t) => t.id === row.id);
+              if (!exists) return prev;
+              return {
+                ...prev,
+                teams: prev.teams.map((t) =>
+                  t.id === row.id
+                    ? {
+                        ...t,
+                        name: row.name || t.name,
+                        badge: row.badge || t.badge || '🏸',
+                        avatarColor: row.avatar_color || t.avatarColor,
+                        locked: typeof row.locked === 'boolean' ? row.locked : t.locked,
+                        captainId: row.captain_id !== undefined ? row.captain_id || undefined : t.captainId,
+                        token: decoded.token || t.token,
+                        lockedPlayerIds:
+                          decoded.lockedPlayerIds.length > 0 ? decoded.lockedPlayerIds : t.lockedPlayerIds,
+                      }
+                    : t
+                ),
+              };
+            });
+            return;
+          }
+
+          if (payload?.eventType === 'DELETE' && payload.old?.id) {
+            const delId = payload.old.id;
+            setState((prev) => ({
+              ...prev,
+              teams: prev.teams.filter((t) => t.id !== delId),
+            }));
+            return;
+          }
+
           SupabaseService.fetchTeams().then((teams) => {
+            if (Date.now() - lastServerScoreTime.current < 2500) return;
             if (teams && teams.length >= 0) {
               setState((prev) => {
                 const prevTokenMap = new Map(prev.teams.map((t) => [t.id, t.token]));
@@ -614,9 +654,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onTeamPlayerChange: () => {
-          // Ignore immediate self-echoes from our own local bulk team updates
-          if (Date.now() - lastServerScoreTime.current < 1500) return;
+          // Ignore immediate self-echoes from our own local team updates
+          if (Date.now() - lastServerScoreTime.current < 2500) return;
           SupabaseService.fetchTeams().then((teams) => {
+            if (Date.now() - lastServerScoreTime.current < 2500) return;
             if (teams && teams.length >= 0) {
               setState((prev) => {
                 const prevTokenMap = new Map(prev.teams.map((t) => [t.id, t.token]));
@@ -816,6 +857,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         } catch {}
       });
 
+      eventSource.addEventListener('team_updated', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.team && data.team.id) {
+            if (data.lastUpdated) lastServerScoreTime.current = data.lastUpdated;
+            setState((prev) => {
+              const exists = prev.teams.some((t) => t.id === data.team.id);
+              const nextTeams = exists
+                ? prev.teams.map((t) => (t.id === data.team.id ? { ...t, ...data.team } : t))
+                : [...prev.teams, data.team];
+              return { ...prev, teams: nextTeams };
+            });
+          }
+        } catch {}
+      });
+
       eventSource.addEventListener('form_published', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
@@ -912,6 +969,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             teams: Array.isArray(teams) && teams.length > 0 ? teams : prev.teams,
             knockout: knockout || prev.knockout,
           }));
+        } else if (event.data?.type === 'TEAM_UPDATED' && event.data.team?.id) {
+          const { team, lastUpdated } = event.data;
+          if (lastUpdated) lastServerScoreTime.current = lastUpdated;
+          setState((prev) => ({
+            ...prev,
+            teams: prev.teams.some((t) => t.id === team.id)
+              ? prev.teams.map((t) => (t.id === team.id ? { ...t, ...team } : t))
+              : [...prev.teams, team],
+          }));
         }
       };
 
@@ -955,6 +1021,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
+        if (Date.now() - lastServerScoreTime.current < 2500) return;
         reconcileAuthoritativeData();
       }
     };
@@ -1282,7 +1349,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   // Teams
-  const addTeam = (name: string, playerIds: string[] = [], captainId?: string): Team => {
+  const addTeam = (
+    name: string,
+    playerIds: string[] = [],
+    captainId?: string,
+    badge = '🏸'
+  ): Team => {
+    lastServerScoreTime.current = Date.now();
     const newTeam: Team = {
       id: crypto.randomUUID(),
       name: name.trim(),
@@ -1290,19 +1363,26 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       captainId: captainId || playerIds[0],
       locked: false,
       avatarColor: 'from-amber-500 to-orange-600',
-      badge: '🏸',
+      badge: badge || '🏸',
     };
 
     if (SupabaseService.isAvailable()) {
-      SupabaseService.saveTeam(newTeam).catch(() => {});
-      SupabaseService.logAudit('team_created', 'team', newTeam.id, { name: newTeam.name }).catch(() => {});
+      SupabaseService.saveTeam(newTeam)
+        .then(() => {
+          lastServerScoreTime.current = Date.now();
+        })
+        .catch(() => {});
+      SupabaseService.logAudit('team_created', 'team', newTeam.id, {
+        name: newTeam.name,
+        badge: newTeam.badge,
+      }).catch(() => {});
     }
 
     setState((prev) => {
       const nextTeams = [...prev.teams, newTeam];
       fetch('/api/tournament/state', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ teams: nextTeams }),
       }).catch(() => {});
       return {
@@ -1313,26 +1393,67 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return newTeam;
   };
 
-  const updateTeam = (id: string, updates: Partial<Team>) => {
+  const updateTeam = async (id: string, updates: Partial<Team>): Promise<boolean> => {
+    if (!id) return false;
+    lastServerScoreTime.current = Date.now();
+
+    let updatedTarget: Team | undefined;
     setState((prev) => {
-      const target = prev.teams.find((t) => t.id === id);
-      const updatedTeams = prev.teams.map((t) => (t.id === id ? { ...t, ...updates } : t));
-      if (target && SupabaseService.isAvailable()) {
-        SupabaseService.saveTeam({ ...target, ...updates }).catch(() => {});
-      }
-      fetch('/api/tournament/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: updatedTeams }),
-      }).catch(() => {});
+      const updatedTeams = prev.teams.map((t) => {
+        if (t.id !== id) return t;
+        updatedTarget = {
+          ...t,
+          ...updates,
+          id,
+          name: updates.name !== undefined ? updates.name.trim() || t.name : t.name,
+          badge: updates.badge !== undefined ? updates.badge || '🏸' : t.badge || '🏸',
+        };
+        return updatedTarget;
+      });
       return {
         ...prev,
         teams: updatedTeams,
       };
     });
+
+    // Broadcast immediate per-team update to any open tabs (Public Homepage, Match Center, Umpire Mode)
+    if (updatedTarget && typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const ch = new BroadcastChannel('spl_live_scores_channel');
+        ch.postMessage({
+          type: 'TEAM_UPDATED',
+          teamId: id,
+          team: updatedTarget,
+          lastUpdated: Date.now(),
+        });
+        ch.close();
+      } catch {}
+    }
+
+    const promises: Promise<boolean>[] = [];
+    if (SupabaseService.isAvailable()) {
+      promises.push(
+        SupabaseService.updateTeamMetadata(id, updates, updatedTarget).catch(() => false)
+      );
+    }
+
+    promises.push(
+      fetch(`/api/tournament/teams/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ ...updates, fullTeam: updatedTarget }),
+      })
+        .then((res) => res.ok)
+        .catch(() => false)
+    );
+
+    const results = await Promise.all(promises);
+    lastServerScoreTime.current = Date.now();
+    return results.some(Boolean);
   };
 
   const deleteTeam = (id: string) => {
+    lastServerScoreTime.current = Date.now();
     if (SupabaseService.isAvailable()) {
       SupabaseService.deleteTeam(id).catch(() => {});
       SupabaseService.logAudit('team_deleted', 'team', id).catch(() => {});
@@ -1360,6 +1481,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const deleteTeamsBulk = (teamIds: string[]) => {
     if (!teamIds || teamIds.length === 0) return;
+    lastServerScoreTime.current = Date.now();
     const idSet = new Set(teamIds);
 
     if (SupabaseService.isAvailable()) {
@@ -1390,69 +1512,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const renameTeam = (id: string, newName: string) => {
-    setState((prev) => {
-      const target = prev.teams.find((t) => t.id === id);
-      const nextTeams = prev.teams.map((t) => (t.id === id ? { ...t, name: newName.trim() } : t));
-      if (target && SupabaseService.isAvailable()) {
-        SupabaseService.saveTeam({ ...target, name: newName.trim() }).catch(() => {});
-      }
-      fetch('/api/tournament/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
-      }).catch(() => {});
-      return {
-        ...prev,
-        teams: nextTeams,
-      };
-    });
+    void updateTeam(id, { name: newName.trim() });
   };
 
   const toggleTeamLock = (id: string) => {
-    setState((prev) => {
-      const target = prev.teams.find((t) => t.id === id);
-      const nextTeams = prev.teams.map((t) => (t.id === id ? { ...t, locked: !t.locked } : t));
-      if (target && SupabaseService.isAvailable()) {
-        SupabaseService.saveTeam({ ...target, locked: !target.locked }).catch(() => {});
-      }
-      fetch('/api/tournament/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
-      }).catch(() => {});
-      return {
-        ...prev,
-        teams: nextTeams,
-      };
-    });
+    const target = state.teams.find((t) => t.id === id);
+    if (!target) return;
+    void updateTeam(id, { locked: !target.locked });
   };
 
   const togglePlayerLockInTeam = (teamId: string, playerId: string) => {
-    setState((prev) => {
-      let updatedTarget: Team | undefined;
-      const nextTeams = prev.teams.map((t) => {
-        if (t.id !== teamId) return t;
-        const currentLocked = Array.isArray(t.lockedPlayerIds) ? t.lockedPlayerIds : [];
-        const isLocked = currentLocked.includes(playerId);
-        const nextLocked = isLocked
-          ? currentLocked.filter((id) => id !== playerId)
-          : [...currentLocked, playerId];
-        updatedTarget = { ...t, lockedPlayerIds: nextLocked };
-        return updatedTarget;
-      });
-      if (updatedTarget && SupabaseService.isAvailable()) {
-        SupabaseService.saveTeam(updatedTarget).catch(() => {});
-      }
-      fetch('/api/tournament/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
-      }).catch(() => {});
-      return {
-        ...prev,
-        teams: nextTeams,
-      };
-    });
+    const target = state.teams.find((t) => t.id === teamId);
+    if (!target) return;
+    const currentLocked = Array.isArray(target.lockedPlayerIds) ? target.lockedPlayerIds : [];
+    const isLocked = currentLocked.includes(playerId);
+    const nextLocked = isLocked
+      ? currentLocked.filter((id) => id !== playerId)
+      : [...currentLocked, playerId];
+    void updateTeam(teamId, { lockedPlayerIds: nextLocked });
   };
 
   const setTeamCaptain = (teamId: string, captainId: string) => {
@@ -1509,6 +1586,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setTeamPlayer = (teamId: string, playerIndex: number, newPlayerId: string) => {
+    lastServerScoreTime.current = Date.now();
     setState((prev) => {
       const teams = prev.teams.map((t) => ({ ...t, players: [...t.players] }));
       const currentTeam = teams.find((t) => t.id === teamId);
@@ -1542,6 +1620,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Direct Player to Team Assignment
   const assignPlayerToTeam = (teamId: string, playerId: string) => {
+    lastServerScoreTime.current = Date.now();
     setState((prev) => {
       // 1. Prevent invalid or duplicate player assignments: remove player from any other team first
       const nextTeams = prev.teams.map((t) => {
@@ -1571,6 +1650,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Direct Player Removal from Team
   const removePlayerFromTeam = (teamId: string, playerId: string) => {
+    lastServerScoreTime.current = Date.now();
     setState((prev) => {
       const nextTeams = prev.teams.map((t) => {
         if (t.id !== teamId) return t;

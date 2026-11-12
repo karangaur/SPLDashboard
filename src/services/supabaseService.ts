@@ -168,7 +168,7 @@ export class SupabaseService {
     return token || null;
   }
 
-  private static decodeShortName(shortName?: string | null): {
+  static decodeShortName(shortName?: string | null): {
     token?: string;
     lockedPlayerIds: string[];
   } {
@@ -234,6 +234,88 @@ export class SupabaseService {
     }
   }
 
+  static async updateTeamMetadata(
+    id: string,
+    updates: Partial<Team>,
+    fallbackTeam?: Team
+  ): Promise<boolean> {
+    if (!this.isAvailable() || !id) return false;
+    try {
+      const patchPayload: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      };
+
+      if (updates.name !== undefined) {
+        patchPayload.name = updates.name.trim() || fallbackTeam?.name || 'Team';
+      }
+      if (updates.badge !== undefined) {
+        patchPayload.badge = updates.badge || '🏸';
+      }
+      if (updates.avatarColor !== undefined) {
+        patchPayload.avatar_color = updates.avatarColor || 'from-amber-500 to-orange-600';
+      }
+      if (updates.locked !== undefined) {
+        patchPayload.locked = Boolean(updates.locked);
+      }
+      if (updates.captainId !== undefined) {
+        patchPayload.captain_id = updates.captainId || null;
+      }
+      if (updates.token !== undefined || updates.lockedPlayerIds !== undefined) {
+        const nextToken = updates.token !== undefined ? updates.token : fallbackTeam?.token;
+        const nextLockedPlayers =
+          updates.lockedPlayerIds !== undefined
+            ? updates.lockedPlayerIds
+            : fallbackTeam?.lockedPlayerIds;
+        patchPayload.short_name = this.encodeShortName(nextToken, nextLockedPlayers);
+      }
+
+      let { data: updatedRows, error } = await (supabase.from('teams') as any)
+        .update(patchPayload)
+        .eq('id', id)
+        .select('id');
+
+      // Retry without captain_id if foreign key reference is not yet synced in players
+      if (error && patchPayload.captain_id) {
+        const retryRes = await (supabase.from('teams') as any)
+          .update({ ...patchPayload, captain_id: null })
+          .eq('id', id)
+          .select('id');
+        updatedRows = retryRes.data;
+        error = retryRes.error;
+      }
+
+      if (error) {
+        console.error('Supabase updateTeamMetadata error:', error.message);
+      }
+
+      // If the team row does not exist yet in Supabase, upsert the full team record safely
+      if ((!updatedRows || updatedRows.length === 0) && fallbackTeam) {
+        return await this.saveTeam({ ...fallbackTeam, ...updates, id });
+      }
+
+      // Only touch team_players if roster array was explicitly included in updates
+      if (updates.players !== undefined) {
+        await supabase.from('team_players').delete().eq('team_id', id);
+        if (updates.players.length > 0) {
+          const uniquePlayers = Array.from(new Set(updates.players.filter(Boolean)));
+          const effectiveCaptain =
+            updates.captainId !== undefined ? updates.captainId : fallbackTeam?.captainId;
+          const rows = uniquePlayers.map((playerId, idx) => ({
+            team_id: id,
+            player_id: playerId,
+            slot_index: idx,
+            is_captain: effectiveCaptain === playerId,
+          }));
+          await supabase.from('team_players').insert(rows as any);
+        }
+      }
+
+      return !error && Boolean(updatedRows && updatedRows.length > 0);
+    } catch {
+      return false;
+    }
+  }
+
   static async saveTeam(team: Team): Promise<boolean> {
     if (!this.isAvailable() || !team?.id) return false;
     try {
@@ -248,7 +330,22 @@ export class SupabaseService {
         updated_at: new Date().toISOString(),
       };
 
-      await supabase.from('teams').upsert(teamPayload as any, { onConflict: 'id' });
+      let { error } = await supabase
+        .from('teams')
+        .upsert(teamPayload as any, { onConflict: 'id' });
+
+      // Fallback if captain_id foreign key fails because player record is not in public.players yet
+      if (error && teamPayload.captain_id) {
+        const retry = await supabase
+          .from('teams')
+          .upsert({ ...teamPayload, captain_id: null } as any, { onConflict: 'id' });
+        error = retry.error;
+      }
+
+      if (error) {
+        console.error('Supabase saveTeam error:', error.message);
+        return false;
+      }
 
       // Replace roster junction
       await supabase.from('team_players').delete().eq('team_id', team.id);
@@ -324,10 +421,16 @@ export class SupabaseService {
       }
 
       // Run team upsert and existing ID check in parallel
-      const [, { data: existingRows }] = await Promise.all([
+      const [upsertRes, { data: existingRows }] = await Promise.all([
         supabase.from('teams').upsert(teamPayloads as any, { onConflict: 'id' }),
         supabase.from('teams').select('id'),
       ]);
+
+      if (upsertRes.error) {
+        // Retry with captain_id nulled on FK mismatch so every team row and badge still saves
+        const safeTeamPayloads = teamPayloads.map((tp) => ({ ...tp, captain_id: null }));
+        await supabase.from('teams').upsert(safeTeamPayloads as any, { onConflict: 'id' });
+      }
 
       // Replace all roster rows in 1 bulk delete + 1 bulk insert
       await supabase.from('team_players').delete().in('team_id', keepIds);

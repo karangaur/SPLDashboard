@@ -834,10 +834,15 @@ async function startServer() {
               }
             }
 
-            const [, { data: existingRows }] = await Promise.all([
+            const [teamUpsertRes, { data: existingRows }] = await Promise.all([
               serverSupabase.from('teams').upsert(teamRows as any, { onConflict: 'id' }),
               serverSupabase.from('teams').select('id'),
             ]);
+
+            if (teamUpsertRes.error) {
+              const safeTeamRows = teamRows.map((tr: any) => ({ ...tr, captain_id: null }));
+              await serverSupabase.from('teams').upsert(safeTeamRows as any, { onConflict: 'id' });
+            }
 
             await serverSupabase.from('team_players').delete().in('team_id', keepIds);
             if (allRosterRows.length > 0) {
@@ -921,6 +926,105 @@ async function startServer() {
 
     broadcastSse('tournament_state', updated);
     res.json({ success: true, lastUpdated: now, state: updated });
+  });
+
+  // Atomic per-team update endpoint (updates badge/name/metadata strictly by unique team ID)
+  app.patch('/api/tournament/teams/:id', async (req, res) => {
+    if (!isAdminAuthorized(req)) {
+      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    }
+    const teamId = String(req.params.id || '').trim();
+    if (!teamId) {
+      return res.status(400).json({ error: 'Team ID is required' });
+    }
+
+    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const now = Date.now();
+    const nowIso = new Date(now).toISOString();
+    const { fullTeam, ...updates } = req.body || {};
+
+    let updatedTeam: any = null;
+    const existingList = Array.isArray(current.teams) ? current.teams : [];
+    const exists = existingList.some((t: any) => t && t.id === teamId);
+
+    if (exists) {
+      current.teams = existingList.map((t: any) => {
+        if (!t || t.id !== teamId) return t;
+        updatedTeam = {
+          ...t,
+          ...updates,
+          id: teamId,
+          name: updates.name !== undefined ? String(updates.name).trim() || t.name : t.name,
+          badge: updates.badge !== undefined ? String(updates.badge || '🏸') : t.badge || '🏸',
+        };
+        return updatedTeam;
+      });
+    } else if (fullTeam && typeof fullTeam === 'object') {
+      updatedTeam = {
+        ...fullTeam,
+        ...updates,
+        id: teamId,
+        name: String(updates.name ?? fullTeam.name ?? 'Team').trim() || 'Team',
+        badge: String(updates.badge ?? fullTeam.badge ?? '🏸'),
+        players: Array.isArray(updates.players ?? fullTeam.players) ? (updates.players ?? fullTeam.players) : [],
+      };
+      current.teams = [...existingList, updatedTeam];
+    } else {
+      return res.status(404).json({ error: 'Team not found' });
+    }
+
+    current.lastUpdated = now;
+    writeJSON(TOURNAMENT_FILE, current);
+
+    if (serverSupabase && updatedTeam) {
+      try {
+        const cleanLocked = Array.from(new Set<string>((updatedTeam.lockedPlayerIds || []).filter(Boolean)));
+        const encodedShortName =
+          cleanLocked.length > 0
+            ? `${updatedTeam.token || ''}::LOCKED:${cleanLocked.join(',')}`
+            : updatedTeam.token || null;
+
+        const teamRow = {
+          id: updatedTeam.id,
+          name: updatedTeam.name,
+          short_name: encodedShortName,
+          captain_id: updatedTeam.captainId || null,
+          avatar_color: updatedTeam.avatarColor || 'from-amber-500 to-orange-600',
+          badge: updatedTeam.badge || '🏸',
+          locked: Boolean(updatedTeam.locked),
+          updated_at: nowIso,
+        };
+
+        let { error: sbErr } = await serverSupabase
+          .from('teams')
+          .upsert(teamRow as any, { onConflict: 'id' });
+
+        if (sbErr && teamRow.captain_id) {
+          await serverSupabase
+            .from('teams')
+            .upsert({ ...teamRow, captain_id: null } as any, { onConflict: 'id' });
+        }
+
+        if (updates.players !== undefined && Array.isArray(updatedTeam.players)) {
+          await serverSupabase.from('team_players').delete().eq('team_id', teamId);
+          const uniquePlayers = Array.from(new Set<string>(updatedTeam.players.filter(Boolean)));
+          if (uniquePlayers.length > 0) {
+            const rosterRows = uniquePlayers.map((pid: string, idx: number) => ({
+              team_id: teamId,
+              player_id: pid,
+              slot_index: idx,
+              is_captain: updatedTeam.captainId === pid,
+            }));
+            await serverSupabase.from('team_players').insert(rosterRows as any);
+          }
+        }
+      } catch (err: any) {
+        console.error('Error syncing updated team to Supabase:', err?.message);
+      }
+    }
+
+    broadcastSse('team_updated', { teamId, team: updatedTeam, lastUpdated: now });
+    return res.json({ success: true, lastUpdated: now, team: updatedTeam });
   });
 
   // Lightweight rapid score endpoint for live polling without heavy payloads

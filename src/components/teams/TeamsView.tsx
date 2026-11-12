@@ -39,7 +39,6 @@ export const TeamsView: React.FC = () => {
     setTeams,
     deleteTeam,
     deleteTeamsBulk,
-    renameTeam,
     toggleTeamLock,
     setTeamCaptain,
     setCaptainsBulk,
@@ -50,8 +49,16 @@ export const TeamsView: React.FC = () => {
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
+  const [iconPickerTeamId, setIconPickerTeamId] = useState<string | null>(null);
   const [selectedTeamDetails, setSelectedTeamDetails] = useState<Team | null>(null);
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
+
+  const iconPickerTeam = iconPickerTeamId
+    ? state.teams.find((t) => t.id === iconPickerTeamId) || null
+    : null;
+  const activeTeamDetails = selectedTeamDetails
+    ? state.teams.find((t) => t.id === selectedTeamDetails.id) || selectedTeamDetails
+    : null;
 
   // Bulk team selection
   const [selectedTeamIds, setSelectedTeamIds] = useState<Set<string>>(new Set());
@@ -238,10 +245,7 @@ export const TeamsView: React.FC = () => {
     if (!newTeamName.trim()) return;
 
     const players = [newPlayer1, newPlayer2].filter(Boolean);
-    const created = addTeam(newTeamName.trim(), players, players[0]);
-    if (newBadge) {
-      updateTeam(created.id, { badge: newBadge });
-    }
+    addTeam(newTeamName.trim(), players, players[0], newBadge || '🏸');
 
     setCreateModalOpen(false);
     setNewTeamName('');
@@ -251,7 +255,41 @@ export const TeamsView: React.FC = () => {
     showNotification(`Team "${newTeamName.trim()}" created successfully.`);
   };
 
-  const badgesList = ['🏸', '🦅', '👑', '⚡', '🛡️', '🎯', '🥷', '🦁', '🔥', '🚀'];
+  const handleSelectTeamIcon = async (teamId: string, badgeIcon: string) => {
+    const targetTeam = state.teams.find((t) => t.id === teamId);
+    if (!targetTeam) return;
+    sportsAudio.playButtonClick();
+    setIconPickerTeamId(null);
+    await updateTeam(teamId, { badge: badgeIcon });
+    showNotification(`Updated icon for "${targetTeam.name}" to ${badgeIcon}.`);
+  };
+
+  const badgesList = [
+    '🏸',
+    '🦅',
+    '👑',
+    '⚡',
+    '🛡️',
+    '🎯',
+    '🥷',
+    '🦁',
+    '🔥',
+    '🚀',
+    '⚔️',
+    '🏆',
+    '🐉',
+    '🐯',
+    '🐺',
+    '🦈',
+    '🌟',
+    '💎',
+    '🌪️',
+    '☄️',
+    '🥇',
+    '🎖️',
+    '🏹',
+    '🔱',
+  ];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -386,9 +424,9 @@ export const TeamsView: React.FC = () => {
               >
                 <div>
                   {/* Team Card Top Strip */}
-                  <div className="p-5 pb-3 border-b border-white/5 bg-gradient-to-r from-white/[0.03] to-transparent">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3 min-w-0">
+                  <div className="p-4 sm:p-5 pb-3 border-b border-white/5 bg-gradient-to-r from-white/[0.03] to-transparent space-y-2.5">
+                    <div className="flex items-start justify-between gap-2.5">
+                      <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
                         {/* Checkbox */}
                         <div
                           onClick={(e) => handleToggleSelectTeam(team.id, e)}
@@ -401,27 +439,46 @@ export const TeamsView: React.FC = () => {
                           {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                         </div>
 
-                        <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-600/30 text-2xl border border-amber-500/20 shadow">
-                          {team.badge || '🏸'}
-                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setIconPickerTeamId(team.id);
+                          }}
+                          title={`Change icon for ${team.name}`}
+                          aria-label={`Change icon for ${team.name}`}
+                          className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-amber-500/20 to-amber-600/30 hover:from-amber-400/30 hover:to-amber-500/40 text-2xl border border-amber-500/20 hover:border-amber-400/60 shadow transition-all active:scale-95"
+                        >
+                          <span>{team.badge || '🏸'}</span>
+                          <span
+                            aria-hidden="true"
+                            className="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-slate-900 border border-amber-400/50 text-[9px] text-amber-300 shadow"
+                          >
+                            ✎
+                          </span>
+                        </button>
+
                         <div className="min-w-0">
-                          <h3 className="font-display text-lg font-black text-white truncate group-hover:text-amber-400 transition-colors">
+                          <h3 className="font-display text-base sm:text-lg font-black text-white truncate group-hover:text-amber-400 transition-colors">
                             {team.name}
                           </h3>
-                          <div className="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-400 mt-0.5">
                             {teamStanding && (
-                              <span className="font-mono font-bold text-amber-400">
-                                Rank #{standings.indexOf(teamStanding) + 1}
-                              </span>
+                              <>
+                                <span className="font-mono font-bold text-amber-400">
+                                  Rank #{standings.indexOf(teamStanding) + 1}
+                                </span>
+                                <span>·</span>
+                              </>
                             )}
-                            <span>·</span>
                             <span>{team.players.length} Players</span>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center gap-0.5 sm:gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
                         <button
+                          type="button"
                           onClick={() => setSelectedTeamDetails(team)}
                           title="View Team Details & Fixtures"
                           aria-label="View team details"
@@ -431,6 +488,7 @@ export const TeamsView: React.FC = () => {
                         </button>
 
                         <button
+                          type="button"
                           onClick={() => toggleTeamLock(team.id)}
                           title={team.locked ? 'Locked (Protected from random draws)' : 'Unlocked'}
                           aria-label={team.locked ? 'Unlock team' : 'Lock team'}
@@ -444,23 +502,43 @@ export const TeamsView: React.FC = () => {
                         </button>
 
                         <button
-                          onClick={() => setEditingTeam(team)}
-                          title="Edit team"
-                          aria-label="Edit team"
+                          type="button"
+                          onClick={() => setEditingTeam({ ...team })}
+                          title="Edit team name & icon"
+                          aria-label={`Edit ${team.name}`}
                           className="p-1.5 text-slate-500 hover:text-slate-200 transition-colors"
                         >
                           <Edit2 className="w-4 h-4" />
                         </button>
 
                         <button
+                          type="button"
                           onClick={() => setDeleteTargetId(team.id)}
                           title="Delete team"
-                          aria-label="Delete team"
+                          aria-label={`Delete ${team.name}`}
                           className="p-1.5 text-slate-500 hover:text-rose-400 transition-colors"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
+                    </div>
+
+                    {/* Dedicated Change Icon Action Row */}
+                    <div className="flex items-center justify-between gap-2 pt-0.5" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => setIconPickerTeamId(team.id)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/25 transition-colors active:scale-95"
+                      >
+                        <Sparkles className="w-3 h-3 text-amber-400 shrink-0" />
+                        <span>Change Icon</span>
+                      </button>
+
+                      {team.token && (
+                        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+                          Token {team.token}
+                        </span>
+                      )}
                     </div>
                   </div>
 
@@ -922,19 +1000,19 @@ export const TeamsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Badge / Mascot
                 </label>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
                   {badgesList.map((b) => (
                     <button
                       key={b}
                       type="button"
                       onClick={() => setNewBadge(b)}
-                      className={`h-9 w-9 rounded-xl flex items-center justify-center text-lg transition-colors ${
+                      className={`h-10 w-full rounded-xl flex items-center justify-center text-lg transition-colors ${
                         newBadge === b
-                          ? 'bg-amber-400/20 border border-amber-400'
-                          : 'bg-white/5 hover:bg-white/10'
+                          ? 'bg-amber-400/20 border border-amber-400 shadow-sm'
+                          : 'bg-white/5 border border-transparent hover:bg-white/10'
                       }`}
                     >
                       {b}
@@ -1034,19 +1112,19 @@ export const TeamsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                   Team Badge
                 </label>
-                <div className="flex flex-wrap gap-2">
+                <div className="grid grid-cols-6 sm:grid-cols-8 gap-2">
                   {badgesList.map((b) => (
                     <button
                       key={b}
                       type="button"
                       onClick={() => setEditingTeam({ ...editingTeam, badge: b })}
-                      className={`h-9 w-9 rounded-xl flex items-center justify-center text-lg transition-colors ${
-                        editingTeam.badge === b
-                          ? 'bg-amber-400/20 border border-amber-400'
-                          : 'bg-white/5 hover:bg-white/10'
+                      className={`h-10 w-full rounded-xl flex items-center justify-center text-lg transition-colors ${
+                        (editingTeam.badge || '🏸') === b
+                          ? 'bg-amber-400/20 border border-amber-400 shadow-sm'
+                          : 'bg-white/5 border border-transparent hover:bg-white/10'
                       }`}
                     >
                       {b}
@@ -1065,17 +1143,101 @@ export const TeamsView: React.FC = () => {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    renameTeam(editingTeam.id, editingTeam.name);
-                    updateTeam(editingTeam.id, { badge: editingTeam.badge });
-                    showNotification(`Updated team "${editingTeam.name}".`);
+                  onClick={async () => {
+                    const targetId = editingTeam.id;
+                    const trimmedName = editingTeam.name.trim() || editingTeam.name;
+                    const nextBadge = editingTeam.badge || '🏸';
                     setEditingTeam(null);
+                    await updateTeam(targetId, {
+                      name: trimmedName,
+                      badge: nextBadge,
+                    });
+                    showNotification(`Updated team "${trimmedName}".`);
                   }}
                   className="px-5 py-2.5 min-h-[44px] text-xs font-bold bg-amber-400 text-slate-950 rounded-xl hover:bg-amber-300 transition-colors shadow flex items-center justify-center"
                 >
                   Save Changes
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Responsive Change Team Icon Picker Modal (Keyed strictly by unique team.id) */}
+      {iconPickerTeam && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm animate-fade-in overflow-y-auto"
+          onClick={() => setIconPickerTeamId(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl glass-panel p-4 sm:p-6 shadow-2xl border border-white/10 space-y-4 my-auto max-h-[88dvh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-amber-500/20 to-amber-600/30 text-2xl border border-amber-500/30 shadow">
+                  {iconPickerTeam.badge || '🏸'}
+                </span>
+                <div className="min-w-0">
+                  <h3 className="font-bold text-white text-sm sm:text-base truncate">
+                    Change Team Icon
+                  </h3>
+                  <p className="text-xs text-amber-400 font-semibold truncate">
+                    {iconPickerTeam.name}
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setIconPickerTeamId(null)}
+                className="w-10 h-10 shrink-0 flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                aria-label="Close icon picker"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-400 leading-relaxed">
+              Select an icon below to update <strong className="text-slate-200">{iconPickerTeam.name}</strong> across Teams, Fixtures, Match Center, Umpire Mode, and Standings.
+            </p>
+
+            <div className="grid grid-cols-4 sm:grid-cols-6 gap-2.5">
+              {badgesList.map((b) => {
+                const isCurrent = (iconPickerTeam.badge || '🏸') === b;
+                return (
+                  <button
+                    key={b}
+                    type="button"
+                    onClick={() => handleSelectTeamIcon(iconPickerTeam.id, b)}
+                    aria-label={`Select icon ${b} for ${iconPickerTeam.name}`}
+                    aria-pressed={isCurrent}
+                    className={`relative min-h-[48px] rounded-xl flex items-center justify-center text-2xl transition-all active:scale-95 ${
+                      isCurrent
+                        ? 'bg-amber-400/25 border-2 border-amber-400 shadow-md shadow-amber-500/15'
+                        : 'bg-white/5 border border-white/10 hover:bg-white/10 hover:border-white/25'
+                    }`}
+                  >
+                    <span>{b}</span>
+                    {isCurrent && (
+                      <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-amber-400 text-slate-950">
+                        <Check className="w-2.5 h-2.5 stroke-[3.5]" />
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="flex items-center justify-end pt-2 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => setIconPickerTeamId(null)}
+                className="px-4 py-2 min-h-[44px] rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-white/5 transition-colors"
+              >
+                Close
+              </button>
             </div>
           </div>
         </div>
