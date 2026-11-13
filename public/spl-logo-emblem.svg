@@ -1,0 +1,106 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" width="360" height="360" fill="none">
+  <defs>
+    <linearGradient id="splGoldMain" x1="40" y1="24" x2="320" y2="336" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FEF3C7" />
+      <stop offset="35%" stop-color="#F59E0B" />
+      <stop offset="100%" stop-color="#B45309" />
+    </linearGradient>
+    <linearGradient id="splGoldSoft" x1="80" y1="40" x2="280" y2="280" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FDE68A" />
+      <stop offset="100%" stop-color="#D97706" />
+    </linearGradient>
+    <linearGradient id="splCrimson" x1="60" y1="90" x2="290" y2="240" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#EF4444" />
+      <stop offset="100%" stop-color="#EA580C" />
+    </linearGradient>
+    <linearGradient id="splObsidian" x1="180" y1="32" x2="180" y2="332" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#111622" />
+      <stop offset="100%" stop-color="#05060A" />
+    </linearGradient>
+    <linearGradient id="splPlatinum" x1="110" y1="80" x2="250" y2="210" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#F8FAFC" />
+      <stop offset="100%" stop-color="#94A3B8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Outer Geometric Championship Crest -->
+  <path
+    d="M180 20L308 66L288 214C281 268 238 312 180 338C122 312 79 268 72 214L52 66L180 20Z"
+    fill="url(#splObsidian)"
+    stroke="url(#splGoldMain)"
+    stroke-width="10"
+    stroke-linejoin="round"
+  />
+  <!-- Inner Platinum Hairline Frame -->
+  <path
+    d="M180 36L292 77L274 210C268 256 230 296 180 319C130 296 92 256 86 210L68 77L180 36Z"
+    stroke="url(#splPlatinum)"
+    stroke-opacity="0.32"
+    stroke-width="2"
+    stroke-linejoin="round"
+  />
+
+  <!-- Dynamic High-Speed Motion Wings (Electric Crimson / Fiery Orange) -->
+  <path d="M26 116L94 128L82 146L34 134L26 116Z" fill="url(#splCrimson)" />
+  <path d="M40 154L98 158L90 174L48 170L40 154Z" fill="url(#splGoldSoft)" />
+  <path d="M334 116L266 128L278 146L326 134L334 116Z" fill="url(#splCrimson)" />
+  <path d="M320 154L262 158L270 174L312 170L320 154Z" fill="url(#splGoldSoft)" />
+
+  <!-- Championship Crown Accent -->
+  <path
+    d="M144 74L154 50L180 64L206 50L216 74H144Z"
+    fill="url(#splGoldMain)"
+    stroke="#FEF3C7"
+    stroke-width="1.5"
+    stroke-linejoin="round"
+  />
+
+  <!-- Stylized Feathered Badminton Shuttlecock -->
+  <path d="M142 94L162 158H198L218 94L200 100L190 90L180 102L170 90L160 100L142 94Z" fill="url(#splPlatinum)" />
+  <path d="M158 100L168 154M180 102V154M202 100L192 154" stroke="#090D16" stroke-width="2.5" stroke-linecap="round" />
+  <rect x="160" y="156" width="40" height="8" rx="3" fill="url(#splCrimson)" />
+  <path d="M164 166H196V173C196 182 189 189 180 189C171 189 164 182 164 173V166Z" fill="url(#splGoldMain)" />
+
+  <!-- Bold Angular Geometric SPL Lettermark -->
+  <g transform="translate(0, 6)">
+    <!-- S -->
+    <path
+      d="M138 198H102L94 212V226L104 232H128L124 242H92L86 254H132L140 240V224L130 218H107L111 210H134L138 198Z"
+      fill="url(#splGoldMain)"
+      stroke="#05060A"
+      stroke-width="2.5"
+      stroke-linejoin="round"
+    />
+    <!-- P -->
+    <path
+      d="M154 198H198L204 208V228L196 236H170V254H154V198ZM170 211V223H188V211H170Z"
+      fill="#F8FAFC"
+      stroke="#05060A"
+      stroke-width="2.5"
+      stroke-linejoin="round"
+    />
+    <!-- L -->
+    <path
+      d="M218 198H235V240H268L262 254H218V198Z"
+      fill="url(#splGoldMain)"
+      stroke="#05060A"
+      stroke-width="2.5"
+      stroke-linejoin="round"
+    />
+  </g>
+
+  <!-- Crimson Divider & Subtitle -->
+  <path d="M112 273H248" stroke="url(#splCrimson)" stroke-width="3" stroke-linecap="round" />
+  <text
+    x="180"
+    y="294"
+    text-anchor="middle"
+    fill="#FDE68A"
+    font-family="Outfit, Plus Jakarta Sans, sans-serif"
+    font-size="13"
+    font-weight="900"
+    letter-spacing="2.4"
+  >
+    3.0 · CHAMPION
+  </text>
+</svg>
