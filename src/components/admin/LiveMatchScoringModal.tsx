@@ -13,6 +13,8 @@ import {
   ChevronDown,
   Layers,
   ShieldAlert,
+  RefreshCw,
+  WifiOff,
 } from 'lucide-react';
 import { Match, KnockoutMatch, Team, Player, MatchSet, BadmintonScoringRules } from '../../types/tournament';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
@@ -35,7 +37,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   initialMatchId,
   isKnockout = false,
 }) => {
-  const { state, updateMatch, updateKnockoutMatch, updateSettings } = useTournament();
+  const { state, updateMatch, updateKnockoutMatch, updateSettings, realtimeStatus, reconnectRealtime } = useTournament();
 
   const rules: BadmintonScoringRules = state.settings.scoringRules || {
     pointTarget: parseInt(state.settings.format || '21', 10) || 21,
@@ -125,12 +127,26 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
       sportsAudio.playFanfare();
     }
 
+    const activeSetEntry: MatchSet = {
+      scoreA: nextA,
+      scoreB: nextB,
+      ...(setEvaluation.isFinished && setEvaluation.winner
+        ? { winner: setEvaluation.winner, isCompleted: true }
+        : {}),
+    };
+    const updatedSets: MatchSet[] =
+      sets.length === 0
+        ? [activeSetEntry]
+        : !sets[sets.length - 1]?.isCompleted
+        ? [...sets.slice(0, -1), activeSetEntry]
+        : [...sets, activeSetEntry];
+
     const payload = {
       scoreA: nextA,
       scoreB: nextB,
       status: nextStatus,
       winner: nextWinner,
-      sets: sets.length > 0 ? sets : [{ scoreA: nextA, scoreB: nextB }],
+      sets: updatedSets,
     };
 
     if (isKnockout) {
@@ -178,8 +194,9 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   const handleNextSet = () => {
     // Record current set as finished and start set 2 or 3
     const setWinner: 'A' | 'B' = scoreA > scoreB ? 'A' : 'B';
+    const priorCompleted = sets.filter((s) => s.isCompleted);
     const archivedSets: MatchSet[] = [
-      ...sets,
+      ...priorCompleted,
       { scoreA, scoreB, winner: setWinner, isCompleted: true },
     ];
 
@@ -222,12 +239,19 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
       ? (currentMatch as any).courtName
       : state.settings.courtNames?.[courtNum - 1]?.trim() || `Court ${courtNum}`;
 
-  const matchRoundLabel =
-    'round' in currentMatch && currentMatch.round
-      ? `Round ${currentMatch.round}`
-      : 'stage' in currentMatch && (currentMatch as any).stage
-      ? String((currentMatch as any).stage)
-      : 'Match';
+  const getStageDisplay = (m: Match | KnockoutMatch) => {
+    if ('round' in m && m.round) return `Round ${m.round}`;
+    if ('stage' in m) {
+      const ko = m as KnockoutMatch;
+      if (ko.stage === 'F') return 'Grand Final';
+      if (ko.stage === 'SF') return `Semi-Final ${ko.slot || 1}`;
+      if (ko.stage === 'ELIM' || ko.stage === 'QF') return `Quarter-Final ${ko.slot || 1}`;
+    }
+    return 'Match';
+  };
+
+  const matchRoundLabel = getStageDisplay(currentMatch);
+  const courtsCount = Math.max(1, state.settings.courts || 1);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-1.5 sm:p-4 md:p-6 bg-slate-950/90 backdrop-blur-md overflow-y-auto overscroll-contain">
@@ -286,35 +310,93 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
             </div>
           </div>
 
-          {/* Second Row: Responsive Match Switcher */}
-          <div className="flex items-center gap-2 min-w-0">
+          {(realtimeStatus === 'reconnecting' || realtimeStatus === 'offline') && (
+            <div
+              role="status"
+              aria-live="polite"
+              className={`flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl text-[11px] font-bold border ${
+                realtimeStatus === 'offline'
+                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/35'
+                  : 'bg-amber-500/15 text-amber-300 border-amber-500/35'
+              }`}
+            >
+              <div className="flex items-center gap-1.5 min-w-0">
+                {realtimeStatus === 'offline' ? (
+                  <WifiOff className="w-3.5 h-3.5 shrink-0" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+                )}
+                <span className="truncate">
+                  {realtimeStatus === 'offline'
+                    ? 'No internet connection — scores will sync when back online'
+                    : 'Reconnecting live broadcast sync...'}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={reconnectRealtime}
+                className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase shrink-0"
+              >
+                Retry
+              </button>
+            </div>
+          )}
+
+          {/* Second Row: Responsive Match Switcher & Court Selector (for Knockout) */}
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
             <span className="text-[10px] sm:text-xs font-semibold text-slate-400 shrink-0 hidden xs:inline">
               Match:
             </span>
-            <div className="relative flex-1 min-w-0">
+            <div className="relative flex-1 min-w-[160px]">
               <select
                 value={selectedId}
                 onChange={(e) => setSelectedId(e.target.value)}
                 className="w-full appearance-none pl-3 pr-8 py-1.5 min-h-[38px] rounded-xl text-xs font-bold text-slate-200 bg-white/10 border border-white/15 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
               >
                 {allMatches.map((m) => {
-                  const tA = state.teams.find((t) => t.id === m.teamA)?.name || 'Team A';
-                  const tB = state.teams.find((t) => t.id === m.teamB)?.name || 'Team B';
+                  const tA = state.teams.find((t) => t.id === m.teamA)?.name || 'TBD';
+                  const tB = state.teams.find((t) => t.id === m.teamB)?.name || 'TBD';
+                  const mCourt = ('court' in m && m.court) ? m.court : 1;
                   const cLabel =
                     'courtName' in m && (m as any).courtName
                       ? (m as any).courtName
-                      : 'court' in m && m.court
-                      ? `C${m.court}`
-                      : 'KO';
+                      : state.settings.courtNames?.[mCourt - 1]?.trim() || `Court ${mCourt}`;
+                  const stageTag = 'stage' in m ? `${getStageDisplay(m)} · ` : '';
                   return (
                     <option key={m.id} value={m.id} className="bg-slate-900 text-white">
-                      {cLabel}: {tA} vs {tB} [{m.status.toUpperCase()}]
+                      {stageTag}{cLabel}: {tA} vs {tB} [{m.status.toUpperCase()}]
                     </option>
                   );
                 })}
               </select>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
+
+            {isKnockout && courtsCount > 1 && (
+              <div className="relative shrink-0">
+                <select
+                  value={courtNum}
+                  onChange={(e) => {
+                    const nextCourt = Number(e.target.value) || 1;
+                    const nextCourtName =
+                      state.settings.courtNames?.[nextCourt - 1]?.trim() || `Court ${nextCourt}`;
+                    updateKnockoutMatch(currentMatch.id, {
+                      court: nextCourt,
+                      courtName: nextCourtName,
+                    });
+                  }}
+                  aria-label="Assign Knockout Match Court"
+                  className="appearance-none pl-3 pr-7 py-1.5 min-h-[38px] rounded-xl text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 focus:outline-none focus:border-amber-400 cursor-pointer"
+                >
+                  {Array.from({ length: courtsCount }, (_, i) => i + 1).map((c) => (
+                    <option key={c} value={c} className="bg-slate-900 text-white">
+                      {state.settings.courtNames?.[c - 1]?.trim() || `Court ${c}`}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-amber-300 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            )}
           </div>
         </header>
 
@@ -446,7 +528,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
             )}
 
             <span className="text-slate-300 font-semibold">
-              Set {sets.length + 1}
+              Set {sets.filter((s) => s.isCompleted).length + 1}
             </span>
             <span className="text-slate-500 font-mono hidden xs:inline">·</span>
             <span className="text-slate-400 font-mono hidden xs:inline">

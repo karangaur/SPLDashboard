@@ -896,7 +896,7 @@ async function startServer() {
               team_b_id: m.teamB || null,
               score_a: m.scoreA != null ? m.scoreA : null,
               score_b: m.scoreB != null ? m.scoreB : null,
-              status: m.status || 'upcoming',
+              status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
               winner_id: m.winner || null,
               time: m.time || (m.courtName ? `Round ${m.round} · ${m.courtName}` : null),
               sets_json: m.sets || null,
@@ -904,6 +904,52 @@ async function startServer() {
               updated_at: nowIso,
             }));
             await serverSupabase.from('matches').upsert(matchRows as any);
+          }
+        }
+
+        // 3b. Sync Knockout Matches if provided
+        if (req.body.knockout && Array.isArray(req.body.knockout.matches)) {
+          const koList = req.body.knockout.matches;
+          const { data: existingKoMatches } = await serverSupabase
+            .from('matches')
+            .select('id')
+            .eq('tournament_season', 'season-4')
+            .eq('match_type', 'knockout');
+
+          const keepKoIds = koList.map((k: any) => String(k.id)).filter(Boolean);
+          const keepKoIdSet = new Set<string>(keepKoIds);
+
+          if (existingKoMatches && existingKoMatches.length > 0) {
+            const orphanKoIds = existingKoMatches
+              .map((m: any) => String(m.id))
+              .filter((id: string) => id && !keepKoIdSet.has(id));
+            if (orphanKoIds.length > 0) {
+              await serverSupabase.from('match_scores').delete().in('match_id', orphanKoIds);
+              await serverSupabase.from('matches').delete().in('id', orphanKoIds);
+            }
+          }
+
+          if (koList.length > 0) {
+            const koRows = koList.map((k: any) => ({
+              id: k.id,
+              tournament_season: 'season-4',
+              round: 99,
+              court: typeof k.court === 'number' ? k.court : parseInt(String(k.court || '').replace(/\D/g, '') || '1', 10) || 1,
+              match_type: 'knockout' as const,
+              stage: (k.stage === 'QF' ? 'ELIM' : k.stage) || 'SF',
+              slot: k.slot || 1,
+              team_a_id: k.teamA || null,
+              team_b_id: k.teamB || null,
+              score_a: k.scoreA != null ? k.scoreA : null,
+              score_b: k.scoreB != null ? k.scoreB : null,
+              status: k.status === 'paused' ? 'postponed' : k.status || 'upcoming',
+              winner_id: k.winner || null,
+              time: k.time || null,
+              sets_json: k.sets || null,
+              mvp_player_id: k.mvpPlayerId || null,
+              updated_at: nowIso,
+            }));
+            await serverSupabase.from('matches').upsert(koRows as any);
           }
         }
 
@@ -1053,16 +1099,17 @@ async function startServer() {
     let matchObj: any = null;
 
     // 1. Check regular matches
+    const { fullMatch: _ignoredGroupFull, isKnockout: _ignoredGroupKo, syncedToSupabase, ...cleanGroupBody } = req.body || {};
     const updatedMatches = (current.matches || []).map((m: any) => {
       if (m.id === matchId) {
         matched = true;
-        const newScoreA = sanitizeScore(req.body.scoreA !== undefined ? req.body.scoreA : m.scoreA);
-        const newScoreB = sanitizeScore(req.body.scoreB !== undefined ? req.body.scoreB : m.scoreB);
+        const newScoreA = sanitizeScore(cleanGroupBody.scoreA !== undefined ? cleanGroupBody.scoreA : m.scoreA);
+        const newScoreB = sanitizeScore(cleanGroupBody.scoreB !== undefined ? cleanGroupBody.scoreB : m.scoreB);
         const currentVersion = (m.version || 0) + 1;
 
         const updated = {
           ...m,
-          ...req.body,
+          ...cleanGroupBody,
           scoreA: newScoreA,
           scoreB: newScoreB,
           version: currentVersion,
@@ -1084,21 +1131,29 @@ async function startServer() {
       current.lastUpdated = now;
       writeJSON(TOURNAMENT_FILE, current);
 
-      // Sync to Supabase PostgreSQL if active
+      // Sync to Supabase PostgreSQL only if client did not already persist atomically
       if (serverSupabase && matchObj) {
-        serverSupabase
-          .from('matches')
-          .upsert({
-            id: matchId,
-            tournament_season: 'season-4',
-            score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
-            score_b: matchObj.scoreB != null ? matchObj.scoreB : null,
-            status: matchObj.status,
-            winner_id: matchObj.winner || null,
-            sets_json: matchObj.sets || [],
-            updated_at: new Date(now).toISOString(),
-          } as any)
-          .then(() => {});
+        if (!syncedToSupabase) {
+          serverSupabase
+            .from('matches')
+            .upsert({
+              id: matchId,
+              tournament_season: 'season-4',
+              court: typeof matchObj.court === 'number' ? matchObj.court : 1,
+              round: matchObj.round || 1,
+              team_a_id: matchObj.teamA || null,
+              team_b_id: matchObj.teamB || null,
+              score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
+              score_b: matchObj.scoreB != null ? matchObj.scoreB : null,
+              status: matchObj.status === 'paused' ? 'postponed' : matchObj.status,
+              winner_id: matchObj.winner || null,
+              time: matchObj.time || null,
+              sets_json: matchObj.sets || [],
+              mvp_player_id: matchObj.mvpPlayerId || null,
+              updated_at: new Date(now).toISOString(),
+            } as any)
+            .then(() => {});
+        }
 
         // Record point history log
         if (matchObj.scoreA != null || matchObj.scoreB != null) {
@@ -1106,7 +1161,7 @@ async function startServer() {
             .from('match_scores')
             .insert({
               match_id: matchId,
-              set_number: Array.isArray(matchObj.sets) ? matchObj.sets.length : 1,
+              set_number: Array.isArray(matchObj.sets) ? Math.max(1, matchObj.sets.length) : 1,
               score_a: matchObj.scoreA || 0,
               score_b: matchObj.scoreB || 0,
               is_completed: matchObj.status === 'completed',
@@ -1132,9 +1187,10 @@ async function startServer() {
           const newScoreB = sanitizeScore(req.body.scoreB !== undefined ? req.body.scoreB : k.scoreB);
           const currentVersion = (k.version || 0) + 1;
 
+          const { fullMatch: _ignoredFull, isKnockout: _ignoredKo, syncedToSupabase: _ignoredSynced, ...cleanBody } = req.body || {};
           const updated = {
             ...k,
-            ...req.body,
+            ...cleanBody,
             scoreA: newScoreA,
             scoreB: newScoreB,
             version: currentVersion,
@@ -1157,22 +1213,46 @@ async function startServer() {
         writeJSON(TOURNAMENT_FILE, current);
 
         if (serverSupabase && matchObj) {
-          serverSupabase
-            .from('matches')
-            .upsert({
-              id: matchId,
-              tournament_season: 'season-4',
-              match_type: 'knockout',
-              stage: matchObj.stage || 'SF',
-              slot: matchObj.slot || 1,
-              score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
-              score_b: matchObj.scoreB != null ? matchObj.scoreB : null,
-              status: matchObj.status,
-              winner_id: matchObj.winner || null,
-              sets_json: matchObj.sets || [],
-              updated_at: new Date(now).toISOString(),
-            } as any)
-            .then(() => {});
+          if (!syncedToSupabase) {
+            serverSupabase
+              .from('matches')
+              .upsert({
+                id: matchId,
+                tournament_season: 'season-4',
+                round: 99,
+                court: typeof matchObj.court === 'number' ? matchObj.court : 1,
+                match_type: 'knockout',
+                stage: (matchObj.stage === 'QF' ? 'ELIM' : matchObj.stage) || 'SF',
+                slot: matchObj.slot || 1,
+                team_a_id: matchObj.teamA || null,
+                team_b_id: matchObj.teamB || null,
+                score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
+                score_b: matchObj.scoreB != null ? matchObj.scoreB : null,
+                status: matchObj.status === 'paused' ? 'postponed' : matchObj.status,
+                winner_id: matchObj.winner || null,
+                time: matchObj.time || null,
+                sets_json: matchObj.sets || [],
+                mvp_player_id: matchObj.mvpPlayerId || null,
+                updated_at: new Date(now).toISOString(),
+              } as any)
+              .then(() => {});
+          }
+
+          if (matchObj.scoreA != null || matchObj.scoreB != null) {
+            serverSupabase
+              .from('match_scores')
+              .insert({
+                match_id: matchId,
+                set_number: Array.isArray(matchObj.sets) ? Math.max(1, matchObj.sets.length) : 1,
+                score_a: matchObj.scoreA || 0,
+                score_b: matchObj.scoreB || 0,
+                is_completed: matchObj.status === 'completed',
+                winner_team_id: matchObj.winner || null,
+                recorded_by: req.body.recordedBy || 'Official Umpire',
+                recorded_at: new Date(now).toISOString(),
+              } as any)
+              .then(() => {});
+          }
         }
 
         broadcastSse('knockout_score', { matchId, match: matchObj, lastUpdated: now });
@@ -1181,10 +1261,8 @@ async function startServer() {
     }
 
     // 3. Upsert match if created on client or sent with fullMatch details
-    const newMatch = req.body.fullMatch || {
-      id: matchId,
-      ...req.body,
-    };
+    const { fullMatch, isKnockout: bodyIsKoFlag, syncedToSupabase: bodySyncedToSupabase, ...restBody } = req.body || {};
+    const newMatch = fullMatch ? { ...fullMatch } : { id: matchId, ...restBody };
     newMatch.scoreA = sanitizeScore(newMatch.scoreA);
     newMatch.scoreB = sanitizeScore(newMatch.scoreB);
     newMatch.version = 1;
@@ -1192,6 +1270,42 @@ async function startServer() {
     if (newMatch.scoreA != null && newMatch.scoreB != null && newMatch.status === 'completed') {
       if (newMatch.scoreA > newMatch.scoreB) newMatch.winner = newMatch.teamA;
       else if (newMatch.scoreB > newMatch.scoreA) newMatch.winner = newMatch.teamB;
+    }
+
+    const bodyIsKnockout = Boolean(bodyIsKoFlag || newMatch.stage || newMatch.matchType === 'knockout');
+    if (bodyIsKnockout) {
+      current.knockout = current.knockout || { format: 'top4', matches: [] };
+      current.knockout.matches = [...(current.knockout.matches || []), newMatch];
+      current.lastUpdated = now;
+      writeJSON(TOURNAMENT_FILE, current);
+
+      if (serverSupabase && !bodySyncedToSupabase) {
+        serverSupabase
+          .from('matches')
+          .upsert({
+            id: matchId,
+            tournament_season: 'season-4',
+            round: 99,
+            court: typeof newMatch.court === 'number' ? newMatch.court : 1,
+            match_type: 'knockout',
+            stage: (newMatch.stage === 'QF' ? 'ELIM' : newMatch.stage) || 'SF',
+            slot: newMatch.slot || 1,
+            team_a_id: newMatch.teamA || null,
+            team_b_id: newMatch.teamB || null,
+            score_a: newMatch.scoreA != null ? newMatch.scoreA : null,
+            score_b: newMatch.scoreB != null ? newMatch.scoreB : null,
+            status: newMatch.status === 'paused' ? 'postponed' : newMatch.status || 'upcoming',
+            winner_id: newMatch.winner || null,
+            time: newMatch.time || null,
+            sets_json: newMatch.sets || [],
+            mvp_player_id: newMatch.mvpPlayerId || null,
+            updated_at: new Date(now).toISOString(),
+          } as any)
+          .then(() => {});
+      }
+
+      broadcastSse('knockout_score', { matchId, match: newMatch, lastUpdated: now });
+      return res.json({ success: true, lastUpdated: now, match: newMatch });
     }
 
     current.matches = current.matches || [];

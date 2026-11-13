@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   Trophy,
   Swords,
@@ -43,11 +43,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   onOpenLogin,
   onGoToAdmin,
 }) => {
-  const { state, standings } = useTournament();
+  const { state, standings, realtimeStatus, reconnectRealtime } = useTournament();
 
   const [activeMatchFilter, setActiveMatchFilter] = useState<'all' | 'live' | 'upcoming' | 'completed'>('all');
   const [selectedCourtFilter, setSelectedCourtFilter] = useState<number | 'all'>('all');
-  const [detailMatch, setDetailMatch] = useState<Match | null>(null);
+  const [detailMatchSnapshot, setDetailMatch] = useState<Match | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -66,16 +66,75 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const getTeam = (teamId?: string) => state.teams.find((t) => t.id === teamId);
   const getPlayer = (playerId?: string) => state.players.find((p) => p.id === playerId);
 
+  const formatKnockoutStageLabel = (stage?: string, slot?: number) => {
+    if (stage === 'F') return 'Grand Final';
+    if (stage === 'SF') return `Semi-Final ${slot || 1}`;
+    if (stage === 'ELIM' || stage === 'QF') return `Quarter-Final ${slot || 1}`;
+    return 'Knockout Match';
+  };
+
+  // Normalize knockout matches into unified public Match broadcast shape
+  const normalizedKnockoutMatches: Match[] = React.useMemo(() => {
+    const stageOrder: Record<string, number> = { F: 3, SF: 2, ELIM: 1, QF: 1 };
+    return [...(state.knockout?.matches || [])]
+      .sort((a, b) => {
+        const pa = stageOrder[a.stage] ?? 0;
+        const pb = stageOrder[b.stage] ?? 0;
+        if (pb !== pa) return pb - pa;
+        return (a.slot || 1) - (b.slot || 1);
+      })
+      .map((ko) => {
+        const cNum = ko.court || 1;
+        const cName =
+          ko.courtName ||
+          state.settings.courtNames?.[cNum - 1]?.trim() ||
+          `Court ${cNum}`;
+        const stageLabel = formatKnockoutStageLabel(ko.stage, ko.slot);
+        return {
+          id: ko.id,
+          round: ko.stage === 'F' ? 999 : ko.stage === 'SF' ? 998 : 997,
+          court: cNum,
+          courtName: cName,
+          teamA: ko.teamA || '',
+          teamB: ko.teamB || '',
+          scoreA: ko.scoreA,
+          scoreB: ko.scoreB,
+          status: ko.status,
+          winner: ko.winner,
+          time: ko.time || `${stageLabel} · ${cName}`,
+          sets: ko.sets,
+          mvpPlayerId: ko.mvpPlayerId,
+          version: ko.version,
+          matchType: 'knockout' as const,
+          stage: ko.stage,
+          slot: ko.slot,
+          stageLabel,
+        };
+      });
+  }, [state.knockout?.matches, state.settings.courtNames]);
+
+  // Unified broadcast + schedule list (Knockout stage matches + Regular league matches)
+  const allPublicMatches = useMemo(
+    () => [...normalizedKnockoutMatches, ...state.matches],
+    [normalizedKnockoutMatches, state.matches]
+  );
+
+  // Keep opened Match Detail Modal live-synchronized when scores/status update
+  const detailMatch = useMemo(() => {
+    if (!detailMatchSnapshot) return null;
+    return allPublicMatches.find((m) => m.id === detailMatchSnapshot.id) || detailMatchSnapshot;
+  }, [detailMatchSnapshot, allPublicMatches]);
+
   // Filtered matches for schedule showcase
-  const filteredMatches = state.matches.filter((m) => {
+  const filteredMatches = allPublicMatches.filter((m) => {
     if (activeMatchFilter !== 'all' && m.status !== activeMatchFilter) return false;
     if (selectedCourtFilter !== 'all' && m.court !== selectedCourtFilter) return false;
     return true;
   });
 
-  const liveMatchesCount = state.matches.filter((m) => m.status === 'live').length;
-  const completedCount = state.matches.filter((m) => m.status === 'completed').length;
-  const upcomingCount = state.matches.filter((m) => m.status === 'upcoming').length;
+  const liveMatchesCount = allPublicMatches.filter((m) => m.status === 'live').length;
+  const completedCount = allPublicMatches.filter((m) => m.status === 'completed').length;
+  const upcomingCount = allPublicMatches.filter((m) => m.status === 'upcoming' || m.status === 'paused').length;
 
   // Dynamic Tournament Settings derived from Supabase-synced state
   const tournamentName = (state.settings.name || 'Smash Premier League').trim();
@@ -98,13 +157,21 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const entryFeeDisplay = state.settings.entryFee ?? 500;
   const announcementText = (state.settings.announcement || '').trim();
 
-  const scrollToSection = (id: string) => {
+  const scrollToSection = useCallback((id: string) => {
     setMobileNavOpen(false);
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' });
     }
-  };
+  }, []);
+
+  const handleOpenMatchModal = useCallback((m: Match) => {
+    setDetailMatch(m);
+  }, []);
+
+  const handleGoToFixtures = useCallback(() => {
+    scrollToSection('matches-schedule');
+  }, [scrollToSection]);
 
   const copyStandingsText = () => {
     const lines = [
@@ -375,7 +442,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
                     <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Total Fixtures</span>
-                    <span className="text-lg sm:text-2xl font-black text-lime-400 font-mono">{state.matches.length} Matches</span>
+                    <span className="text-lg sm:text-2xl font-black text-lime-400 font-mono">{allPublicMatches.length} Matches</span>
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
                     <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Championship Venue</span>
@@ -422,11 +489,16 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           </div>
 
           <LiveMatchHero
-            matches={state.matches}
+            matches={allPublicMatches}
             teams={state.teams}
             players={state.players}
-            onOpenMatchModal={(m) => setDetailMatch(m)}
-            onGoToFixtures={() => scrollToSection('matches-schedule')}
+            scoringRules={state.settings.scoringRules}
+            courtNames={state.settings.courtNames}
+            venue={venueLabel}
+            realtimeStatus={realtimeStatus}
+            onRetryRealtime={reconnectRealtime}
+            onOpenMatchModal={handleOpenMatchModal}
+            onGoToFixtures={handleGoToFixtures}
           />
         </section>
 
@@ -457,7 +529,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  All ({state.matches.length})
+                  All ({allPublicMatches.length})
                 </button>
                 <button
                   onClick={() => setActiveMatchFilter('live')}
@@ -555,21 +627,31 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   >
                     <div>
                       {/* Top Badges */}
-                      <div className="flex items-center justify-between pb-3 border-b border-white/5 text-xs">
-                        <span className="font-mono text-slate-400 font-semibold truncate max-w-[200px]">
-                          Round {m.round} · {m.courtName || state.settings.courtNames?.[m.court - 1]?.trim() || `Court ${m.court}`}
+                      <div className="flex items-center justify-between pb-3 border-b border-white/5 text-xs gap-2">
+                        <span
+                          className={`font-mono font-semibold truncate max-w-[210px] ${
+                            m.matchType === 'knockout' ? 'text-amber-300 font-bold' : 'text-slate-400'
+                          }`}
+                        >
+                          {m.matchType === 'knockout'
+                            ? `${m.stage === 'F' ? '🏆 ' : ''}${m.stageLabel} · ${m.courtName || state.settings.courtNames?.[m.court - 1]?.trim() || `Court ${m.court}`}`
+                            : `Round ${m.round} · ${m.courtName || state.settings.courtNames?.[m.court - 1]?.trim() || `Court ${m.court}`}`}
                         </span>
                         {isLive ? (
-                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                          <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40 shrink-0">
                             <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
                             Live
                           </span>
+                        ) : m.status === 'paused' ? (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 shrink-0">
+                            Paused
+                          </span>
                         ) : isDone ? (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-300 shrink-0">
                             Final
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300">
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500/20 text-amber-300 shrink-0">
                             Upcoming
                           </span>
                         )}
@@ -582,18 +664,18 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                             <span className="text-xl">{tA?.badge || '🏸'}</span>
                             <span
                               className={`font-display font-bold text-sm truncate ${
-                                m.winner === m.teamA ? 'text-lime-400 font-black' : 'text-white'
+                                m.winner && m.winner === m.teamA ? 'text-lime-400 font-black' : 'text-white'
                               }`}
                             >
-                              {tA?.name || 'Team A'}
+                              {tA?.name || 'Awaiting Team'}
                             </span>
                           </div>
                           <span
                             className={`font-mono text-xl font-black ${
-                              isDone || isLive ? 'text-white' : 'text-slate-600'
+                              isDone || isLive || m.status === 'paused' ? 'text-white' : 'text-slate-600'
                             }`}
                           >
-                            {isDone || isLive ? sA : '-'}
+                            {isDone || isLive || m.status === 'paused' ? sA : '-'}
                           </span>
                         </div>
 
@@ -602,18 +684,18 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                             <span className="text-xl">{tB?.badge || '🏸'}</span>
                             <span
                               className={`font-display font-bold text-sm truncate ${
-                                m.winner === m.teamB ? 'text-lime-400 font-black' : 'text-white'
+                                m.winner && m.winner === m.teamB ? 'text-lime-400 font-black' : 'text-white'
                               }`}
                             >
-                              {tB?.name || 'Team B'}
+                              {tB?.name || 'Awaiting Team'}
                             </span>
                           </div>
                           <span
                             className={`font-mono text-xl font-black ${
-                              isDone || isLive ? 'text-white' : 'text-slate-600'
+                              isDone || isLive || m.status === 'paused' ? 'text-white' : 'text-slate-600'
                             }`}
                           >
-                            {isDone || isLive ? sB : '-'}
+                            {isDone || isLive || m.status === 'paused' ? sB : '-'}
                           </span>
                         </div>
                       </div>
@@ -1064,25 +1146,30 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </button>
 
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-lime-400 mb-1">
-              <span>Match Center Card</span>
+              <span>{detailMatch.matchType === 'knockout' ? 'Knockout Championship' : 'Match Center Card'}</span>
               <span>•</span>
               <span>{detailMatch.courtName || state.settings.courtNames?.[detailMatch.court - 1]?.trim() || `Court ${detailMatch.court}`}</span>
             </div>
 
             <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">
-              Round {detailMatch.round} Fixture Breakdown
+              {detailMatch.matchType === 'knockout'
+                ? `${detailMatch.stageLabel || 'Knockout Stage'} Breakdown`
+                : `Round ${detailMatch.round} Fixture Breakdown`}
             </h3>
 
             {/* Scorecard Body */}
             <div className="mt-6 p-5 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-white text-base">{getTeam(detailMatch.teamA)?.name || 'Team A'}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {(getTeam(detailMatch.teamA)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
-                  </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-2xl shrink-0">{getTeam(detailMatch.teamA)?.badge || '🏸'}</span>
+                  <div className="min-w-0">
+                    <p className="font-bold text-white text-base truncate">{getTeam(detailMatch.teamA)?.name || 'Awaiting Team'}</p>
+                    <p className="text-xs text-slate-400 mt-0.5 truncate">
+                      {(getTeam(detailMatch.teamA)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
+                    </p>
+                  </div>
                 </div>
-                <span className="text-3xl font-black font-mono text-lime-400">
+                <span className="text-3xl font-black font-mono text-lime-400 shrink-0">
                   {detailMatch.scoreA ?? 0}
                 </span>
               </div>
@@ -1111,14 +1198,17 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="font-bold text-white text-base">{getTeam(detailMatch.teamB)?.name || 'Team B'}</p>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {(getTeam(detailMatch.teamB)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
-                  </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-2xl shrink-0">{getTeam(detailMatch.teamB)?.badge || '🏸'}</span>
+                  <div className="min-w-0">
+                    <p className="font-bold text-white text-base truncate">{getTeam(detailMatch.teamB)?.name || 'Awaiting Team'}</p>
+                    <p className="text-xs text-slate-400 mt-0.5 truncate">
+                      {(getTeam(detailMatch.teamB)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
+                    </p>
+                  </div>
                 </div>
-                <span className="text-3xl font-black font-mono text-white">
+                <span className="text-3xl font-black font-mono text-white shrink-0">
                   {detailMatch.scoreB ?? 0}
                 </span>
               </div>

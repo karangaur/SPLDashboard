@@ -46,7 +46,7 @@ export const KnockoutView: React.FC = () => {
     playerId ? state.players.find((p) => p.id === playerId) : undefined;
 
   const elimMatches = state.knockout.matches
-    .filter((m) => m.stage === 'ELIM')
+    .filter((m) => m.stage === 'ELIM' || m.stage === 'QF')
     .sort((a, b) => a.slot - b.slot);
   const sfMatches = state.knockout.matches
     .filter((m) => m.stage === 'SF')
@@ -331,13 +331,13 @@ export const KnockoutView: React.FC = () => {
       {/* Visual Bracket Grid */}
       {state.knockout.matches.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 sm:gap-6">
-          {/* Column 1: Eliminator Round (if top 8) */}
+          {/* Column 1: Quarter-Finals / Eliminator Round (if top 8) */}
           {elimMatches.length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2 pb-1 border-b border-white/10">
                 <Flame className="w-4 h-4 text-amber-500" />
                 <h3 className="font-display font-bold text-base text-white uppercase tracking-wider">
-                  Eliminator Round
+                  Quarter-Finals / Eliminators
                 </h3>
               </div>
 
@@ -346,7 +346,7 @@ export const KnockoutView: React.FC = () => {
                   <KnockoutMatchCard
                     key={m.id}
                     match={m}
-                    matchLabel={`Eliminator ${idx + 1}`}
+                    matchLabel={`Quarter-Final ${idx + 1}`}
                     onScoreSubmit={handleScoreChange}
                     onOpenUmpire={(id) => setLiveScoringMatchId(id)}
                     editMode={editMode}
@@ -466,15 +466,23 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
   onScoreSubmit,
   onOpenUmpire,
 }) => {
-  const { state } = useTournament();
+  const { state, updateKnockoutMatch } = useTournament();
   const [scoreA, setScoreA] = useState(match.scoreA?.toString() ?? '');
   const [scoreB, setScoreB] = useState(match.scoreB?.toString() ?? '');
+
+  React.useEffect(() => {
+    setScoreA(match.scoreA?.toString() ?? '');
+    setScoreB(match.scoreB?.toString() ?? '');
+  }, [match.scoreA, match.scoreB]);
 
   const teamA = match.teamA ? state.teams.find((t) => t.id === match.teamA) : undefined;
   const teamB = match.teamB ? state.teams.find((t) => t.id === match.teamB) : undefined;
 
   const isAWinner = match.winner === match.teamA;
   const isBWinner = match.winner === match.teamB;
+
+  const courtNum = match.court || 1;
+  const courtDisplay = match.courtName || state.settings.courtNames?.[courtNum - 1]?.trim() || `Court ${courtNum}`;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -484,16 +492,33 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
   return (
     <div
       className={`rounded-2xl glass-card p-4 border transition-all space-y-3 ${
-        isFinal
+        match.status === 'live'
+          ? 'border-rose-500/50 bg-rose-500/[0.04] shadow-lg shadow-rose-500/10'
+          : isFinal
           ? 'border-amber-500/40 gold-glow bg-amber-500/5'
           : match.status === 'completed'
           ? 'border-white/15'
           : 'border-white/5'
       }`}
     >
-      <div className="flex items-center justify-between text-xs pb-2 border-b border-white/10">
-        <span className="font-bold text-slate-400 uppercase tracking-wider">{matchLabel}</span>
-        <div className="flex items-center gap-1.5">
+      <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-2 border-b border-white/10">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="font-bold text-slate-300 uppercase tracking-wider truncate">{matchLabel}</span>
+          <span className="px-1.5 py-0.5 rounded bg-white/5 border border-white/10 text-[10px] font-mono text-slate-400 shrink-0">
+            {courtDisplay}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5 shrink-0">
+          {teamA && teamB && match.status === 'upcoming' && (
+            <button
+              type="button"
+              onClick={() => updateKnockoutMatch(match.id, { status: 'live', scoreA: match.scoreA ?? 0, scoreB: match.scoreB ?? 0 })}
+              className="px-2 py-0.5 rounded-lg text-[10px] font-black text-slate-950 bg-emerald-400 hover:bg-emerald-300 transition-all active:scale-95"
+              title="Set this knockout match to LIVE broadcast immediately"
+            >
+              Go Live
+            </button>
+          )}
           {teamA && teamB && onOpenUmpire && (
             <button
               onClick={() => onOpenUmpire(match.id)}
@@ -503,6 +528,17 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
               <Maximize2 className="w-3 h-3" />
               <span>Umpire</span>
             </button>
+          )}
+          {match.status === 'live' && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-500/20 text-rose-300 border border-rose-500/40">
+              <span className="w-1.5 h-1.5 rounded-full bg-rose-400 animate-pulse" />
+              LIVE
+            </span>
+          )}
+          {match.status === 'paused' && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
+              PAUSED
+            </span>
           )}
           {match.status === 'completed' && (
             <span className="text-[10px] font-bold text-emerald-400 flex items-center gap-1">

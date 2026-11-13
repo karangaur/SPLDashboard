@@ -550,29 +550,48 @@ export class SupabaseService {
       const groupMatches: Match[] = [];
       const koMatches: KnockoutMatch[] = [];
 
+      const stageOrder: Record<string, number> = { ELIM: 1, QF: 1, SF: 2, F: 3 };
+
       for (const m of data as DbMatch[]) {
+        const normalizedStatus =
+          (m.status as any) === 'paused' || m.status === 'postponed'
+            ? 'paused'
+            : m.status === 'live'
+            ? 'live'
+            : m.status === 'completed'
+            ? 'completed'
+            : 'upcoming';
+        const parsedCourt =
+          typeof m.court === 'number'
+            ? m.court
+            : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1;
+
         if (m.match_type === 'knockout') {
           koMatches.push({
             id: m.id,
             stage: (m.stage as any) || 'SF',
             slot: m.slot || 1,
+            court: parsedCourt,
+            time: m.time || undefined,
             teamA: m.team_a_id || undefined,
             teamB: m.team_b_id || undefined,
             scoreA: m.score_a != null ? m.score_a : undefined,
             scoreB: m.score_b != null ? m.score_b : undefined,
-            status: m.status === 'live' ? 'live' : m.status === 'completed' ? 'completed' : 'upcoming',
+            status: normalizedStatus,
             winner: m.winner_id || undefined,
+            sets: m.sets_json || undefined,
+            mvpPlayerId: m.mvp_player_id || undefined,
           });
         } else {
           groupMatches.push({
             id: m.id,
             round: m.round,
-            court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
+            court: parsedCourt,
             teamA: m.team_a_id || '',
             teamB: m.team_b_id || '',
             scoreA: m.score_a != null ? m.score_a : undefined,
             scoreB: m.score_b != null ? m.score_b : undefined,
-            status: m.status,
+            status: normalizedStatus,
             winner: m.winner_id || undefined,
             time: m.time || undefined,
             sets: m.sets_json || undefined,
@@ -581,9 +600,61 @@ export class SupabaseService {
         }
       }
 
+      koMatches.sort((a, b) => {
+        const sa = stageOrder[a.stage] ?? 9;
+        const sb = stageOrder[b.stage] ?? 9;
+        if (sa !== sb) return sa - sb;
+        return (a.slot || 1) - (b.slot || 1);
+      });
+
       return { matches: groupMatches, knockout: koMatches };
     } catch {
       return null;
+    }
+  }
+
+  // Per-match tail-coalescing write queue prevents out-of-order HTTP races on rapid +1/-1 clicks
+  // while keeping independent courts running concurrently.
+  private static matchScoreInFlight = new Set<string>();
+  private static matchScorePending = new Map<
+    string,
+    { payload: Record<string, any>; season: string; resolvers: ((ok: boolean) => void)[] }
+  >();
+
+  private static async flushMatchScoreQueue(matchId: string): Promise<void> {
+    if (this.matchScoreInFlight.has(matchId)) return;
+    this.matchScoreInFlight.add(matchId);
+
+    try {
+      while (true) {
+        const pending = this.matchScorePending.get(matchId);
+        if (!pending) break;
+        this.matchScorePending.delete(matchId);
+
+        let success = false;
+        try {
+          const { error } = await supabase
+            .from('matches')
+            .upsert({ id: matchId, tournament_season: pending.season, ...pending.payload } as any);
+          success = !error;
+          if (error) {
+            console.error('[SupabaseService] updateMatchScore failed:', error.message);
+          }
+        } catch (err) {
+          console.error('[SupabaseService] updateMatchScore exception:', err);
+          success = false;
+        }
+
+        for (const resolve of pending.resolvers) {
+          resolve(success);
+        }
+      }
+    } finally {
+      this.matchScoreInFlight.delete(matchId);
+      // Guard against a write queued right before finally ran
+      if (this.matchScorePending.has(matchId)) {
+        void this.flushMatchScoreQueue(matchId);
+      }
     }
   }
 
@@ -599,22 +670,50 @@ export class SupabaseService {
         updated_at: new Date().toISOString(),
       };
 
-      if (updates.scoreA !== undefined) payload.score_a = updates.scoreA;
-      if (updates.scoreB !== undefined) payload.score_b = updates.scoreB;
-      if (updates.status !== undefined) payload.status = updates.status;
-      if (updates.winner !== undefined) payload.winner_id = updates.winner;
-      if ('sets' in updates && updates.sets) payload.sets_json = updates.sets;
-      if ('teamA' in updates && updates.teamA) payload.team_a_id = updates.teamA;
-      if ('teamB' in updates && updates.teamB) payload.team_b_id = updates.teamB;
-      if ('stage' in updates && (updates as any).stage) payload.stage = (updates as any).stage;
-      if ('slot' in updates && (updates as any).slot) payload.slot = (updates as any).slot;
-      if (isKnockout) payload.match_type = 'knockout';
+      if ('scoreA' in updates) payload.score_a = updates.scoreA ?? null;
+      if ('scoreB' in updates) payload.score_b = updates.scoreB ?? null;
+      if (updates.status !== undefined) {
+        // DB CHECK allows: 'upcoming', 'live', 'completed', 'postponed'
+        payload.status = updates.status === 'paused' ? 'postponed' : updates.status;
+      }
+      if ('winner' in updates) payload.winner_id = updates.winner || null;
+      if ('sets' in updates) payload.sets_json = updates.sets ?? null;
+      if ('teamA' in updates) payload.team_a_id = updates.teamA || null;
+      if ('teamB' in updates) payload.team_b_id = updates.teamB || null;
+      if ('court' in updates && updates.court != null) {
+        payload.court =
+          typeof updates.court === 'number'
+            ? updates.court
+            : parseInt(String(updates.court).replace(/\D/g, '') || '1', 10) || 1;
+      }
+      if ('time' in updates) payload.time = updates.time || null;
+      if ('mvpPlayerId' in updates) payload.mvp_player_id = updates.mvpPlayerId || null;
+      if ('stage' in updates && (updates as any).stage) {
+        const st = String((updates as any).stage);
+        payload.stage = st === 'QF' ? 'ELIM' : st;
+      }
+      if ('slot' in updates && (updates as any).slot != null) payload.slot = (updates as any).slot;
+      if (isKnockout) {
+        payload.match_type = 'knockout';
+        payload.round = 99;
+      }
 
-      const { error } = await supabase
-        .from('matches')
-        .upsert({ id: matchId, tournament_season: season, ...payload } as any);
-
-      return !error;
+      return await new Promise<boolean>((resolve) => {
+        const existing = this.matchScorePending.get(matchId);
+        if (existing) {
+          // Merge latest updates on top of pending write so the newest score always wins
+          existing.payload = { ...existing.payload, ...payload };
+          existing.season = season;
+          existing.resolvers.push(resolve);
+        } else {
+          this.matchScorePending.set(matchId, {
+            payload,
+            season,
+            resolvers: [resolve],
+          });
+        }
+        void this.flushMatchScoreQueue(matchId);
+      });
     } catch {
       return false;
     }
@@ -784,16 +883,19 @@ export class SupabaseService {
         id: m.id,
         tournament_season: season,
         round: 99,
-        court: 1,
+        court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1,
         match_type: 'knockout' as const,
-        stage: m.stage || 'SF',
+        stage: (m.stage === 'QF' ? 'ELIM' : m.stage) || 'SF',
         slot: m.slot || 1,
         team_a_id: m.teamA || null,
         team_b_id: m.teamB || null,
         score_a: m.scoreA != null ? m.scoreA : null,
         score_b: m.scoreB != null ? m.scoreB : null,
-        status: m.status,
+        status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
         winner_id: m.winner || null,
+        time: m.time || null,
+        sets_json: m.sets || null,
+        mvp_player_id: m.mvpPlayerId || null,
         updated_at: new Date().toISOString(),
       }));
       const { error } = await supabase.from('matches').upsert(rows as any);
@@ -803,9 +905,30 @@ export class SupabaseService {
     }
   }
 
+  static async replaceKnockoutMatches(matches: KnockoutMatch[], season = 'season-4'): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      await this.clearKnockoutMatches(season);
+      if (matches.length === 0) return true;
+      return await this.batchSaveKnockoutMatches(matches, season);
+    } catch {
+      return false;
+    }
+  }
+
   static async clearKnockoutMatches(season = 'season-4'): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      const { data: existing } = await supabase
+        .from('matches')
+        .select('id')
+        .eq('tournament_season', season)
+        .eq('match_type', 'knockout');
+
+      const ids = (existing || []).map((m: any) => m.id);
+      if (ids.length > 0) {
+        await supabase.from('match_scores').delete().in('match_id', ids);
+      }
       const { error } = await supabase
         .from('matches')
         .delete()
@@ -1606,11 +1729,25 @@ export class SupabaseService {
   // ============================================================================
   // 9. SUPABASE REALTIME LIVE SCORE & REGISTRATION SUBSCRIPTIONS
   // ============================================================================
+  private static cleanupExistingChannels(channelName: string) {
+    try {
+      const existingChannels = supabase.getChannels?.() || [];
+      for (const ch of existingChannels) {
+        const topic = (ch as any)?.topic || '';
+        if (topic === channelName || topic === `realtime:${channelName}`) {
+          void supabase.removeChannel(ch);
+        }
+      }
+    } catch {}
+  }
+
   static subscribeLiveMatches(onMatchChange: (payload: any) => void) {
     if (!this.isAvailable()) return () => {};
     try {
+      const channelName = 'spl-live-matches-channel';
+      this.cleanupExistingChannels(channelName);
       const channel = supabase
-        .channel('spl-live-matches-channel')
+        .channel(channelName)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'matches' },
@@ -1621,7 +1758,9 @@ export class SupabaseService {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        try {
+          void supabase.removeChannel(channel);
+        } catch {}
       };
     } catch {
       return () => {};
@@ -1631,8 +1770,10 @@ export class SupabaseService {
   static subscribeRegistrations(onRegChange: (payload: any) => void) {
     if (!this.isAvailable()) return () => {};
     try {
+      const channelName = 'spl-live-registrations-channel';
+      this.cleanupExistingChannels(channelName);
       const channel = supabase
-        .channel('spl-live-registrations-channel')
+        .channel(channelName)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'registrations' },
@@ -1643,7 +1784,9 @@ export class SupabaseService {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        try {
+          void supabase.removeChannel(channel);
+        } catch {}
       };
     } catch {
       return () => {};
@@ -1653,8 +1796,10 @@ export class SupabaseService {
   static subscribePlayers(onPlayerChange: (payload: any) => void) {
     if (!this.isAvailable()) return () => {};
     try {
+      const channelName = 'spl-live-players-channel';
+      this.cleanupExistingChannels(channelName);
       const channel = supabase
-        .channel('spl-live-players-channel')
+        .channel(channelName)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'players' },
@@ -1665,7 +1810,9 @@ export class SupabaseService {
         .subscribe();
 
       return () => {
-        supabase.removeChannel(channel);
+        try {
+          void supabase.removeChannel(channel);
+        } catch {}
       };
     } catch {
       return () => {};
@@ -1674,51 +1821,70 @@ export class SupabaseService {
 
   static subscribeTournamentMaster(handlers: TournamentRealtimeHandlers): () => void {
     if (!this.isAvailable()) return () => {};
+    let disposed = false;
     try {
+      const channelName = 'spl-master-realtime-channel';
+      this.cleanupExistingChannels(channelName);
+
       const channel = supabase
-        .channel('spl-master-realtime-channel')
+        .channel(channelName)
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'matches' },
-          (payload: any) => handlers.onMatchChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onMatchChange?.(payload);
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'players' },
-          (payload: any) => handlers.onPlayerChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onPlayerChange?.(payload);
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'teams' },
-          (payload: any) => handlers.onTeamChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onTeamChange?.(payload);
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'team_players' },
-          (payload: any) => handlers.onTeamPlayerChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onTeamPlayerChange?.(payload);
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'registrations' },
-          (payload: any) => handlers.onRegistrationChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onRegistrationChange?.(payload);
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'tournament_standings' },
-          (payload: any) => handlers.onStandingsChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onStandingsChange?.(payload);
+          }
         )
         .on(
           'postgres_changes',
           { event: '*', schema: 'public', table: 'registration_form_config' },
-          (payload: any) => handlers.onFormConfigChange?.(payload)
+          (payload: any) => {
+            if (!disposed) handlers.onFormConfigChange?.(payload);
+          }
         )
         .subscribe((status) => {
-          handlers.onStatusChange?.(status);
+          if (!disposed) handlers.onStatusChange?.(status);
         });
 
       return () => {
+        disposed = true;
         try {
-          supabase.removeChannel(channel);
+          void supabase.removeChannel(channel);
         } catch {}
       };
     } catch {

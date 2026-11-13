@@ -168,3 +168,371 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.25);
 }
+
+/* Semi-Final Championship Broadcast Compositor Animations */
+@keyframes splSpotlightLeft {
+  0%, 100% {
+    transform: rotate(-18deg) translate3d(-4%, -2%, 0) scale(1);
+    opacity: 0.22;
+  }
+  50% {
+    transform: rotate(-8deg) translate3d(6%, 2%, 0) scale(1.06);
+    opacity: 0.36;
+  }
+}
+
+@keyframes splSpotlightRight {
+  0%, 100% {
+    transform: rotate(18deg) translate3d(4%, -2%, 0) scale(1);
+    opacity: 0.22;
+  }
+  50% {
+    transform: rotate(8deg) translate3d(-6%, 2%, 0) scale(1.06);
+    opacity: 0.36;
+  }
+}
+
+@keyframes splParticleFloat {
+  0%, 100% {
+    transform: translate3d(0, 0, 0) scale(0.95);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translate3d(0, -18px, 0) scale(1.15);
+    opacity: 0.7;
+  }
+}
+
+@keyframes splChampionshipSheen {
+  0% {
+    transform: translate3d(-120%, 0, 0);
+  }
+  100% {
+    transform: translate3d(220%, 0, 0);
+  }
+}
+
+@keyframes splVsPulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.45;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 0.8;
+  }
+}
+
+.spl-spotlight-left {
+  animation: splSpotlightLeft 8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.spl-spotlight-right {
+  animation: splSpotlightRight 9s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.spl-particle-float {
+  animation: splParticleFloat 6s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.spl-championship-sheen {
+  animation: splChampionshipSheen 4.5s ease-in-out infinite;
+  will-change: transform;
+}
+
+.spl-vs-pulse {
+  animation: splVsPulse 2.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Grand Final Black & Gold Championship Animations */
+@keyframes splGoldParticleRise {
+  0%, 100% {
+    transform: translate3d(0, 8px, 0) scale(0.9);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translate3d(0, -22px, 0) scale(1.2);
+    opacity: 0.85;
+  }
+}
+
+@keyframes splTrophyGlow {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.65;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.95;
+  }
+}
+
+@keyframes splGfBannerReveal {
+  0% {
+    transform: translate3d(0, -14px, 0) scale(0.97);
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes splGfEnterLeft {
+  0% {
+    transform: translate3d(-38px, 0, 0) scale(0.96);
+    opacity: 0.15;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes splGfEnterRight {
+  0% {
+    transform: translate3d(38px, 0, 0) scale(0.96);
+    opacity: 0.15;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes splGfVsBurst {
+  0% {
+    transform: scale(0.55) rotate(-14deg);
+    opacity: 0.2;
+  }
+  55% {
+    transform: scale(1.18) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(3deg);
+    opacity: 1;
+  }
+}
+
+@keyframes splGfScoreboardReveal {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.4;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.spl-gold-particle {
+  animation: splGoldParticleRise 5.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.spl-trophy-glow {
+  animation: splTrophyGlow 3s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.spl-gf-banner-reveal {
+  animation: splGfBannerReveal 0.65s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.spl-gf-enter-left {
+  animation: splGfEnterLeft 0.75s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+  will-change: transform, opacity;
+}
+
+.spl-gf-enter-right {
+  animation: splGfEnterRight 0.75s cubic-bezier(0.16, 1, 0.3, 1) 0.18s both;
+  will-change: transform, opacity;
+}
+
+.spl-gf-vs-burst {
+  animation: splGfVsBurst 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.32s both;
+  will-change: transform, opacity;
+}
+
+.spl-gf-scoreboard-reveal {
+  animation: splGfScoreboardReveal 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.45s both;
+  will-change: transform, opacity;
+}
+
+/* Winner Celebration Confetti & Banner Animations */
+@keyframes splConfettiFall {
+  0% {
+    transform: translate3d(0, -18px, 0) rotate(0deg) scale(0.9);
+    opacity: 0;
+  }
+  12% {
+    opacity: 1;
+  }
+  80% {
+    opacity: 0.9;
+  }
+  100% {
+    transform: translate3d(var(--spl-drift, 14px), 340px, 0) rotate(520deg) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes splWinnerBannerIn {
+  0% {
+    transform: translate3d(0, 10px, 0) scale(0.97);
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+.spl-winner-banner-in {
+  animation: splWinnerBannerIn 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.spl-confetti-piece {
+  position: absolute;
+  top: -10px;
+  border-radius: 2px;
+  pointer-events: none;
+  animation: splConfettiFall 2.9s cubic-bezier(0.2, 0.7, 0.4, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.spl-confetti-piece:nth-child(1) { left: 5%; width: 8px; height: 12px; animation-delay: 0s; --spl-drift: 18px; }
+.spl-confetti-piece:nth-child(2) { left: 10%; width: 7px; height: 10px; animation-delay: 0.14s; --spl-drift: -16px; }
+.spl-confetti-piece:nth-child(3) { left: 16%; width: 9px; height: 12px; animation-delay: 0.06s; --spl-drift: 22px; }
+.spl-confetti-piece:nth-child(4) { left: 22%; width: 6px; height: 10px; animation-delay: 0.24s; --spl-drift: -20px; }
+.spl-confetti-piece:nth-child(5) { left: 28%; width: 8px; height: 11px; animation-delay: 0.1s; --spl-drift: 14px; }
+.spl-confetti-piece:nth-child(6) { left: 34%; width: 7px; height: 13px; animation-delay: 0.28s; --spl-drift: -18px; }
+.spl-confetti-piece:nth-child(7) { left: 40%; width: 9px; height: 10px; animation-delay: 0.04s; --spl-drift: 24px; }
+.spl-confetti-piece:nth-child(8) { left: 46%; width: 6px; height: 11px; animation-delay: 0.2s; --spl-drift: -14px; }
+.spl-confetti-piece:nth-child(9) { left: 52%; width: 8px; height: 12px; animation-delay: 0.12s; --spl-drift: 16px; }
+.spl-confetti-piece:nth-child(10) { left: 58%; width: 7px; height: 10px; animation-delay: 0.3s; --spl-drift: -22px; }
+.spl-confetti-piece:nth-child(11) { left: 64%; width: 9px; height: 12px; animation-delay: 0.08s; --spl-drift: 18px; }
+.spl-confetti-piece:nth-child(12) { left: 70%; width: 6px; height: 11px; animation-delay: 0.22s; --spl-drift: -16px; }
+.spl-confetti-piece:nth-child(13) { left: 76%; width: 8px; height: 12px; animation-delay: 0.16s; --spl-drift: 20px; }
+.spl-confetti-piece:nth-child(14) { left: 82%; width: 7px; height: 10px; animation-delay: 0.02s; --spl-drift: -20px; }
+.spl-confetti-piece:nth-child(15) { left: 88%; width: 9px; height: 12px; animation-delay: 0.26s; --spl-drift: 14px; }
+.spl-confetti-piece:nth-child(16) { left: 93%; width: 7px; height: 11px; animation-delay: 0.12s; --spl-drift: -18px; }
+.spl-confetti-piece:nth-child(17) { left: 19%; width: 7px; height: 9px; animation-delay: 0.36s; --spl-drift: 16px; }
+.spl-confetti-piece:nth-child(18) { left: 73%; width: 7px; height: 9px; animation-delay: 0.34s; --spl-drift: -16px; }
+
+/* Grand Final Championship Ceremony Sequence Animations */
+@keyframes splGfTrophyRise {
+  0% {
+    transform: translate3d(0, 56px, 0) scale(0.55);
+    opacity: 0;
+  }
+  65% {
+    transform: translate3d(0, -6px, 0) scale(1.06);
+    opacity: 1;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+@keyframes splGfTrophySpin3d {
+  0% {
+    transform: perspective(700px) rotateY(-28deg);
+  }
+  50% {
+    transform: perspective(700px) rotateY(28deg);
+  }
+  100% {
+    transform: perspective(700px) rotateY(-28deg);
+  }
+}
+
+@keyframes splFireworkBurst {
+  0% {
+    transform: scale(0.25);
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.95;
+  }
+  100% {
+    transform: scale(1.75);
+    opacity: 0;
+  }
+}
+
+@keyframes splChampionTextReveal {
+  0% {
+    transform: translate3d(0, 16px, 0) scale(0.95);
+    opacity: 0;
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+    opacity: 1;
+  }
+}
+
+.spl-gf-trophy-rise {
+  animation: splGfTrophyRise 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+.spl-gf-trophy-spin3d {
+  animation: splGfTrophySpin3d 4.2s ease-in-out infinite;
+  will-change: transform;
+}
+
+.spl-firework-burst {
+  animation: splFireworkBurst 1.6s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  will-change: transform, opacity;
+}
+
+.spl-firework-delay-1 {
+  animation-delay: 0.45s;
+}
+
+.spl-firework-delay-2 {
+  animation-delay: 0.9s;
+}
+
+.spl-champion-text-reveal {
+  animation: splChampionTextReveal 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spl-spotlight-left,
+  .spl-spotlight-right,
+  .spl-particle-float,
+  .spl-championship-sheen,
+  .spl-vs-pulse,
+  .spl-gold-particle,
+  .spl-trophy-glow,
+  .spl-gf-banner-reveal,
+  .spl-gf-enter-left,
+  .spl-gf-enter-right,
+  .spl-gf-vs-burst,
+  .spl-gf-scoreboard-reveal,
+  .spl-winner-banner-in,
+  .spl-gf-trophy-rise,
+  .spl-gf-trophy-spin3d,
+  .spl-champion-text-reveal {
+    animation: none;
+    transform: none;
+    opacity: 1;
+  }
+  .spl-confetti-piece,
+  .spl-firework-burst {
+    display: none;
+    animation: none;
+  }
+}
+

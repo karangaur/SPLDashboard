@@ -25,6 +25,7 @@ import {
   Shield,
   Sparkles,
   ExternalLink,
+  WifiOff,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { AuthService, AdminUser } from '../../services/authService';
@@ -43,7 +44,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
   onLogout,
   onViewPublicHome,
 }) => {
-  const { state, updateMatch, updateKnockoutMatch } = useTournament();
+  const { state, updateMatch, updateKnockoutMatch, realtimeStatus, reconnectRealtime } = useTournament();
 
   const [activeTab, setActiveTab] = useState<'scoring' | 'players'>('scoring');
   const [matchTypeFilter, setMatchTypeFilter] = useState<'all' | 'live' | 'upcoming' | 'completed' | 'knockout'>('all');
@@ -70,7 +71,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
         ...km,
         isKnockout: true,
         round: km.stage === 'F' ? 99 : km.stage === 'SF' ? 90 : 80,
-        court: 1,
+        court: km.court || 1,
       }));
     }
 
@@ -98,7 +99,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
         ...foundKo,
         isKnockout: true,
         round: foundKo.stage === 'F' ? 99 : foundKo.stage === 'SF' ? 90 : 80,
-        court: 1,
+        court: foundKo.court || 1,
       } as any;
     }
     return matches[0] || null;
@@ -169,9 +170,9 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     if (confirm('Reset scores for this match to 0-0?')) {
       sportsAudio.playButtonClick();
       if (isKo) {
-        updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live' });
+        updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
       } else {
-        updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live' });
+        updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
       }
     }
   };
@@ -305,6 +306,38 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
         {activeTab === 'scoring' ? (
           /* TAB 1: LIVE MATCH SCORING CONSOLE */
           <div className="space-y-6">
+            {(realtimeStatus === 'reconnecting' || realtimeStatus === 'offline') && (
+              <div
+                role="status"
+                aria-live="polite"
+                className={`p-3 rounded-2xl border flex items-center justify-between gap-2 text-xs font-bold ${
+                  realtimeStatus === 'offline'
+                    ? 'bg-rose-500/15 border-rose-500/35 text-rose-300'
+                    : 'bg-amber-500/15 border-amber-500/35 text-amber-300'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  {realtimeStatus === 'offline' ? (
+                    <WifiOff className="w-4 h-4 shrink-0" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 animate-spin shrink-0" />
+                  )}
+                  <span>
+                    {realtimeStatus === 'offline'
+                      ? 'Offline — Live broadcast synchronization is paused until internet reconnects.'
+                      : 'Connection interrupted — Reconnecting to live broadcast database...'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={reconnectRealtime}
+                  className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-[11px] font-black uppercase shrink-0"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
             {/* Real-time synchronization notice */}
             <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-cyan-300">
               <div className="flex items-center gap-2">

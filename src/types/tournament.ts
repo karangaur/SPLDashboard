@@ -71,12 +71,19 @@ export interface Match {
   sets?: MatchSet[];
   mvpPlayerId?: string;
   version?: number;
+  matchType?: 'group' | 'knockout';
+  stage?: 'ELIM' | 'QF' | 'SF' | 'F';
+  slot?: number;
+  stageLabel?: string;
 }
 
 export interface KnockoutMatch {
   id: string;
-  stage: 'ELIM' | 'SF' | 'F';
+  stage: 'ELIM' | 'QF' | 'SF' | 'F';
   slot: number;
+  court?: number;
+  courtName?: string;
+  time?: string;
   teamA?: string;
   teamB?: string;
   scoreA?: number;
@@ -85,6 +92,7 @@ export interface KnockoutMatch {
   winner?: string;
   manual?: boolean;
   sets?: MatchSet[];
+  mvpPlayerId?: string;
   version?: number;
 }
 
