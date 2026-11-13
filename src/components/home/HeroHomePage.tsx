@@ -72,10 +72,16 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     return 'Knockout Match';
   };
 
-  // Normalize knockout matches into unified public Match broadcast shape
+  // Normalize knockout matches into unified public Match broadcast shape (strictly deduplicated by ID)
   const normalizedKnockoutMatches: Match[] = React.useMemo(() => {
     const stageOrder: Record<string, number> = { F: 3, SF: 2, ELIM: 1, QF: 1 };
-    return [...(state.knockout?.matches || [])]
+    const seenIds = new Set<string>();
+    const uniqueKo = (state.knockout?.matches || []).filter((ko) => {
+      if (!ko?.id || seenIds.has(ko.id)) return false;
+      seenIds.add(ko.id);
+      return true;
+    });
+    return uniqueKo
       .sort((a, b) => {
         const pa = stageOrder[a.stage] ?? 0;
         const pb = stageOrder[b.stage] ?? 0;
@@ -112,11 +118,16 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       });
   }, [state.knockout?.matches, state.settings.courtNames]);
 
-  // Unified broadcast + schedule list (Knockout stage matches + Regular league matches)
-  const allPublicMatches = useMemo(
-    () => [...normalizedKnockoutMatches, ...state.matches],
-    [normalizedKnockoutMatches, state.matches]
-  );
+  // Unified broadcast + schedule list (strictly deduplicated by match ID)
+  const allPublicMatches = useMemo(() => {
+    const seenIds = new Set<string>(normalizedKnockoutMatches.map((m) => m.id));
+    const uniqueLeague = state.matches.filter((m) => {
+      if (!m?.id || seenIds.has(m.id)) return false;
+      seenIds.add(m.id);
+      return true;
+    });
+    return [...normalizedKnockoutMatches, ...uniqueLeague];
+  }, [normalizedKnockoutMatches, state.matches]);
 
   // Keep opened Match Detail Modal live-synchronized when scores/status update
   const detailMatch = useMemo(() => {

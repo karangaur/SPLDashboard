@@ -667,6 +667,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   : [...prev.knockout.matches, koMatch];
                 return {
                   ...prev,
+                  matches: prev.matches.filter((existing) => existing.id !== koMatch.id),
                   knockout: {
                     ...prev.knockout,
                     matches: progressKnockoutMatches(nextKo, prev.knockout.format),
@@ -697,6 +698,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   matches: exists
                     ? prev.matches.map((existing) => (existing.id === groupMatch.id ? { ...existing, ...groupMatch } : existing))
                     : [...prev.matches, groupMatch],
+                  knockout: {
+                    ...prev.knockout,
+                    matches: prev.knockout.matches.filter((k) => k.id !== groupMatch.id),
+                  },
                 };
               });
             }
@@ -813,12 +818,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 sportsAudio.playFanfare();
               }
 
+              const cleanedMatches =
+                updated.match_type === 'knockout'
+                  ? nextMatches.filter((m) => m.id !== updated.id)
+                  : nextMatches;
+
+              const cleanedKnockoutMatches =
+                updated.match_type && updated.match_type !== 'knockout'
+                  ? nextKnockoutMatches.filter((k) => k.id !== updated.id)
+                  : nextKnockoutMatches;
+
               return {
                 ...prev,
-                matches: nextMatches,
+                matches: cleanedMatches,
                 knockout: {
                   ...prev.knockout,
-                  matches: progressKnockoutMatches(nextKnockoutMatches, prev.knockout.format),
+                  matches: progressKnockoutMatches(cleanedKnockoutMatches, prev.knockout.format),
                 },
               };
             });

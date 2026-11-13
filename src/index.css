@@ -660,6 +660,57 @@
   animation: splScorePop 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Official League Standings Compositor Animations */
+@keyframes splPodiumRise {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 16px, 0) scale(0.98);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes splStatFlash {
+  0% {
+    opacity: 0.55;
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes splRankDeltaPop {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 5px, 0) scale(0.85);
+  }
+  100% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.spl-podium-enter {
+  animation: splPodiumRise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.spl-podium-delay-1 { animation-delay: 0ms; }
+.spl-podium-delay-2 { animation-delay: 90ms; }
+.spl-podium-delay-3 { animation-delay: 160ms; }
+
+.spl-stat-flash {
+  display: inline-block;
+  animation: splStatFlash 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.spl-rank-delta {
+  animation: splRankDeltaPop 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
 @media (max-width: 639px) {
   .spl-confetti-piece:nth-child(n+11) {
     display: none;
@@ -673,7 +724,8 @@
   .spl-champion-halo {
     will-change: auto;
   }
-  .spl-team-card-enter {
+  .spl-team-card-enter,
+  .spl-podium-enter {
     animation-duration: 0.4s;
   }
 }
@@ -714,7 +766,10 @@
   .spl-team-card-enter,
   .spl-team-badge-fade,
   .spl-champion-halo,
-  .spl-score-tick {
+  .spl-score-tick,
+  .spl-podium-enter,
+  .spl-stat-flash,
+  .spl-rank-delta {
     animation: none;
     transform: none;
     opacity: 1;
