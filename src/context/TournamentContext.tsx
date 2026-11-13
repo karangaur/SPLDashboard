@@ -15,6 +15,8 @@ import {
   FormAppearance,
   RegistrationTokenRecord,
   PaymentStatus,
+  HeroConfig,
+  HeroVersionRecord,
 } from '../types/tournament';
 import {
   STORAGE_KEY,
@@ -25,6 +27,11 @@ import {
   progressKnockoutMatches,
   calculateStandings,
 } from '../utils/tournamentEngine';
+import {
+  DEFAULT_HERO_CONFIG,
+  normalizeHeroConfig,
+  cloneHeroConfig,
+} from '../utils/heroDefaults';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
 import { AuthService } from '../services/authService';
@@ -145,6 +152,19 @@ interface TournamentContextType {
   deleteRegistrationsBulk: (ids: string[]) => void;
   bulkApproveRegistrations: (ids: string[]) => void;
   
+  // Hero Section Customization Manager
+  publishedHeroConfig: HeroConfig;
+  fetchAdminHeroState: () => Promise<{ published: HeroConfig; draft: HeroConfig; versions: HeroVersionRecord[] }>;
+  saveHeroDraft: (draft: HeroConfig) => Promise<{ success: boolean; draft?: HeroConfig; error?: string }>;
+  publishHeroConfig: (
+    config: HeroConfig,
+    summary?: string,
+    action?: 'publish' | 'restore'
+  ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
+  restoreHeroVersion: (
+    versionRecord: HeroVersionRecord
+  ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
+
   // Global actions
   resetToDefault: () => void;
   clearTournamentData: () => void;
@@ -253,6 +273,28 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() =>
     createDefaultFormConfig()
   );
+  const [publishedHeroConfig, setPublishedHeroConfig] = useState<HeroConfig>(() => {
+    try {
+      const cached = localStorage.getItem('spl_hero_published_cache_season-4');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object') {
+          return normalizeHeroConfig({ ...parsed, status: 'published' });
+        }
+      }
+    } catch {}
+    return cloneHeroConfig(DEFAULT_HERO_CONFIG);
+  });
+  const heroPublishGuardRef = useRef<number>(0);
+
+  const applyPublishedHeroConfig = useCallback((rawConfig: Partial<HeroConfig> | null | undefined) => {
+    if (!rawConfig || typeof rawConfig !== 'object') return;
+    const normalized = normalizeHeroConfig({ ...rawConfig, status: 'published' });
+    setPublishedHeroConfig(normalized);
+    try {
+      localStorage.setItem('spl_hero_published_cache_season-4', JSON.stringify(normalized));
+    } catch {}
+  }, []);
   const [isRegistrationStatusHydrated, setIsRegistrationStatusHydrated] = useState<boolean>(false);
   const [tokens, setTokens] = useState<RegistrationTokenRecord[]>([]);
   const [activeToken, setActiveToken] = useState<RegistrationTokenRecord | null>(null);
@@ -418,6 +460,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             if (isDisposed) return;
 
             const extractedFromSupabase = SupabaseService.extractTournamentSettingsFromConfig(cfg);
+            const isHeroGuardActive = Date.now() - heroPublishGuardRef.current < 2500;
+            if (!isHeroGuardActive && (cfg?.appearance as any)?.heroPublished) {
+              applyPublishedHeroConfig((cfg?.appearance as any).heroPublished);
+            } else if (!isHeroGuardActive && !cfg) {
+              fetch(`/api/hero/published?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => {
+                  if (d?.heroConfig && !isDisposed) applyPublishedHeroConfig(d.heroConfig);
+                })
+                .catch(() => {});
+            }
             const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const resolvedEnabled =
               isRegGuardActive
@@ -616,6 +669,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                     predefinedTeams: Array.isArray(serverState.predefinedTeams) ? serverState.predefinedTeams : prev.predefinedTeams,
                     teamFormationMode: serverState.teamFormationMode || prev.teamFormationMode,
                   }));
+                }
+              })
+              .catch(() => {});
+
+            fetch(`/api/hero/published?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((data) => {
+                if (data?.heroConfig && !isDisposed && Date.now() - heroPublishGuardRef.current >= 2500) {
+                  applyPublishedHeroConfig(data.heroConfig);
                 }
               })
               .catch(() => {});
@@ -1166,8 +1228,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             syncRegistrationEnabledState(incomingEnabled, incomingNotice, true);
           }
 
+          if (
+            Date.now() - heroPublishGuardRef.current >= 2500 &&
+            (row.appearance_json as any)?.heroPublished
+          ) {
+            applyPublishedHeroConfig((row.appearance_json as any).heroPublished);
+          }
+
           SupabaseService.fetchFormConfig(seasonSlug).then((cfg) => {
             if (!cfg || isDisposed) return;
+            if (Date.now() - heroPublishGuardRef.current >= 2500 && (cfg.appearance as any)?.heroPublished) {
+              applyPublishedHeroConfig((cfg.appearance as any).heroPublished);
+            }
             const guardStillActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const resolvedEnabled = guardStillActive ? regToggleGuardRef.current.enabled : cfg.enabled !== false;
             const normalizedCfg: RegistrationFormConfig = {
@@ -1452,10 +1524,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         } catch {}
       });
 
+      eventSource.addEventListener('hero_published', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data?.heroConfig && Date.now() - heroPublishGuardRef.current >= 2500) {
+            applyPublishedHeroConfig(data.heroConfig);
+          }
+        } catch {}
+      });
+
       eventSource.addEventListener('form_published', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
           if (data && data.config) {
+            if ((data.config.appearance as any)?.heroPublished && Date.now() - heroPublishGuardRef.current >= 2500) {
+              applyPublishedHeroConfig((data.config.appearance as any).heroPublished);
+            }
             const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const effectiveEnabled = isRegGuardActive
               ? regToggleGuardRef.current.enabled
@@ -1546,10 +1630,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // =========================================================================
     let liveChannel: BroadcastChannel | null = null;
     let formChannel: BroadcastChannel | null = null;
+    let heroChannel: BroadcastChannel | null = null;
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       liveChannel = new BroadcastChannel('spl_live_scores_channel');
       formChannel = new BroadcastChannel('spl_form_config_channel');
+      heroChannel = new BroadcastChannel('spl_hero_config_channel');
+
+      heroChannel.onmessage = (event) => {
+        if (event.data?.type === 'HERO_PUBLISHED' && event.data.heroConfig) {
+          applyPublishedHeroConfig(event.data.heroConfig);
+        }
+      };
 
       liveChannel.onmessage = (event) => {
         if (event.data?.type === 'SCORE_UPDATE') {
@@ -1584,6 +1676,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       formChannel.onmessage = (event) => {
         if (event.data?.type === 'FORM_PUBLISHED' && event.data.config) {
           const nextCfg = event.data.config as RegistrationFormConfig;
+          if ((nextCfg.appearance as any)?.heroPublished) {
+            applyPublishedHeroConfig((nextCfg.appearance as any).heroPublished);
+          }
           setFormConfig(nextCfg);
           setIsRegistrationStatusHydrated(true);
           if (typeof nextCfg.enabled === 'boolean') {
@@ -1702,6 +1797,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource?.close();
       liveChannel?.close();
       formChannel?.close();
+      heroChannel?.close();
       unsubMaster?.();
     };
   }, []);
@@ -4266,6 +4362,62 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return false;
   };
 
+  // Hero Section Manager Actions
+  const fetchAdminHeroState = useCallback(async () => {
+    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+    return SupabaseService.fetchAdminHeroState(seasonSlug);
+  }, []);
+
+  const saveHeroDraft = useCallback(async (draft: HeroConfig) => {
+    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+    const currentUser = AuthService.getCurrentUser();
+    const author = currentUser?.name || currentUser?.username || 'Tournament Director';
+    return SupabaseService.saveHeroDraft(draft, author, seasonSlug);
+  }, []);
+
+  const publishHeroConfig = useCallback(
+    async (
+      config: HeroConfig,
+      summary = 'Hero customization published',
+      action: 'publish' | 'restore' = 'publish'
+    ) => {
+      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const currentUser = AuthService.getCurrentUser();
+      const author = currentUser?.name || currentUser?.username || 'Tournament Director';
+      heroPublishGuardRef.current = Date.now();
+      const res = await SupabaseService.publishHeroConfig(
+        config,
+        author,
+        summary,
+        action,
+        seasonSlug
+      );
+      if (res.success && res.published) {
+        applyPublishedHeroConfig(res.published);
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          try {
+            const hch = new BroadcastChannel('spl_hero_config_channel');
+            hch.postMessage({ type: 'HERO_PUBLISHED', heroConfig: res.published, seasonSlug });
+            hch.close();
+          } catch {}
+        }
+      }
+      return res;
+    },
+    [applyPublishedHeroConfig]
+  );
+
+  const restoreHeroVersion = useCallback(
+    async (versionRecord: HeroVersionRecord) => {
+      return publishHeroConfig(
+        versionRecord.config,
+        `Restored Version v${versionRecord.versionNum}`,
+        'restore'
+      );
+    },
+    [publishHeroConfig]
+  );
+
   return (
     <TournamentContext.Provider
       value={{
@@ -4341,6 +4493,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         exportStateJSON,
         importStateJSON,
         triggerCelebration,
+        publishedHeroConfig,
+        fetchAdminHeroState,
+        saveHeroDraft,
+        publishHeroConfig,
+        restoreHeroVersion,
       }}
     >
       {children}

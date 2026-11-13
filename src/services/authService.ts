@@ -68,7 +68,10 @@ export class AuthService {
   static getAuthHeader(): Record<string, string> {
     const session = this.getSession();
     if (session?.token) {
-      return { Authorization: `Bearer ${session.token}` };
+      return {
+        Authorization: `Bearer ${session.token}`,
+        ...(session.user?.id ? { 'X-SPL-Admin-Id': session.user.id } : {}),
+      };
     }
     return {};
   }

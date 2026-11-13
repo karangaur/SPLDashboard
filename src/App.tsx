@@ -15,6 +15,7 @@ import { StatisticsView } from './components/statistics/StatisticsView';
 import { ChampionView } from './components/champion/ChampionView';
 import { SettingsView } from './components/settings/SettingsView';
 import { UserManagementView } from './components/users/UserManagementView';
+import { HeroSectionManagerView } from './components/hero-admin/HeroSectionManagerView';
 import { ScoreOperatorDashboard } from './components/scorer/ScoreOperatorDashboard';
 import { PublicRegistrationPage } from './components/registration/PublicRegistrationPage';
 import { AdminLoginPage } from './components/auth/AdminLoginPage';
@@ -47,6 +48,8 @@ const RESERVED_PATHS = new Set([
   'registered',
   'statistics',
   'champion',
+  'hero',
+  'hero-manager',
   'settings',
   'users',
 ]);
@@ -64,6 +67,8 @@ const VALID_ADMIN_TABS: Record<string, NavTab> = {
   registered: 'registered',
   statistics: 'statistics',
   champion: 'champion',
+  hero: 'hero',
+  'hero-manager': 'hero',
   settings: 'settings',
   users: 'users',
 };
@@ -276,6 +281,8 @@ export default function App() {
         return <StatisticsView />;
       case 'champion':
         return <ChampionView />;
+      case 'hero':
+        return <HeroSectionManagerView />;
       case 'settings':
         return <SettingsView />;
       case 'users':

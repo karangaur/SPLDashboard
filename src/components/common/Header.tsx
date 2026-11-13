@@ -14,6 +14,7 @@ import {
   ExternalLink,
   ShieldCheck,
   User,
+  Palette,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { AuthService } from '../../services/authService';
@@ -31,6 +32,7 @@ export type NavTab =
   | 'registered'
   | 'statistics'
   | 'champion'
+  | 'hero'
   | 'settings'
   | 'users';
 
@@ -48,6 +50,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
   const [accountModalOpen, setAccountModalOpen] = useState(false);
 
   const isSuperAdmin = AuthService.isSuperAdmin();
+  const canManageTournament = AuthService.canManageTournament();
   const liveMatchesCount = state.matches.filter((m) => m.status === 'live').length;
 
   const handleNav = (tab: NavTab) => {
@@ -174,7 +177,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               aria-expanded={moreDropdownOpen}
               aria-haspopup="true"
               className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 ${
-                ['tokens', 'registered', 'statistics', 'champion', 'settings', 'users'].includes(currentTab)
+                ['tokens', 'registered', 'statistics', 'champion', 'hero', 'settings', 'users'].includes(currentTab)
                   ? 'bg-white/10 text-amber-400 font-semibold'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
@@ -226,6 +229,17 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                     <span>Champion Ceremony</span>
                   </button>
                   <div className="my-1 border-t border-white/10" />
+                  {canManageTournament && (
+                    <button
+                      onClick={() => handleNav('hero')}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-slate-200 hover:text-white flex items-center gap-2.5 ${
+                        currentTab === 'hero' ? 'bg-amber-400/20 text-amber-300 font-semibold' : 'hover:bg-white/10'
+                      }`}
+                    >
+                      <Palette className="w-4 h-4 text-amber-400" />
+                      <span>Hero Section Manager</span>
+                    </button>
+                  )}
                   <button
                     onClick={() => handleNav('settings')}
                     className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 text-slate-200 hover:text-white flex items-center gap-2.5"
@@ -429,6 +443,17 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                 <span>Champion Ceremony</span>
                 <Trophy className="w-4 h-4 text-amber-400" />
               </button>
+              {canManageTournament && (
+                <button
+                  onClick={() => handleNav('hero')}
+                  className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm font-semibold ${
+                    currentTab === 'hero' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'hover:bg-white/5 text-slate-200'
+                  }`}
+                >
+                  <span>Hero Section Manager</span>
+                  <Palette className="w-4 h-4 text-amber-400" />
+                </button>
+              )}
               <button
                 onClick={() => handleNav('settings')}
                 className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm ${

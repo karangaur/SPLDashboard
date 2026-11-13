@@ -11,8 +11,12 @@ import {
   StandingsRecord,
   TournamentSettings,
   PaymentSettings,
+  HeroConfig,
+  HeroVersionRecord,
 } from '../types/tournament';
 import { createDefaultFormConfig } from '../utils/tournamentEngine';
+import { DEFAULT_HERO_CONFIG, normalizeHeroConfig, cloneHeroConfig } from '../utils/heroDefaults';
+import { AuthService } from './authService';
 import {
   DbPlayer,
   DbTeam,
@@ -1316,11 +1320,16 @@ export class SupabaseService {
       const existingId = existing?.id || slug;
       const nextVersion = existing ? (existing.version || 1) + 1 : 1;
 
-      // Preserve persisted tournamentSettings metadata inside appearance_json
-      const existingTournamentSettings = existing?.appearance_json?.tournamentSettings;
+      // Preserve persisted tournamentSettings and Hero Section metadata inside appearance_json
+      const existingApp = (existing?.appearance_json as any) || {};
+      const existingTournamentSettings = existingApp.tournamentSettings;
       const incomingTournamentSettings = (config.appearance as any)?.tournamentSettings;
-      const mergedAppearance = {
+      const mergedAppearance: Record<string, any> = {
         ...(config.appearance || {}),
+        ...(existingApp.heroPublished ? { heroPublished: existingApp.heroPublished } : {}),
+        ...(existingApp.heroDraft ? { heroDraft: existingApp.heroDraft } : {}),
+        ...(existingApp.heroLastPublishedAt ? { heroLastPublishedAt: existingApp.heroLastPublishedAt } : {}),
+        ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
         ...(existingTournamentSettings || incomingTournamentSettings
           ? {
               tournamentSettings: {
@@ -2006,6 +2015,367 @@ export class SupabaseService {
       };
     } catch {
       return () => {};
+    }
+  }
+
+  // ============================================================================
+  // 8. HERO SECTION CUSTOMIZATION (DRAFT, PUBLISH, VERSIONS, MEDIA)
+  // ============================================================================
+  static extractPublishedHeroFromConfig(config: RegistrationFormConfig | null): HeroConfig {
+    const rawHero = (config?.appearance as any)?.heroPublished;
+    if (rawHero && typeof rawHero === 'object') {
+      const normalized = normalizeHeroConfig(rawHero);
+      normalized.status = 'published';
+      return normalized;
+    }
+    return cloneHeroConfig(DEFAULT_HERO_CONFIG);
+  }
+
+  static extractPublishedHeroFromRow(row: DbRegistrationFormConfig | null): HeroConfig {
+    const rawHero = (row?.appearance_json as any)?.heroPublished;
+    if (rawHero && typeof rawHero === 'object') {
+      const normalized = normalizeHeroConfig(rawHero);
+      normalized.status = 'published';
+      return normalized;
+    }
+    return cloneHeroConfig(DEFAULT_HERO_CONFIG);
+  }
+
+  static async fetchPublishedHeroConfig(seasonSlug = 'season-4'): Promise<HeroConfig> {
+    if (this.isAvailable()) {
+      try {
+        const row = await this.fetchFormConfigRow(seasonSlug);
+        const appJson = (row?.appearance_json as any) || {};
+        if (appJson.heroPublished && typeof appJson.heroPublished === 'object') {
+          const normalized = normalizeHeroConfig(appJson.heroPublished);
+          normalized.status = 'published';
+          return normalized;
+        }
+      } catch {}
+    }
+
+    try {
+      const res = await fetch(`/api/hero/published?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.heroConfig) {
+          const normalized = normalizeHeroConfig(data.heroConfig);
+          normalized.status = 'published';
+          return normalized;
+        }
+      }
+    } catch {}
+
+    return cloneHeroConfig(DEFAULT_HERO_CONFIG);
+  }
+
+  static async fetchHeroVersions(seasonSlug = 'season-4'): Promise<HeroVersionRecord[]> {
+    if (!this.isAvailable()) return [];
+    try {
+      const { data, error } = await supabase
+        .from('registration_form_versions')
+        .select('*')
+        .eq('season_slug', seasonSlug)
+        .order('created_at', { ascending: false })
+        .limit(40);
+
+      if (error || !Array.isArray(data)) return [];
+
+      return (data as any[])
+        .filter((row) => row?.snapshot_json?.kind === 'hero_version' && row?.snapshot_json?.heroConfig)
+        .slice(0, 20)
+        .map((row) => ({
+          id: row.id,
+          versionNum: Number(row.version_num) || 1,
+          action: row.snapshot_json.action === 'restore' ? 'restore' : 'publish',
+          createdBy: String(row.created_by || 'admin').replace(/^hero:/, ''),
+          createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
+          summary: String(row.snapshot_json.summary || `Published v${row.version_num}`),
+          config: normalizeHeroConfig(row.snapshot_json.heroConfig),
+        }));
+    } catch {
+      return [];
+    }
+  }
+
+  static async fetchAdminHeroState(seasonSlug = 'season-4'): Promise<{
+    published: HeroConfig;
+    draft: HeroConfig;
+    versions: HeroVersionRecord[];
+  }> {
+    try {
+      const res = await fetch(`/api/hero/admin/state?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, {
+        headers: { ...AuthService.getAuthHeader() },
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.published && data?.draft) {
+          return {
+            published: normalizeHeroConfig({ ...data.published, status: 'published' }),
+            draft: normalizeHeroConfig({ ...data.draft, status: 'draft' }),
+            versions: Array.isArray(data.versions)
+              ? data.versions.map((v: any) => ({
+                  ...v,
+                  config: normalizeHeroConfig(v.config),
+                }))
+              : [],
+          };
+        }
+      }
+    } catch {}
+
+    const published = await this.fetchPublishedHeroConfig(seasonSlug);
+    let draft = cloneHeroConfig({ ...published, status: 'draft' });
+    if (this.isAvailable()) {
+      const row = await this.fetchFormConfigRow(seasonSlug);
+      const rawDraft = (row?.appearance_json as any)?.heroDraft;
+      if (rawDraft && typeof rawDraft === 'object') {
+        draft = normalizeHeroConfig({ ...rawDraft, status: 'draft' });
+      }
+    }
+    const versions = await this.fetchHeroVersions(seasonSlug);
+    return { published, draft, versions };
+  }
+
+  static async saveHeroDraft(
+    draftConfig: HeroConfig,
+    author = 'Tournament Director',
+    seasonSlug = 'season-4'
+  ): Promise<{ success: boolean; draft?: HeroConfig; error?: string }> {
+    const cleanDraft = normalizeHeroConfig({
+      ...draftConfig,
+      status: 'draft',
+      updatedAt: Date.now(),
+      updatedBy: author,
+    });
+
+    try {
+      const res = await fetch('/api/hero/draft', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...AuthService.getAuthHeader(),
+        },
+        body: JSON.stringify({ config: cleanDraft, author, seasonSlug }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        return {
+          success: true,
+          draft: normalizeHeroConfig({ ...(data.draft || cleanDraft), status: 'draft' }),
+        };
+      }
+      if (res.status === 401 || res.status === 403 || res.status === 400) {
+        return { success: false, error: data?.error || 'Authorization or validation error' };
+      }
+    } catch {}
+
+    // Direct Supabase fallback when server route is unreachable (only if authorized organizer)
+    if (!AuthService.canManageTournament()) {
+      return { success: false, error: 'Unauthorized: Tournament Director or Super Admin required.' };
+    }
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Unable to save draft: database connection unavailable.' };
+    }
+
+    try {
+      const existingRow = await this.fetchFormConfigRow(seasonSlug);
+      if (!existingRow) return { success: false, error: 'Configuration record not found.' };
+      const existingAppearance = (existingRow.appearance_json as any) || {};
+      const mergedAppearance = {
+        ...existingAppearance,
+        heroDraft: cleanDraft,
+      };
+      const { error } = await (supabase.from('registration_form_config') as any)
+        .update({
+          appearance_json: mergedAppearance,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', existingRow.id);
+
+      if (error) return { success: false, error: error.message };
+      return { success: true, draft: cleanDraft };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to save draft.' };
+    }
+  }
+
+  static async publishHeroConfig(
+    config: HeroConfig,
+    author = 'Tournament Director',
+    summary = 'Hero customization published',
+    action: 'publish' | 'restore' = 'publish',
+    seasonSlug = 'season-4'
+  ): Promise<{
+    success: boolean;
+    published?: HeroConfig;
+    version?: HeroVersionRecord;
+    error?: string;
+  }> {
+    const sanitized = normalizeHeroConfig(config);
+
+    try {
+      const res = await fetch('/api/hero/publish', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...AuthService.getAuthHeader(),
+        },
+        body: JSON.stringify({ config: sanitized, author, summary, action, seasonSlug }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        return {
+          success: true,
+          published: normalizeHeroConfig({ ...(data.published || sanitized), status: 'published' }),
+          version: data.version
+            ? { ...data.version, config: normalizeHeroConfig(data.version.config) }
+            : undefined,
+        };
+      }
+      if (res.status === 401 || res.status === 403 || res.status === 400) {
+        return { success: false, error: data?.error || 'Unauthorized or invalid hero configuration' };
+      }
+    } catch {}
+
+    if (!AuthService.canManageTournament()) {
+      return { success: false, error: 'Unauthorized: Tournament Director or Super Admin required.' };
+    }
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Unable to publish: database connection unavailable.' };
+    }
+
+    try {
+      const existingRow = await this.fetchFormConfigRow(seasonSlug);
+      if (!existingRow) return { success: false, error: 'Configuration record not found.' };
+
+      const existingApp = (existingRow.appearance_json as any) || {};
+      const currentVersion = Number(existingApp.heroPublished?.version || 0);
+      const nextVersionNum = Math.max(1, currentVersion + 1);
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+
+      const publishedConfig: HeroConfig = {
+        ...sanitized,
+        version: nextVersionNum,
+        status: 'published',
+        updatedAt: nowMs,
+        updatedBy: author,
+        publishedAt: nowMs,
+        publishedBy: author,
+      };
+
+      const draftMirror: HeroConfig = { ...publishedConfig, status: 'draft' };
+
+      const mergedAppearance = {
+        ...existingApp,
+        heroPublished: publishedConfig,
+        heroDraft: draftMirror,
+        heroLastPublishedAt: nowIso,
+        heroPublishedBy: author,
+      };
+
+      const { error } = await (supabase.from('registration_form_config') as any)
+        .update({
+          appearance_json: mergedAppearance,
+          updated_at: nowIso,
+        })
+        .eq('id', existingRow.id);
+
+      if (error) return { success: false, error: error.message };
+
+      const versionId = crypto.randomUUID();
+      await supabase.from('registration_form_versions').insert({
+        id: versionId,
+        form_config_id: existingRow.id,
+        season_slug: existingRow.season_slug || seasonSlug,
+        version_num: nextVersionNum,
+        snapshot_json: {
+          kind: 'hero_version',
+          action,
+          summary,
+          heroConfig: publishedConfig,
+        } as any,
+        created_by: `hero:${author}`,
+        created_at: nowIso,
+      } as any);
+
+      void this.logAudit('hero_published', 'hero_config', existingRow.id, {
+        version: nextVersionNum,
+        action,
+        summary,
+      });
+
+      return {
+        success: true,
+        published: publishedConfig,
+        version: {
+          id: versionId,
+          versionNum: nextVersionNum,
+          action,
+          createdBy: author,
+          createdAt: nowMs,
+          summary,
+          config: publishedConfig,
+        },
+      };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to publish Hero configuration.' };
+    }
+  }
+
+  static async uploadHeroMediaFile(
+    file: File,
+    kind: 'logo' | 'image' | 'video'
+  ): Promise<{
+    success: boolean;
+    url?: string;
+    storagePath?: string;
+    mimeType?: string;
+    size?: number;
+    provider?: 'supabase' | 'server';
+    error?: string;
+  }> {
+    const maxBytes =
+      kind === 'logo' ? 3 * 1024 * 1024 : kind === 'image' ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+    if (file.size > maxBytes) {
+      const mbLimit = Math.round(maxBytes / (1024 * 1024));
+      return { success: false, error: `File exceeds the ${mbLimit}MB limit for Hero ${kind} uploads.` };
+    }
+
+    try {
+      const res = await fetch('/api/hero/media/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': file.type || 'application/octet-stream',
+          'X-File-Name': encodeURIComponent(file.name),
+          'X-Media-Kind': kind,
+          ...AuthService.getAuthHeader(),
+        },
+        body: file,
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success && data?.url) {
+        return {
+          success: true,
+          url: data.url,
+          storagePath: data.storagePath,
+          mimeType: data.mimeType,
+          size: data.size,
+          provider: data.provider || 'server',
+        };
+      }
+      return {
+        success: false,
+        error: data?.error || `Upload failed with status ${res.status}`,
+      };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Media upload network error.' };
     }
   }
 }

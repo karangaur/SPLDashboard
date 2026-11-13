@@ -26,7 +26,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
-import { BadmintonHeroVisual } from './BadmintonHeroVisual';
+import { HeroSectionCanvas } from './HeroSectionCanvas';
 import { LiveMatchHero } from './LiveMatchHero';
 import { FixturesShowcaseSection } from './FixturesShowcaseSection';
 import { TeamsShowcaseSection } from './TeamsShowcaseSection';
@@ -45,7 +45,14 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   onOpenLogin,
   onGoToAdmin,
 }) => {
-  const { state, standings, realtimeStatus, reconnectRealtime, isRegistrationOpen } = useTournament();
+  const {
+    state,
+    standings,
+    realtimeStatus,
+    reconnectRealtime,
+    isRegistrationOpen,
+    publishedHeroConfig,
+  } = useTournament();
 
   const [detailMatchSnapshot, setDetailMatch] = useState<Match | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
@@ -237,17 +244,26 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           
           {/* Brand Wordmark with New SPL 3.0 Championship Emblem */}
           <div className="flex items-center gap-2.5 sm:gap-3 shrink min-w-0">
-            <button
+              <button
               onClick={() => {
                 setMobileNavOpen(false);
                 window.scrollTo({ top: 0, behavior: 'smooth' });
               }}
               className="flex items-center gap-2.5 sm:gap-3 text-left group min-w-0"
             >
-              <SPLLogoEmblemSvg
-                className="h-9 w-9 sm:h-11 sm:w-11 shrink-0 drop-shadow-[0_4px_12px_rgba(245,158,11,0.3)] group-hover:scale-105 transition-transform"
-                include30
-              />
+              {publishedHeroConfig?.logo?.applyGlobalNavbarBranding &&
+              publishedHeroConfig?.logo?.customLogoUrl ? (
+                <img
+                  src={publishedHeroConfig.logo.customLogoUrl}
+                  alt={tournamentName}
+                  className="h-9 sm:h-11 w-auto max-w-[120px] object-contain shrink-0 drop-shadow-[0_4px_12px_rgba(245,158,11,0.3)] group-hover:scale-105 transition-transform"
+                />
+              ) : (
+                <SPLLogoEmblemSvg
+                  className="h-9 w-9 sm:h-11 sm:w-11 shrink-0 drop-shadow-[0_4px_12px_rgba(245,158,11,0.3)] group-hover:scale-105 transition-transform"
+                  include30
+                />
+              )}
               <div className="min-w-0">
                 <span className="font-display text-sm sm:text-base lg:text-lg font-black tracking-tight text-white uppercase truncate block leading-tight">
                   {tournamentName}
@@ -422,239 +438,22 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       {/* Main Content Sections */}
       <main className="relative z-10 space-y-14 sm:space-y-24 pb-20">
         
-        {/* 2. REDESIGNED SPL 3.0 CHAMPIONSHIP HERO SECTION */}
-        <section
-          aria-label="Smash Premier League 3.0 Championship Hero"
-          className="relative overflow-hidden bg-[#05060b] border-b border-amber-400/15 pt-8 pb-10 sm:pt-12 sm:pb-14 lg:pt-14 lg:pb-16"
-        >
-          {/* Atmospheric Arena Spotlights, Court Lines & Golden Particles */}
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden spl-broadcast-layer">
-            {/* Volumetric Overhead Stadium Spotlight Beams */}
-            <div className="spl-spotlight-left absolute -top-28 -left-24 w-[28rem] h-[34rem] bg-gradient-to-b from-amber-400/20 via-orange-500/10 to-transparent blur-3xl" />
-            <div className="spl-spotlight-right absolute -top-28 -right-20 w-[30rem] h-[34rem] bg-gradient-to-b from-red-600/20 via-amber-500/10 to-transparent blur-3xl" />
-            <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/45 to-transparent" />
-
-            {/* Subtle Background Badminton Court Architecture */}
-            <svg
-              className="hidden md:block absolute inset-0 w-full h-full opacity-[0.07] text-amber-200"
-              viewBox="0 0 1200 600"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              preserveAspectRatio="xMidYMid slice"
-            >
-              <rect x="110" y="70" width="980" height="460" />
-              <line x1="600" y1="70" x2="600" y2="530" strokeDasharray="8 6" />
-              <line x1="250" y1="70" x2="250" y2="530" />
-              <line x1="950" y1="70" x2="950" y2="530" />
-              <line x1="110" y1="145" x2="1090" y2="145" />
-              <line x1="110" y1="455" x2="1090" y2="455" />
-            </svg>
-
-            {/* Lightweight Arena Gold Dust Particles (Desktop/Tablet) */}
-            <span className="hidden sm:block spl-particle-float absolute top-[22%] left-[14%] w-1.5 h-1.5 rounded-full bg-amber-300/60" />
-            <span className="hidden sm:block spl-particle-float absolute top-[34%] left-[44%] w-1 h-1 rounded-full bg-red-400/55" />
-            <span className="hidden md:block spl-particle-float absolute top-[18%] right-[22%] w-1.5 h-1.5 rounded-full bg-amber-200/50" />
-            <span className="hidden md:block spl-particle-float absolute bottom-[28%] right-[12%] w-1 h-1 rounded-full bg-orange-400/60" />
-          </div>
-
-          <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            {/* Hero 2-Column Athletic Split */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-10 items-stretch">
-              {/* LEFT Column: Brand Crest, Championship Title, Tagline & Action CTAs */}
-              <div className="lg:col-span-6 xl:col-span-7 flex flex-col justify-center space-y-5 sm:space-y-6 text-center lg:text-left">
-                {/* Prominent Brand-New SPL Championship Logo Lockup */}
-                <div className="flex justify-center lg:justify-start">
-                  <SPLLogo
-                    variant="hero"
-                    size="md"
-                    animated
-                    subtitle="SPL 3.0 · CHAMPION EDITION"
-                  />
-                </div>
-
-                {/* Unboxed Crimson & Gold Kicker */}
-                <div className="spl-hero-stagger-1 flex items-center justify-center lg:justify-start gap-2.5 text-xs font-display font-black uppercase tracking-[0.26em] text-amber-300">
-                  <span className="h-[2px] w-7 bg-gradient-to-r from-red-500 to-amber-400 rounded-full shrink-0" />
-                  <span>CHAMPION EDITION</span>
-                  <span className="text-slate-600">·</span>
-                  <span className="text-slate-300 truncate">{organizerLabel}</span>
-                </div>
-
-                {/* Bold Championship Title + Energetic Tagline + Supporting Copy */}
-                <div className="spl-hero-stagger-1 space-y-3">
-                  <h1 className="text-[clamp(2.25rem,4.5vw,4.15rem)] font-black font-display tracking-tight text-white uppercase leading-[1.03] text-balance">
-                    SMASH PREMIER{' '}
-                    <span className="block sm:inline">LEAGUE{' '}</span>
-                    <span className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
-                      3.0
-                    </span>
-                  </h1>
-
-                  <p className="spl-hero-stagger-2 text-lg sm:text-2xl lg:text-[1.65rem] font-display font-black uppercase italic tracking-[0.06em] bg-gradient-to-r from-amber-300 via-yellow-200 to-red-400 bg-clip-text text-transparent">
-                    “RISE. SMASH. CONQUER.”
-                  </p>
-
-                  <p className="spl-hero-stagger-2 text-sm sm:text-base lg:text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed">
-                    Where Champions Rise and Legends Are Made.
-                    {announcementText ? (
-                      <span className="block mt-1.5 text-xs sm:text-sm text-amber-200/90 font-medium">
-                        {announcementText}
-                      </span>
-                    ) : null}
-                  </p>
-                </div>
-
-                {/* Phase 4: Premium Championship Action CTAs */}
-                <div className="spl-hero-stagger-3 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center lg:justify-start gap-3 pt-1">
-                  {/* 1. Primary CTA: REGISTER NOW / REGISTRATION CLOSED */}
-                  {isRegistrationOpen ? (
-                    <button
-                      type="button"
-                      onClick={onOpenPublicRegister}
-                      className="group relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:via-amber-300 hover:to-orange-400 shadow-[0_12px_30px_-8px_rgba(245,158,11,0.55)] transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer whitespace-nowrap"
-                    >
-                      <PlusCircle className="w-4 h-4 shrink-0 text-slate-950" />
-                      <span>REGISTER NOW</span>
-                      <ArrowRight className="w-4 h-4 shrink-0 text-slate-950 transition-transform group-hover:translate-x-0.5" />
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      disabled
-                      aria-disabled="true"
-                      className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-400 bg-slate-800/90 border border-slate-700 cursor-not-allowed whitespace-nowrap"
-                    >
-                      <Lock className="w-4 h-4 shrink-0 text-slate-400" />
-                      <span>REGISTRATION CLOSED</span>
-                    </button>
-                  )}
-
-                  {/* 2. Secondary CTA: WATCH LIVE MATCHES */}
-                  <button
-                    type="button"
-                    onClick={() => scrollToSection('live-match')}
-                    className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-extrabold text-xs sm:text-sm uppercase tracking-wider text-white bg-red-950/40 hover:bg-red-900/50 border border-red-500/45 hover:border-red-400/70 backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer whitespace-nowrap"
-                  >
-                    {liveMatchesCount > 0 ? (
-                      <span className="relative flex h-2.5 w-2.5 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-                      </span>
-                    ) : (
-                      <Play className="w-4 h-4 shrink-0 text-red-400" />
-                    )}
-                    <span>WATCH LIVE MATCHES</span>
-                  </button>
-
-                  {/* 3. Tertiary CTA: VIEW MATCH SCHEDULE */}
-                  <button
-                    type="button"
-                    onClick={() => scrollToSection('matches-schedule')}
-                    className="w-full sm:w-auto flex items-center justify-center gap-2 px-5 py-3.5 min-h-[48px] rounded-xl font-display font-bold text-xs sm:text-sm uppercase tracking-wider text-slate-100 bg-white/[0.04] hover:bg-white/[0.1] border border-slate-300/25 hover:border-amber-300/45 backdrop-blur-md transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer whitespace-nowrap"
-                  >
-                    <Calendar className="w-4 h-4 shrink-0 text-amber-300" />
-                    <span>VIEW MATCH SCHEDULE</span>
-                  </button>
-                </div>
-
-                {!isRegistrationOpen && (
-                  <p className="text-xs sm:text-sm text-slate-400 font-medium flex items-center justify-center lg:justify-start gap-2">
-                    <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span>Registration for Smash Premier League 3.0 is currently closed.</span>
-                  </p>
-                )}
-              </div>
-
-              {/* RIGHT Column: Dramatic Jump-Smash Championship Showcase */}
-              <div className="lg:col-span-6 xl:col-span-5 flex items-stretch spl-hero-stagger-2">
-                <BadmintonHeroVisual venue={venueLabel} />
-              </div>
-            </div>
-
-            {/* Phase 5: Live Tournament Information Strip (100% Live Supabase-Backed State) */}
-            <div
-              aria-label="Live Tournament Information Strip"
-              className="mt-8 sm:mt-10 rounded-2xl border border-white/10 bg-[#0b0e18]/85 backdrop-blur-md p-3.5 sm:p-4 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
-            >
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 divide-y sm:divide-y-0 sm:divide-x divide-white/10">
-                {/* 1. Tournament Name */}
-                <div className="pt-1 sm:pt-0 sm:pr-3 min-w-0">
-                  <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
-                    Tournament
-                  </span>
-                  <span
-                    title={tournamentName}
-                    className="mt-1 block text-sm sm:text-base font-display font-black text-white truncate"
-                  >
-                    {tournamentName || 'Not Configured'}
-                  </span>
-                </div>
-
-                {/* 2. Current Stage */}
-                <div className="pt-2.5 sm:pt-0 sm:pl-4 sm:pr-3 min-w-0">
-                  <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
-                    Current Stage
-                  </span>
-                  <span className="mt-1 block text-sm sm:text-base font-display font-black text-amber-300 truncate">
-                    {currentTournamentStage}
-                  </span>
-                </div>
-
-                {/* 3. Registered Teams */}
-                <div className="pt-2.5 sm:pt-0 sm:pl-4 sm:pr-3 min-w-0">
-                  <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
-                    Registered Teams
-                  </span>
-                  <span className="mt-1 block text-sm sm:text-base font-mono font-black text-white tabular-nums">
-                    {state.teams.length > 0 ? `${state.teams.length} Teams` : 'No Teams Yet'}
-                  </span>
-                </div>
-
-                {/* 4. Active Live Matches */}
-                <div className="pt-2.5 sm:pt-0 sm:pl-4 sm:pr-3 min-w-0">
-                  <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
-                    Active Live Matches
-                  </span>
-                  <div className="mt-1 flex items-center gap-2">
-                    {liveMatchesCount > 0 && (
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
-                    )}
-                    <span
-                      className={`text-sm sm:text-base font-mono font-black tabular-nums ${
-                        liveMatchesCount > 0 ? 'text-red-400' : 'text-slate-300'
-                      }`}
-                    >
-                      {liveMatchesCount > 0 ? `${liveMatchesCount} Live` : '0 Live'}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 5. Next / Active Match Info */}
-                <div className="pt-2.5 sm:pt-0 sm:pl-4 min-w-0">
-                  <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
-                    {featuredFixture?.status === 'live' ? 'On Court Now' : 'Upcoming Match'}
-                  </span>
-                  {featuredFixture ? (
-                    <div className="mt-1 min-w-0">
-                      <span className="block text-xs sm:text-sm font-bold text-white truncate">
-                        {(getTeam(featuredFixture.teamA)?.name || 'TBD')} vs {(getTeam(featuredFixture.teamB)?.name || 'TBD')}
-                      </span>
-                      <span className="block text-[11px] font-mono text-amber-300/90 truncate">
-                        {featuredFixture.courtName || `Court ${featuredFixture.court}`}
-                        {featuredFixture.stageLabel ? ` · ${featuredFixture.stageLabel}` : ''}
-                      </span>
-                    </div>
-                  ) : (
-                    <span className="mt-1 block text-xs sm:text-sm font-semibold text-slate-400 truncate">
-                      No Upcoming Fixtures
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
+        {/* 2. DYNAMIC SUPABASE-SYNCED SPL 3.0 CHAMPIONSHIP HERO SECTION */}
+        <HeroSectionCanvas
+          heroConfig={publishedHeroConfig}
+          isRegistrationOpen={isRegistrationOpen}
+          tournamentName={tournamentName}
+          organizerLabel={organizerLabel}
+          venueLabel={venueLabel}
+          announcementText={announcementText}
+          currentTournamentStage={currentTournamentStage}
+          teamsCount={state.teams.length}
+          liveMatchesCount={liveMatchesCount}
+          featuredFixture={featuredFixture}
+          getTeam={getTeam}
+          onOpenPublicRegister={onOpenPublicRegister}
+          onScrollToSection={scrollToSection}
+        />
 
         {/* 3. LIVE MATCH — CHAMPIONSHIP ARENA BROADCAST */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

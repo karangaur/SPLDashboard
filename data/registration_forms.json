@@ -11,8 +11,8 @@
     "enabled": true,
     "closedNotice": "Registrations for this tournament are currently closed. Please contact the tournament organizer for spot entry inquiries.",
     "isPublished": true,
-    "publishedAt": 1792927202685,
-    "lastUpdatedAt": 1794560327012,
+    "publishedAt": 1794561912289,
+    "lastUpdatedAt": 1794561912289,
     "appearance": {
       "formTitle": "Player Entry & Registration Form",
       "formDescription": "Register as an official athlete for the upcoming Smash Premier League championship.",
@@ -205,6 +205,8 @@
     "customUrlSlug": "register",
     "payment": {
       "baseFee": 500
-    }
+    },
+    "author": "QA Bot",
+    "version": 2
   }
 }

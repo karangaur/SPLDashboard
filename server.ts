@@ -5,6 +5,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'crypto';
+import {
+  DEFAULT_HERO_CONFIG,
+  normalizeHeroConfig,
+  cloneHeroConfig,
+  sanitizeSvgMarkup,
+  sanitizePlainText,
+} from './src/utils/heroDefaults';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -45,6 +53,8 @@ const FORMS_FILE = path.join(DATA_DIR, 'registration_forms.json');
 const TOKENS_FILE = path.join(DATA_DIR, 'registration_tokens.json');
 const AUTH_FILE = path.join(DATA_DIR, 'admin_auth.json');
 const TOURNAMENT_FILE = path.join(DATA_DIR, 'tournament_state.json');
+const HERO_FILE = path.join(DATA_DIR, 'hero_config.json');
+const HERO_MEDIA_DIR = path.join(DATA_DIR, 'hero-media');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -53,6 +63,11 @@ if (!fs.existsSync(DATA_DIR)) {
   } catch (err) {
     console.warn('Could not create data dir:', err);
   }
+}
+if (!fs.existsSync(HERO_MEDIA_DIR)) {
+  try {
+    fs.mkdirSync(HERO_MEDIA_DIR, { recursive: true });
+  } catch {}
 }
 
 // In Vercel serverless, copy initial seed files from read-only filesystem to /tmp
@@ -314,7 +329,10 @@ async function startServer() {
   app.use((_req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PATCH, DELETE, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+    res.header(
+      'Access-Control-Allow-Headers',
+      'Content-Type, Authorization, X-Requested-With, X-SPL-Admin-Id, X-File-Name, X-Media-Kind'
+    );
     if (_req.method === 'OPTIONS') {
       return res.sendStatus(200);
     }
@@ -759,6 +777,17 @@ async function startServer() {
         const nowIso = new Date().toISOString();
         const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
         const rowId = existingRow?.id || seasonSlug;
+        const existingApp = (existingRow?.appearance_json as any) || {};
+        const mergedAppearance = {
+          ...(updated.appearance || {}),
+          ...(existingApp.heroPublished ? { heroPublished: existingApp.heroPublished } : {}),
+          ...(existingApp.heroDraft ? { heroDraft: existingApp.heroDraft } : {}),
+          ...(existingApp.heroLastPublishedAt ? { heroLastPublishedAt: existingApp.heroLastPublishedAt } : {}),
+          ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
+          ...(existingApp.tournamentSettings && !updated.appearance?.tournamentSettings
+            ? { tournamentSettings: existingApp.tournamentSettings }
+            : {}),
+        };
         await serverSupabase
           .from('registration_form_config')
           .upsert({
@@ -775,7 +804,7 @@ async function startServer() {
             closed_notice: updated.closedNotice || null,
             is_published: updated.isPublished,
             payment_config_json: updated.payment || {},
-            appearance_json: updated.appearance || {},
+            appearance_json: mergedAppearance,
             fields_json: updated.fields || [],
             version: nextVersion,
             published_at: isPublishing ? nowIso : undefined,
@@ -2346,6 +2375,600 @@ async function startServer() {
     writeJSON(REGISTRATIONS_FILE, list);
     broadcastSse('registrations_bulk_approved', { ids });
     return res.json({ success: true, approvedCount });
+  });
+
+  // =========================================================================
+  // HERO SECTION CUSTOMIZATION MANAGER API ROUTES (RBAC + STORAGE + REALTIME)
+  // =========================================================================
+  interface HeroStorageFile {
+    published: any;
+    draft: any;
+    versions: any[];
+  }
+
+  function readLocalHeroStore(): HeroStorageFile {
+    const fallback: HeroStorageFile = {
+      published: cloneHeroConfig(DEFAULT_HERO_CONFIG),
+      draft: cloneHeroConfig({ ...DEFAULT_HERO_CONFIG, status: 'draft' }),
+      versions: [],
+    };
+    const stored = readJSON<HeroStorageFile>(HERO_FILE, fallback);
+    return {
+      published: normalizeHeroConfig({ ...(stored.published || DEFAULT_HERO_CONFIG), status: 'published' }),
+      draft: normalizeHeroConfig({ ...(stored.draft || stored.published || DEFAULT_HERO_CONFIG), status: 'draft' }),
+      versions: Array.isArray(stored.versions) ? stored.versions : [],
+    };
+  }
+
+  async function verifyHeroAdminRequest(req: express.Request): Promise<{
+    authorized: boolean;
+    status: number;
+    error?: string;
+    adminName?: string;
+    role?: string;
+  }> {
+    const authHeader = req.headers.authorization;
+    const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
+    if (!token) {
+      return { authorized: false, status: 401, error: 'Unauthorized: Missing authentication token.' };
+    }
+
+    const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
+    const localSession = authConfig.activeTokens?.[token];
+    if (localSession && Date.now() <= localSession.expiresAt) {
+      const account = authConfig.accounts?.find((a: any) => a.id === localSession.userId);
+      if (!account) {
+        return { authorized: false, status: 401, error: 'Unauthorized: Session account not found.' };
+      }
+      if (account.role !== 'super_admin' && account.role !== 'tournament_director') {
+        return { authorized: false, status: 403, error: 'Forbidden: Only Super Admin or Tournament Director can customize the Hero Section.' };
+      }
+      return { authorized: true, status: 200, adminName: account.name || account.username, role: account.role };
+    }
+
+    // Check Supabase JWT if token looks like a JWT
+    if (serverSupabase && token.split('.').length === 3) {
+      try {
+        const { data: userData } = await serverSupabase.auth.getUser(token);
+        if (userData?.user) {
+          const { data: adminRow } = await serverSupabase
+            .from('admin_users')
+            .select('id, name, username, role, is_active')
+            .or(`auth_user_id.eq.${userData.user.id},email.eq.${userData.user.email}`)
+            .maybeSingle();
+          if (adminRow && (adminRow as any).is_active !== false) {
+            const role = (adminRow as any).role;
+            if (role !== 'super_admin' && role !== 'tournament_director') {
+              return { authorized: false, status: 403, error: 'Forbidden: Insufficient role privileges.' };
+            }
+            return { authorized: true, status: 200, adminName: (adminRow as any).name, role };
+          }
+        }
+      } catch {}
+    }
+
+    // Check active Supabase-issued session token (spl_sb_... / spl_sess_...) bound to X-SPL-Admin-Id
+    const claimedAdminId = String(req.headers['x-spl-admin-id'] || '').trim();
+    if (
+      serverSupabase &&
+      claimedAdminId &&
+      /^spl_(sb|sess|tk)_[a-f0-9]{16,}$/i.test(token)
+    ) {
+      try {
+        const { data: adminRow } = await serverSupabase
+          .from('admin_users')
+          .select('id, name, username, role, is_active')
+          .eq('id', claimedAdminId)
+          .maybeSingle();
+        if (adminRow && (adminRow as any).is_active !== false) {
+          const role = (adminRow as any).role;
+          if (role !== 'super_admin' && role !== 'tournament_director') {
+            return { authorized: false, status: 403, error: 'Forbidden: Score operators cannot modify Hero configuration.' };
+          }
+          return {
+            authorized: true,
+            status: 200,
+            adminName: (adminRow as any).name || (adminRow as any).username,
+            role,
+          };
+        }
+      } catch {}
+    }
+
+    return { authorized: false, status: 401, error: 'Unauthorized: Valid administrator session required.' };
+  }
+
+  function detectAndValidateHeroMedia(
+    buf: Buffer,
+    fileName: string,
+    declaredMime: string,
+    kind: 'logo' | 'image' | 'video'
+  ): { valid: boolean; ext?: string; mime?: string; buffer?: Buffer; error?: string } {
+    if (!buf || buf.length === 0) {
+      return { valid: false, error: 'Uploaded file is empty.' };
+    }
+
+    const maxBytes =
+      kind === 'logo' ? 3 * 1024 * 1024 : kind === 'image' ? 10 * 1024 * 1024 : 50 * 1024 * 1024;
+    if (buf.length > maxBytes) {
+      return {
+        valid: false,
+        error: `File exceeds maximum allowed size (${Math.round(maxBytes / (1024 * 1024))}MB) for ${kind}.`,
+      };
+    }
+
+    const ext = path.extname(fileName || '').toLowerCase();
+
+    if (kind === 'video') {
+      const isMp4Signature = buf.length >= 12 && buf.subarray(4, 8).toString('ascii') === 'ftyp';
+      const isWebmSignature =
+        buf.length >= 4 && buf[0] === 0x1a && buf[1] === 0x45 && buf[2] === 0xdf && buf[3] === 0xa3;
+
+      if (isMp4Signature && (ext === '.mp4' || ext === '.m4v' || declaredMime.includes('mp4') || !ext)) {
+        return { valid: true, ext: '.mp4', mime: 'video/mp4', buffer: buf };
+      }
+      if (isWebmSignature && (ext === '.webm' || declaredMime.includes('webm') || !ext)) {
+        return { valid: true, ext: '.webm', mime: 'video/webm', buffer: buf };
+      }
+      return {
+        valid: false,
+        error: 'Invalid video file signature. Only authentic MP4 and WebM video files are allowed.',
+      };
+    }
+
+    // Image / Logo validation
+    const isPng =
+      buf.length >= 8 &&
+      buf[0] === 0x89 &&
+      buf[1] === 0x50 &&
+      buf[2] === 0x4e &&
+      buf[3] === 0x47 &&
+      buf[4] === 0x0d &&
+      buf[5] === 0x0a &&
+      buf[6] === 0x1a &&
+      buf[7] === 0x0a;
+    if (isPng) {
+      return { valid: true, ext: '.png', mime: 'image/png', buffer: buf };
+    }
+
+    const isJpeg = buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
+    if (isJpeg && kind === 'image') {
+      return { valid: true, ext: '.jpg', mime: 'image/jpeg', buffer: buf };
+    }
+    if (isJpeg && kind === 'logo') {
+      return { valid: true, ext: '.jpg', mime: 'image/jpeg', buffer: buf };
+    }
+
+    const isWebp =
+      buf.length >= 12 &&
+      buf.subarray(0, 4).toString('ascii') === 'RIFF' &&
+      buf.subarray(8, 12).toString('ascii') === 'WEBP';
+    if (isWebp) {
+      return { valid: true, ext: '.webp', mime: 'image/webp', buffer: buf };
+    }
+
+    const isAvif =
+      buf.length >= 12 &&
+      buf.subarray(4, 8).toString('ascii') === 'ftyp' &&
+      (buf.subarray(8, 12).toString('ascii') === 'avif' ||
+        buf.subarray(8, 12).toString('ascii') === 'avis');
+    if (isAvif && kind === 'image') {
+      return { valid: true, ext: '.avif', mime: 'image/avif', buffer: buf };
+    }
+
+    const isSvgCandidate =
+      ext === '.svg' || declaredMime.includes('svg') || buf.subarray(0, 512).toString('utf-8').includes('<svg');
+    if (isSvgCandidate && kind === 'logo') {
+      const rawText = buf.toString('utf-8');
+      const svgResult = sanitizeSvgMarkup(rawText);
+      if (!svgResult.valid) {
+        return { valid: false, error: svgResult.error || 'Unsafe or malformed SVG logo rejected.' };
+      }
+      return {
+        valid: true,
+        ext: '.svg',
+        mime: 'image/svg+xml',
+        buffer: Buffer.from(svgResult.sanitized, 'utf-8'),
+      };
+    }
+
+    return {
+      valid: false,
+      error:
+        kind === 'logo'
+          ? 'Invalid logo format. Supported: PNG, WebP, or safe SVG.'
+          : 'Invalid image format. Supported: JPG/JPEG, PNG, WebP, or AVIF.',
+    };
+  }
+
+  // Public Hero Config endpoint (NEVER exposes draft!)
+  app.get('/api/hero/published', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const seasonSlug = String(req.query.season || 'season-4');
+    if (serverSupabase) {
+      try {
+        const row = await fetchServerSupabaseFormRow(seasonSlug);
+        const published = (row?.appearance_json as any)?.heroPublished;
+        if (published && typeof published === 'object') {
+          const normalized = normalizeHeroConfig({ ...published, status: 'published' });
+          return res.json({ heroConfig: normalized, source: 'supabase' });
+        }
+      } catch {}
+    }
+    const localStore = readLocalHeroStore();
+    return res.json({ heroConfig: localStore.published, source: 'server' });
+  });
+
+  // Admin Hero State (published + private draft + version history)
+  app.get('/api/hero/admin/state', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const auth = await verifyHeroAdminRequest(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const seasonSlug = String(req.query.season || 'season-4');
+    const localStore = readLocalHeroStore();
+    let published = localStore.published;
+    let draft = localStore.draft;
+    let versions = localStore.versions;
+
+    if (serverSupabase) {
+      try {
+        const row = await fetchServerSupabaseFormRow(seasonSlug);
+        const appJson = (row?.appearance_json as any) || {};
+        if (appJson.heroPublished) {
+          published = normalizeHeroConfig({ ...appJson.heroPublished, status: 'published' });
+        }
+        if (appJson.heroDraft) {
+          draft = normalizeHeroConfig({ ...appJson.heroDraft, status: 'draft' });
+        } else {
+          draft = cloneHeroConfig({ ...published, status: 'draft' });
+        }
+
+        const { data: versionRows } = await serverSupabase
+          .from('registration_form_versions')
+          .select('*')
+          .eq('season_slug', seasonSlug)
+          .order('created_at', { ascending: false })
+          .limit(40);
+
+        if (Array.isArray(versionRows)) {
+          const dbVersions = versionRows
+            .filter((r: any) => r?.snapshot_json?.kind === 'hero_version' && r?.snapshot_json?.heroConfig)
+            .slice(0, 20)
+            .map((r: any) => ({
+              id: r.id,
+              versionNum: Number(r.version_num) || 1,
+              action: r.snapshot_json.action === 'restore' ? 'restore' : 'publish',
+              createdBy: String(r.created_by || 'admin').replace(/^hero:/, ''),
+              createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+              summary: String(r.snapshot_json.summary || `Published v${r.version_num}`),
+              config: normalizeHeroConfig(r.snapshot_json.heroConfig),
+            }));
+          if (dbVersions.length > 0) {
+            versions = dbVersions;
+          }
+        }
+      } catch {}
+    }
+
+    return res.json({ published, draft, versions });
+  });
+
+  // Save Hero Draft privately (NEVER modifies published hero)
+  app.post('/api/hero/draft', async (req, res) => {
+    const auth = await verifyHeroAdminRequest(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const seasonSlug = String(req.body?.seasonSlug || 'season-4');
+    const rawConfig = req.body?.config;
+    if (!rawConfig || typeof rawConfig !== 'object') {
+      return res.status(400).json({ error: 'Invalid Hero configuration payload.' });
+    }
+
+    const author = sanitizePlainText(req.body?.author || auth.adminName || 'Tournament Director', 80) || 'Tournament Director';
+    const cleanDraft = normalizeHeroConfig({
+      ...rawConfig,
+      status: 'draft',
+      updatedAt: Date.now(),
+      updatedBy: author,
+    });
+
+    const store = readLocalHeroStore();
+    store.draft = cleanDraft;
+    writeJSON(HERO_FILE, store);
+
+    if (serverSupabase) {
+      try {
+        const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+        if (existingRow) {
+          const existingApp = (existingRow.appearance_json as any) || {};
+          const mergedApp = {
+            ...existingApp,
+            heroDraft: cleanDraft,
+          };
+          const { error: sbErr } = await serverSupabase
+            .from('registration_form_config')
+            .update({
+              appearance_json: mergedApp,
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', existingRow.id);
+          if (sbErr) {
+            return res.status(500).json({ error: sbErr.message });
+          }
+        }
+      } catch (err: any) {
+        return res.status(500).json({ error: err?.message || 'Supabase draft persistence failed.' });
+      }
+    }
+
+    return res.json({ success: true, draft: cleanDraft });
+  });
+
+  // Publish Hero Config atomically + Version Snapshot + Realtime Broadcast
+  app.post('/api/hero/publish', async (req, res) => {
+    const auth = await verifyHeroAdminRequest(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const seasonSlug = String(req.body?.seasonSlug || 'season-4');
+    const rawConfig = req.body?.config;
+    if (!rawConfig || typeof rawConfig !== 'object') {
+      return res.status(400).json({ error: 'Invalid Hero configuration payload.' });
+    }
+
+    const author = sanitizePlainText(req.body?.author || auth.adminName || 'Tournament Director', 80) || 'Tournament Director';
+    const action = req.body?.action === 'restore' ? 'restore' : 'publish';
+    const summary = sanitizePlainText(req.body?.summary || 'Published Hero customization', 160) || 'Published Hero customization';
+    const normalizedInput = normalizeHeroConfig(rawConfig);
+
+    const store = readLocalHeroStore();
+    let baseVersion = Number(store.published?.version || 0);
+    let existingRow: any = null;
+
+    if (serverSupabase) {
+      existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+      const dbCurrentVersion = Number((existingRow?.appearance_json as any)?.heroPublished?.version || 0);
+      baseVersion = Math.max(baseVersion, dbCurrentVersion);
+    }
+
+    const nextVersion = Math.max(1, baseVersion + 1);
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+
+    const publishedConfig = normalizeHeroConfig({
+      ...normalizedInput,
+      version: nextVersion,
+      status: 'published',
+      updatedAt: nowMs,
+      updatedBy: author,
+      publishedAt: nowMs,
+      publishedBy: author,
+    });
+
+    const draftMirror = cloneHeroConfig({ ...publishedConfig, status: 'draft' });
+    const versionRecord = {
+      id: crypto.randomUUID(),
+      versionNum: nextVersion,
+      action,
+      createdBy: author,
+      createdAt: nowMs,
+      summary,
+      config: publishedConfig,
+    };
+
+    if (serverSupabase && existingRow) {
+      try {
+        const existingApp = (existingRow.appearance_json as any) || {};
+        const mergedApp = {
+          ...existingApp,
+          heroPublished: publishedConfig,
+          heroDraft: draftMirror,
+          heroLastPublishedAt: nowIso,
+          heroPublishedBy: author,
+        };
+        const { error: updateErr } = await serverSupabase
+          .from('registration_form_config')
+          .update({
+            appearance_json: mergedApp,
+            updated_at: nowIso,
+          })
+          .eq('id', existingRow.id);
+        if (updateErr) {
+          return res.status(500).json({ error: updateErr.message });
+        }
+
+        await serverSupabase.from('registration_form_versions').insert({
+          id: versionRecord.id,
+          form_config_id: existingRow.id,
+          season_slug: existingRow.season_slug || seasonSlug,
+          version_num: nextVersion,
+          snapshot_json: {
+            kind: 'hero_version',
+            action,
+            summary,
+            heroConfig: publishedConfig,
+          },
+          created_by: `hero:${author}`,
+          created_at: nowIso,
+        });
+
+        serverSupabase
+          .from('audit_logs')
+          .insert({
+            action: action === 'restore' ? 'hero_version_restored' : 'hero_published',
+            entity_type: 'hero_config',
+            entity_id: existingRow.id,
+            user_email: author,
+            details_json: { version: nextVersion, summary },
+          })
+          .then(() => {});
+      } catch (err: any) {
+        return res.status(500).json({ error: err?.message || 'Supabase publish error.' });
+      }
+    }
+
+    store.published = publishedConfig;
+    store.draft = draftMirror;
+    store.versions = [versionRecord, ...store.versions].slice(0, 20);
+    writeJSON(HERO_FILE, store);
+
+    broadcastSse('hero_published', {
+      seasonSlug,
+      heroConfig: publishedConfig,
+      version: versionRecord,
+    });
+
+    return res.json({
+      success: true,
+      published: publishedConfig,
+      version: versionRecord,
+    });
+  });
+
+  // Hero Media Upload (Admin RBAC + Magic Byte Signature + SVG Sanitization + Supabase Storage / Local Disk)
+  app.post(
+    '/api/hero/media/upload',
+    express.raw({ type: '*/*', limit: '52mb' }),
+    async (req, res) => {
+      const auth = await verifyHeroAdminRequest(req);
+      if (!auth.authorized) {
+        return res.status(auth.status).json({ error: auth.error });
+      }
+
+      const kindHeader = String(req.headers['x-media-kind'] || 'image').toLowerCase();
+      const kind: 'logo' | 'image' | 'video' =
+        kindHeader === 'logo' || kindHeader === 'video' ? kindHeader : 'image';
+
+      const rawFileName = decodeURIComponent(String(req.headers['x-file-name'] || `upload-${Date.now()}`));
+      const declaredMime = String(req.headers['content-type'] || '').toLowerCase();
+      const buf = Buffer.isBuffer(req.body) ? req.body : Buffer.from([]);
+
+      const checked = detectAndValidateHeroMedia(buf, rawFileName, declaredMime, kind);
+      if (!checked.valid || !checked.buffer || !checked.ext || !checked.mime) {
+        return res.status(400).json({
+          success: false,
+          code: 'INVALID_MEDIA_TYPE',
+          error: checked.error || 'Unsupported or unsafe media file.',
+        });
+      }
+
+      const uniqueName = `hero-${kind}-${Date.now()}-${crypto.randomUUID().slice(0, 8)}${checked.ext}`;
+      const storagePath = `hero/${uniqueName}`;
+
+      // 1. Attempt Supabase Storage upload first if bucket exists
+      if (serverSupabase) {
+        try {
+          const { error: upErr } = await serverSupabase.storage
+            .from('spl-hero-media')
+            .upload(storagePath, checked.buffer, {
+              contentType: checked.mime,
+              cacheControl: '31536000',
+              upsert: false,
+            });
+          if (!upErr) {
+            const { data: pubData } = serverSupabase.storage
+              .from('spl-hero-media')
+              .getPublicUrl(storagePath);
+            if (pubData?.publicUrl) {
+              return res.json({
+                success: true,
+                url: pubData.publicUrl,
+                storagePath,
+                mimeType: checked.mime,
+                size: checked.buffer.length,
+                provider: 'supabase',
+              });
+            }
+          }
+        } catch {}
+      }
+
+      // 2. Clean validated server media store fallback (persists in DATA_DIR/hero-media)
+      try {
+        if (!fs.existsSync(HERO_MEDIA_DIR)) {
+          fs.mkdirSync(HERO_MEDIA_DIR, { recursive: true });
+        }
+        const diskPath = path.join(HERO_MEDIA_DIR, uniqueName);
+        fs.writeFileSync(diskPath, checked.buffer);
+        return res.json({
+          success: true,
+          url: `/api/hero/media/${uniqueName}`,
+          storagePath: uniqueName,
+          mimeType: checked.mime,
+          size: checked.buffer.length,
+          provider: 'server',
+        });
+      } catch (err: any) {
+        return res.status(500).json({
+          success: false,
+          error: err?.message || 'Failed to store uploaded media file.',
+        });
+      }
+    }
+  );
+
+  // Serve validated Hero media with Range support for video streaming
+  app.get('/api/hero/media/:filename', (req, res) => {
+    const rawName = String(req.params.filename || '');
+    const safeName = path.basename(rawName);
+    if (!safeName || safeName !== rawName || safeName.includes('..')) {
+      return res.status(400).json({ error: 'Invalid filename' });
+    }
+    const filePath = path.join(HERO_MEDIA_DIR, safeName);
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Media asset not found' });
+    }
+
+    const ext = path.extname(safeName).toLowerCase();
+    const mimeMap: Record<string, string> = {
+      '.png': 'image/png',
+      '.jpg': 'image/jpeg',
+      '.jpeg': 'image/jpeg',
+      '.webp': 'image/webp',
+      '.avif': 'image/avif',
+      '.svg': 'image/svg+xml',
+      '.mp4': 'video/mp4',
+      '.webm': 'video/webm',
+    };
+    const contentType = mimeMap[ext] || 'application/octet-stream';
+
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    if (ext === '.svg') {
+      res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    }
+
+    const stat = fs.statSync(filePath);
+    const total = stat.size;
+    const range = req.headers.range;
+
+    if (range && (ext === '.mp4' || ext === '.webm')) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? Math.min(parseInt(parts[1], 10), total - 1) : total - 1;
+      if (Number.isNaN(start) || start >= total || start < 0 || end < start) {
+        res.status(416).setHeader('Content-Range', `bytes */${total}`);
+        return res.end();
+      }
+      const chunkSize = end - start + 1;
+      res.status(206);
+      res.setHeader('Content-Range', `bytes ${start}-${end}/${total}`);
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Content-Length', chunkSize);
+      res.setHeader('Content-Type', contentType);
+      return fs.createReadStream(filePath, { start, end }).pipe(res);
+    }
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Content-Length', total);
+    res.setHeader('Accept-Ranges', 'bytes');
+    return fs.createReadStream(filePath).pipe(res);
   });
 
   // Dedicated JSON error handling middleware

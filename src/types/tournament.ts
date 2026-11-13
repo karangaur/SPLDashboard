@@ -322,3 +322,181 @@ export interface TournamentState {
   teamFormationMode: 'random' | 'predefined' | 'mixed';
 }
 
+// ============================================================================
+// HERO SECTION CUSTOMIZATION MANAGER TYPES
+// ============================================================================
+
+export type HeroBackgroundType = 'gradient' | 'image' | 'video';
+export type HeroBackgroundFit = 'cover' | 'contain' | 'fill';
+export type HeroSectionHeight = 'compact' | 'standard' | 'tall' | 'fullscreen';
+export type HeroContentAlignment = 'left' | 'center' | 'right';
+export type HeroFontFamily =
+  | 'Outfit'
+  | 'Plus Jakarta Sans'
+  | 'Barlow Condensed'
+  | 'Oswald'
+  | 'Manrope'
+  | 'DM Sans';
+export type HeroAnimationPreset =
+  | 'staggered-broadcast'
+  | 'cinematic-fade'
+  | 'kinetic-smash'
+  | 'minimal'
+  | 'none';
+export type HeroThemePresetId =
+  | 'championship-gold'
+  | 'electric-arena'
+  | 'royal-championship'
+  | 'custom';
+export type HeroButtonActionTarget =
+  | 'register'
+  | '#live-match'
+  | '#matches-schedule'
+  | '#teams-roster'
+  | '#standings-table'
+  | '#tournament-info'
+  | '/register'
+  | 'custom-url';
+export type HeroButtonStyle =
+  | 'gold-primary'
+  | 'crimson-outline'
+  | 'glass-outline'
+  | 'emerald-solid'
+  | 'royal-solid'
+  | 'custom';
+export type HeroButtonHoverEffect = 'lift-glow' | 'scale' | 'shine' | 'none';
+
+export interface HeroBackgroundConfig {
+  type: HeroBackgroundType;
+  imageUrl: string;
+  imageStoragePath?: string;
+  mobileImageUrl: string;
+  mobileImageStoragePath?: string;
+  focalPointX: number;
+  focalPointY: number;
+  mobileFocalPointX: number;
+  mobileFocalPointY: number;
+  imageFit: HeroBackgroundFit;
+  videoUrl: string;
+  videoStoragePath?: string;
+  videoPosterUrl: string;
+  videoPosterStoragePath?: string;
+  videoAutoplay: boolean;
+  videoLoop: boolean;
+  videoPlayOnMobile: boolean;
+  overlayOpacity: number;
+  overlayColor: string;
+  solidColor: string;
+  gradientStart: string;
+  gradientMid: string;
+  gradientEnd: string;
+  gradientDirection: 'to-b' | 'to-br' | 'to-r' | 'radial';
+  showCourtPattern: boolean;
+  backgroundMotion: boolean;
+}
+
+export interface HeroLogoConfig {
+  visible: boolean;
+  customLogoUrl: string;
+  customLogoStoragePath?: string;
+  customLogoMime?: string;
+  subtitle: string;
+  desktopSize: 'sm' | 'md' | 'lg' | 'xl';
+  mobileSize: 'sm' | 'md' | 'lg';
+  alignment: 'inherit' | 'left' | 'center' | 'right';
+  entranceAnimation: boolean;
+  applyGlobalNavbarBranding: boolean;
+}
+
+export interface HeroTextFieldStyle {
+  text: string;
+  visible: boolean;
+  color: string;
+  fontSizeDesktop: number;
+  fontSizeMobile: number;
+  fontWeight: '500' | '600' | '700' | '800' | '900';
+}
+
+export interface HeroTextConfig {
+  alignment: HeroContentAlignment;
+  fontFamily: HeroFontFamily;
+  kickerText: string;
+  kickerVisible: boolean;
+  kickerColor: string;
+  mainHeading: HeroTextFieldStyle;
+  subtitle: HeroTextFieldStyle;
+  tagline: HeroTextFieldStyle;
+  description: HeroTextFieldStyle;
+  showAnnouncementLine: boolean;
+}
+
+export interface HeroButtonConfig {
+  id: string;
+  role: 'registration' | 'live' | 'schedule';
+  label: string;
+  visible: boolean;
+  order: number;
+  style: HeroButtonStyle;
+  customBgColor: string;
+  customTextColor: string;
+  customBorderColor: string;
+  actionTarget: HeroButtonActionTarget;
+  customUrl: string;
+  hoverEffect: HeroButtonHoverEffect;
+}
+
+export interface HeroButtonsLayoutConfig {
+  desktopLayout: 'row' | 'wrap' | 'stacked';
+  mobileLayout: 'stacked' | 'row';
+  buttons: HeroButtonConfig[];
+}
+
+export interface HeroThemeConfig {
+  preset: HeroThemePresetId;
+  sectionHeight: HeroSectionHeight;
+  contentAlignment: HeroContentAlignment;
+  headingColor: string;
+  accentColor: string;
+  borderColor: string;
+  showRightShowcaseCard: boolean;
+  showInfoStrip: boolean;
+}
+
+export interface HeroAnimationConfig {
+  enabled: boolean;
+  preset: HeroAnimationPreset;
+  intensity: 'subtle' | 'balanced' | 'energetic';
+  durationScale: number;
+  logoEntrance: boolean;
+  headingReveal: boolean;
+  subtitleAnimation: boolean;
+  buttonEntrance: boolean;
+  backgroundMotion: boolean;
+  floatingParticles: boolean;
+  spotlightEffects: boolean;
+}
+
+export interface HeroConfig {
+  version: number;
+  status: 'draft' | 'published';
+  updatedAt: number;
+  updatedBy: string;
+  publishedAt?: number;
+  publishedBy?: string;
+  background: HeroBackgroundConfig;
+  logo: HeroLogoConfig;
+  text: HeroTextConfig;
+  buttons: HeroButtonsLayoutConfig;
+  theme: HeroThemeConfig;
+  animations: HeroAnimationConfig;
+}
+
+export interface HeroVersionRecord {
+  id: string;
+  versionNum: number;
+  action: 'publish' | 'restore';
+  createdBy: string;
+  createdAt: number;
+  summary: string;
+  config: HeroConfig;
+}
