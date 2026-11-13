@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
-import confetti from 'canvas-confetti';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   ArrowRight,
   Award,
@@ -80,7 +79,7 @@ const isGrandFinalMatchRecord = (m?: Match | null) =>
           !m.stageLabel?.toLowerCase().includes('quarter')))
   );
 
-const GoldenChampionshipTrophySvg: React.FC<{ className?: string }> = ({ className = 'w-20 h-20' }) => (
+const GoldenChampionshipTrophySvg: React.FC<{ className?: string }> = React.memo(({ className = 'w-20 h-20' }) => (
   <svg viewBox="0 0 120 120" fill="none" className={className} aria-hidden="true">
     <defs>
       <linearGradient id="splGoldCupGrad" x1="20" y1="15" x2="100" y2="105" gradientUnits="userSpaceOnUse">
@@ -131,7 +130,7 @@ const GoldenChampionshipTrophySvg: React.FC<{ className?: string }> = ({ classNa
     <path d="M40 91H80L84 100H36L40 91Z" fill="url(#splGoldPedestalGrad)" stroke="#FDE68A" strokeWidth="1.5" />
     <rect x="30" y="100" width="60" height="10" rx="3" fill="url(#splGoldPedestalGrad)" stroke="#FEF08A" strokeWidth="1.5" />
   </svg>
-);
+));
 
 const getKnockoutStageMeta = (match?: Match | null) => {
   if (!match || match.matchType !== 'knockout') {
@@ -221,7 +220,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
     Record<string, { winnerId: string; runId: number }>
   >({});
 
+  const isMountedRef = useRef<boolean>(true);
   const gfCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const confettiResetRef = useRef<(() => void) | null>(null);
   const gfCeremonyTimersRef = useRef<number[]>([]);
   const gfRunCounterRef = useRef<number>(0);
   const [gfCeremony, setGfCeremony] = useState<{
@@ -231,47 +232,66 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
     runId: number;
   } | null>(null);
 
-  const clearGfCeremonyTimers = () => {
+  const clearGfCeremonyTimers = useCallback(() => {
     gfCeremonyTimersRef.current.forEach((t) => window.clearTimeout(t));
     gfCeremonyTimersRef.current = [];
-  };
+    confettiResetRef.current?.();
+  }, []);
 
-  const launchScopedGoldFireworks = () => {
+  const launchScopedGoldFireworks = useCallback(() => {
     if (typeof window === 'undefined' || !gfCanvasRef.current) return;
     if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-    try {
-      const fire = confetti.create(gfCanvasRef.current, { resize: true, useWorker: false });
-      const goldColors = ['#FBBF24', '#F59E0B', '#FDE68A', '#FB923C', '#FFFFFF'];
-      fire({
-        particleCount: 55,
-        angle: 60,
-        spread: 60,
-        origin: { x: 0.15, y: 0.72 },
-        colors: goldColors,
-        scalar: 0.95,
-      });
-      fire({
-        particleCount: 55,
-        angle: 120,
-        spread: 60,
-        origin: { x: 0.85, y: 0.72 },
-        colors: goldColors,
-        scalar: 0.95,
-      });
-      const burstTimer = window.setTimeout(() => {
-        try {
-          fire({
-            particleCount: 70,
-            spread: 85,
-            origin: { x: 0.5, y: 0.42 },
-            colors: goldColors,
-            scalar: 1.05,
-          });
-        } catch {}
-      }, 450);
-      gfCeremonyTimersRef.current.push(burstTimer);
-    } catch {}
-  };
+
+    void import('canvas-confetti')
+      .then(({ default: confetti }) => {
+        if (!isMountedRef.current || !gfCanvasRef.current) return;
+        const isCompactMobile = window.innerWidth < 640;
+        const fire = confetti.create(gfCanvasRef.current, {
+          resize: true,
+          useWorker: false,
+          disableForReducedMotion: true,
+        });
+        confettiResetRef.current = () => {
+          try {
+            fire.reset?.();
+          } catch {}
+        };
+        const goldColors = ['#FBBF24', '#F59E0B', '#FDE68A', '#FB923C', '#FFFFFF'];
+        const sideCount = isCompactMobile ? 28 : 55;
+        const centerCount = isCompactMobile ? 36 : 70;
+
+        fire({
+          particleCount: sideCount,
+          angle: 60,
+          spread: 58,
+          origin: { x: 0.15, y: 0.72 },
+          colors: goldColors,
+          scalar: isCompactMobile ? 0.8 : 0.95,
+        });
+        fire({
+          particleCount: sideCount,
+          angle: 120,
+          spread: 58,
+          origin: { x: 0.85, y: 0.72 },
+          colors: goldColors,
+          scalar: isCompactMobile ? 0.8 : 0.95,
+        });
+        const burstTimer = window.setTimeout(() => {
+          if (!isMountedRef.current || !gfCanvasRef.current) return;
+          try {
+            fire({
+              particleCount: centerCount,
+              spread: 80,
+              origin: { x: 0.5, y: 0.42 },
+              colors: goldColors,
+              scalar: isCompactMobile ? 0.85 : 1.05,
+            });
+          } catch {}
+        }, 450);
+        gfCeremonyTimersRef.current.push(burstTimer);
+      })
+      .catch(() => {});
+  }, []);
 
   const startGrandFinalCeremony = (matchId: string, winnerId: string) => {
     clearGfCeremonyTimers();
@@ -340,12 +360,15 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
   };
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
+      isMountedRef.current = false;
       celebrationTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
       celebrationTimersRef.current.clear();
       clearGfCeremonyTimers();
+      confettiResetRef.current = null;
     };
-  }, []);
+  }, [clearGfCeremonyTimers]);
 
   // Detect confirmed Supabase match completions, winner corrections, and resets per match
   useEffect(() => {
@@ -514,9 +537,11 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
     return ordered;
   }, [matches, liveMatches, pausedMatches, readyUpcomingMatches, completedMatches]);
 
-  // Helper getters
-  const getTeam = (id?: string) => (id ? teams.find((t) => t.id === id) : undefined);
-  const getPlayer = (id?: string) => (id ? players.find((p) => p.id === id) : undefined);
+  // Memoized O(1) lookups prevent repeated linear scans on every live score tick
+  const teamMap = useMemo(() => new Map(teams.map((t) => [t.id, t])), [teams]);
+  const playerMap = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
+  const getTeam = (id?: string) => (id ? teamMap.get(id) : undefined);
+  const getPlayer = (id?: string) => (id ? playerMap.get(id) : undefined);
 
   const teamA = getTeam(activeMatch?.teamA);
   const teamB = getTeam(activeMatch?.teamB);
@@ -710,7 +735,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
       />
 
       <div
-        className={`relative rounded-3xl border p-4 sm:p-8 shadow-2xl overflow-hidden transition-all duration-500 ease-out ${
+        className={`relative w-full max-w-full rounded-2xl sm:rounded-3xl border p-3.5 sm:p-6 lg:p-8 shadow-2xl overflow-hidden transition-colors duration-500 ease-out ${
           isGrandFinal
             ? 'border-amber-400/60 bg-gradient-to-br from-[#060503] via-[#170f04] to-[#050403] shadow-[0_0_65px_-12px_rgba(245,158,11,0.55),0_0_32px_-8px_rgba(249,115,22,0.35)]'
             : isSemiFinal
@@ -730,20 +755,20 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
           }`}
         />
 
-        {/* Animated Fiery Gold Spotlights & Golden Particles (Grand Final Championship Only) */}
+        {/* Animated Fiery Gold Spotlights & Golden Particles (Grand Final Championship Only, mobile GPU budgeted) */}
         {isGrandFinal && (
-          <div aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div aria-hidden="true" className="spl-broadcast-layer absolute inset-0 pointer-events-none overflow-hidden">
             {/* Left Fiery Gold Stadium Spotlight */}
             <div className="spl-spotlight-left absolute -top-28 -left-16 w-[58%] h-[145%] origin-top bg-[conic-gradient(from_165deg_at_35%_0%,transparent_0deg,rgba(245,158,11,0.28)_18deg,rgba(249,115,22,0.16)_34deg,transparent_54deg)]" />
             {/* Right Metallic Gold Stadium Spotlight */}
             <div className="spl-spotlight-right absolute -top-28 -right-16 w-[58%] h-[145%] origin-top bg-[conic-gradient(from_140deg_at_65%_0%,transparent_0deg,rgba(251,191,36,0.28)_18deg,rgba(234,88,12,0.15)_34deg,transparent_54deg)]" />
-            {/* Center Fiery Amber Arena Glow */}
-            <div className="absolute inset-x-0 top-1/4 h-72 bg-[radial-gradient(circle,rgba(245,158,11,0.2)_0%,rgba(249,115,22,0.08)_55%,transparent_75%)] blur-2xl" />
-            {/* Floating Golden Championship Particles */}
+            {/* Center Fiery Amber Arena Glow (desktop/tablet) */}
+            <div className="hidden sm:block absolute inset-x-0 top-1/4 h-72 bg-[radial-gradient(circle,rgba(245,158,11,0.2)_0%,rgba(249,115,22,0.08)_55%,transparent_75%)] blur-2xl" />
+            {/* Floating Golden Championship Particles (subset on narrow phones) */}
             {GRAND_FINAL_PARTICLES.map((p, i) => (
               <span
                 key={i}
-                className={`spl-gold-particle absolute rounded-full ${p.size} ${p.color} blur-[0.5px]`}
+                className={`spl-gold-particle absolute rounded-full ${p.size} ${p.color} ${i >= 4 ? 'hidden sm:block' : ''}`}
                 style={{
                   left: p.left,
                   top: p.top,
@@ -757,18 +782,18 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
         {/* Animated Stadium Spotlights & Subtle Particles (Semi-Final Championship Broadcast Only) */}
         {isSemiFinal && (
-          <div aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div aria-hidden="true" className="spl-broadcast-layer absolute inset-0 pointer-events-none overflow-hidden">
             {/* Left Electric Blue Stadium Spotlight Beam */}
             <div className="spl-spotlight-left absolute -top-28 -left-16 w-[55%] h-[145%] origin-top bg-[conic-gradient(from_165deg_at_35%_0%,transparent_0deg,rgba(59,130,246,0.22)_18deg,rgba(99,102,241,0.12)_34deg,transparent_52deg)]" />
             {/* Right Electric Purple Stadium Spotlight Beam */}
             <div className="spl-spotlight-right absolute -top-28 -right-16 w-[55%] h-[145%] origin-top bg-[conic-gradient(from_140deg_at_65%_0%,transparent_0deg,rgba(168,85,247,0.24)_18deg,rgba(139,92,246,0.12)_34deg,transparent_52deg)]" />
-            {/* Soft Center Radial Arena Depth */}
-            <div className="absolute inset-x-0 top-1/4 h-64 bg-[radial-gradient(circle,rgba(139,92,246,0.16)_0%,rgba(59,130,246,0.06)_55%,transparent_75%)] blur-2xl" />
-            {/* Smooth Floating Background Particles */}
+            {/* Soft Center Radial Arena Depth (desktop/tablet) */}
+            <div className="hidden sm:block absolute inset-x-0 top-1/4 h-64 bg-[radial-gradient(circle,rgba(139,92,246,0.16)_0%,rgba(59,130,246,0.06)_55%,transparent_75%)] blur-2xl" />
+            {/* Smooth Floating Background Particles (subset on narrow phones) */}
             {SEMI_FINAL_PARTICLES.map((p, i) => (
               <span
                 key={i}
-                className={`spl-particle-float absolute rounded-full ${p.size} ${p.color} blur-[0.5px]`}
+                className={`spl-particle-float absolute rounded-full ${p.size} ${p.color} ${i >= 4 ? 'hidden sm:block' : ''}`}
                 style={{
                   left: p.left,
                   top: p.top,
@@ -782,7 +807,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
         {/* Animated Celebration Spotlights for League / Quarter-Final when celebration triggers */}
         {isCelebratingNow && !isGrandFinal && !isSemiFinal && (
-          <div aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden">
+          <div aria-hidden="true" className="spl-broadcast-layer absolute inset-0 pointer-events-none overflow-hidden">
             <div className="spl-spotlight-left absolute -top-28 -left-16 w-[52%] h-[145%] origin-top bg-[conic-gradient(from_165deg_at_35%_0%,transparent_0deg,rgba(251,191,36,0.22)_18deg,rgba(16,185,129,0.12)_34deg,transparent_52deg)]" />
             <div className="spl-spotlight-right absolute -top-28 -right-16 w-[52%] h-[145%] origin-top bg-[conic-gradient(from_140deg_at_65%_0%,transparent_0deg,rgba(245,158,11,0.22)_18deg,rgba(56,189,248,0.12)_34deg,transparent_52deg)]" />
           </div>
@@ -793,7 +818,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
           <canvas
             ref={gfCanvasRef}
             aria-hidden="true"
-            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+            className="spl-broadcast-layer absolute inset-0 w-full h-full pointer-events-none z-20"
           />
         )}
 
@@ -808,10 +833,10 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
         {/* Step 3 Animated Radial Golden Fireworks Bursts (contained within broadcast container) */}
         {isGrandFinalChampionConfirmed &&
           (currentGfCeremonyStep === 'step3_fireworks' || currentGfCeremonyStep === 'step4_announce') && (
-            <div aria-hidden="true" className="absolute inset-0 pointer-events-none overflow-hidden z-20">
-              <div className="spl-firework-burst absolute top-14 left-[14%] w-32 h-32 rounded-full bg-[radial-gradient(circle,rgba(253,224,71,0.75)_0%,rgba(245,158,11,0.35)_38%,transparent_72%)] blur-[1px]" />
-              <div className="spl-firework-burst spl-firework-delay-1 absolute top-10 right-[14%] w-36 h-36 rounded-full bg-[radial-gradient(circle,rgba(251,146,60,0.8)_0%,rgba(251,191,36,0.38)_38%,transparent_72%)] blur-[1px]" />
-              <div className="spl-firework-burst spl-firework-delay-2 absolute bottom-16 left-1/2 -translate-x-1/2 w-40 h-40 rounded-full bg-[radial-gradient(circle,rgba(254,240,138,0.7)_0%,rgba(234,88,12,0.32)_40%,transparent_72%)] blur-[1px]" />
+            <div aria-hidden="true" className="spl-broadcast-layer absolute inset-0 pointer-events-none overflow-hidden z-20">
+              <div className="spl-firework-burst absolute top-10 sm:top-14 left-[10%] sm:left-[14%] w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-[radial-gradient(circle,rgba(253,224,71,0.75)_0%,rgba(245,158,11,0.35)_38%,transparent_72%)]" />
+              <div className="spl-firework-burst spl-firework-delay-1 absolute top-8 sm:top-10 right-[10%] sm:right-[14%] w-28 h-28 sm:w-36 sm:h-36 rounded-full bg-[radial-gradient(circle,rgba(251,146,60,0.8)_0%,rgba(251,191,36,0.38)_38%,transparent_72%)]" />
+              <div className="hidden sm:block spl-firework-burst spl-firework-delay-2 absolute bottom-16 left-1/2 -translate-x-1/2 w-40 h-40 rounded-full bg-[radial-gradient(circle,rgba(254,240,138,0.7)_0%,rgba(234,88,12,0.32)_40%,transparent_72%)]" />
             </div>
           )}
 
@@ -824,7 +849,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
             <div
               key={`confetti-${activeMatch.id}-${activeMatchCelebration?.runId || gfCeremony?.runId || 1}`}
               aria-hidden="true"
-              className="absolute inset-0 pointer-events-none overflow-hidden z-20"
+              className="spl-broadcast-layer absolute inset-0 pointer-events-none overflow-hidden z-20"
             >
               {Array.from({ length: 18 }, (_, idx) => (
                 <span
@@ -1086,12 +1111,12 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
             </div>
           )}
 
-          {/* Responsive Multi-Court & Knockout Match Selector (each tab retains its own stage theme) */}
+          {/* Mobile-First Swipeable Multi-Court & Knockout Match Selector */}
           {selectorMatches.length > 1 && (
             <div
               role="tablist"
               aria-label="Live and upcoming court matches"
-              className="flex flex-wrap sm:flex-nowrap items-center gap-1.5 sm:overflow-x-auto no-scrollbar pt-1"
+              className="flex items-center gap-2 overflow-x-auto no-scrollbar snap-x snap-mandatory pt-1 pb-1 max-w-full"
             >
               {selectorMatches.map((m) => {
                 const tA = getTeam(m.teamA);
@@ -1115,7 +1140,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     role="tab"
                     aria-selected={isSelected}
                     onClick={() => setSelectedMatchId(m.id)}
-                    className={`px-2.5 py-1.5 min-h-[40px] rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                    className={`snap-start px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
                       isSelected
                         ? mIsGf
                           ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-400 text-slate-950 border border-amber-200/80 shadow-lg shadow-amber-500/35'
@@ -1160,8 +1185,8 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     <span className="opacity-75 font-mono text-[10px]">
                       {mCourt.replace(/^Court\s+/i, 'C')}:
                     </span>
-                    <span className="truncate max-w-[140px]">
-                      {tA?.badge || ''} {tA?.name?.slice(0, 9) || 'TBD'} v {tB?.name?.slice(0, 9) || 'TBD'}
+                    <span className="truncate max-w-[130px] sm:max-w-[160px]">
+                      {tA?.badge || ''} {tA?.name?.slice(0, 10) || 'TBD'} v {tB?.name?.slice(0, 10) || 'TBD'}
                     </span>
                     {hasScore && (
                       <span
@@ -1199,12 +1224,12 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
             </p>
           </div>
         ) : (
-          <div className="relative z-10 py-5 sm:py-8">
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-center">
+          <div className="spl-landscape-compact-grid relative z-10 py-4 sm:py-7 lg:py-8">
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-3 sm:gap-4 lg:gap-6 items-center">
               
               {/* Team A Card */}
               <div
-                className={`lg:col-span-5 flex items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-5 rounded-2xl border transition-all duration-500 ${
+                className={`spl-landscape-compact-card md:col-span-5 flex items-center justify-between gap-2.5 sm:gap-4 p-3 sm:p-4 lg:p-5 rounded-2xl border transition-colors duration-300 min-w-0 ${
                   showGrandFinalIntro ? 'spl-gf-enter-left' : ''
                 } ${
                   isWinnerA
@@ -1220,7 +1245,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
               >
                 <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
                   <div
-                    className={`relative flex h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl font-black text-xl sm:text-2xl shadow-lg transition-all duration-500 ${
+                    className={`relative flex h-11 w-11 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl font-black text-lg sm:text-2xl shadow-lg ${
                       isGrandFinal
                         ? 'bg-gradient-to-tr from-amber-500 via-yellow-400 to-orange-400 text-slate-950 shadow-amber-500/40 ring-1 ring-amber-200/70'
                         : isSemiFinal
@@ -1231,18 +1256,18 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     <span>{teamA?.badge || '🏸'}</span>
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                      <h3 className="text-base sm:text-xl font-black text-white font-display truncate">
+                    <div className="flex flex-wrap items-center gap-1 sm:gap-2">
+                      <h3 className="text-sm sm:text-lg lg:text-xl font-black text-white font-display leading-snug line-clamp-2 sm:truncate">
                         {teamA?.name || 'Awaiting Team'}
                       </h3>
                       {isWinnerA && (
-                        <span className="px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase shrink-0 border bg-amber-400/25 text-amber-200 border-amber-300/55">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase shrink-0 border bg-amber-400/25 text-amber-200 border-amber-300/55">
                           {isGrandFinal ? '👑 Champion' : '🏆 Winner'}
                         </span>
                       )}
                     </div>
                     <div
-                      className={`text-xs mt-0.5 truncate ${
+                      className={`text-[11px] sm:text-xs mt-0.5 truncate ${
                         isGrandFinal
                           ? 'text-amber-200/85'
                           : isSemiFinal
@@ -1273,7 +1298,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                 {/* Large Score Digit (zero animation delay for instant real-time updates) */}
                 <div className={`text-right shrink-0 pl-2 ${showGrandFinalIntro ? 'spl-gf-scoreboard-reveal' : ''}`}>
                   <div
-                    className={`text-3xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums ${
+                    className={`text-4xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums leading-none ${
                       scoreA > scoreB
                         ? isGrandFinal
                           ? 'text-amber-300 drop-shadow-[0_0_22px_rgba(251,191,36,0.75)]'
@@ -1288,7 +1313,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     {scoreA}
                   </div>
                   <span
-                    className={`text-[10px] uppercase font-bold ${
+                    className={`text-[10px] uppercase font-bold block mt-0.5 ${
                       isGrandFinal
                         ? 'text-amber-300/80'
                         : isSemiFinal
@@ -1302,14 +1327,14 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
               </div>
 
               {/* Middle Match Broadcast Status & Cinematic VS Divider */}
-              <div className="lg:col-span-2 flex flex-col items-center justify-center text-center space-y-2 py-1 sm:py-2">
+              <div className="md:col-span-2 flex flex-col items-center justify-center text-center space-y-1.5 sm:space-y-2 py-1 sm:py-2 min-w-0">
                 {isGrandFinal ? (
                   <div className={`relative flex items-center justify-center ${showGrandFinalIntro ? 'spl-gf-vs-burst' : ''}`}>
                     <span
                       aria-hidden="true"
-                      className="spl-vs-pulse absolute w-16 h-16 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-amber-500/50 via-orange-500/45 to-yellow-400/45 blur-md pointer-events-none"
+                      className="spl-vs-pulse absolute w-14 h-14 sm:w-20 sm:h-20 rounded-full bg-gradient-to-tr from-amber-500/50 via-orange-500/45 to-yellow-400/45 blur-md pointer-events-none"
                     />
-                    <div className="relative inline-flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 rounded-2xl rotate-3 bg-gradient-to-br from-amber-300 via-amber-500 to-orange-600 border border-amber-200/85 text-slate-950 font-black italic text-base sm:text-lg font-display tracking-wider shadow-[0_0_28px_rgba(245,158,11,0.8)]">
+                    <div className="relative inline-flex items-center justify-center w-11 h-11 sm:w-14 sm:h-14 rounded-2xl rotate-3 bg-gradient-to-br from-amber-300 via-amber-500 to-orange-600 border border-amber-200/85 text-slate-950 font-black italic text-sm sm:text-lg font-display tracking-wider shadow-[0_0_28px_rgba(245,158,11,0.8)]">
                       VS
                     </div>
                   </div>
@@ -1317,9 +1342,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   <div className="relative flex items-center justify-center">
                     <span
                       aria-hidden="true"
-                      className="spl-vs-pulse absolute w-14 h-14 sm:w-16 sm:h-16 rounded-full bg-gradient-to-tr from-blue-500/40 via-violet-500/40 to-purple-500/40 blur-sm pointer-events-none"
+                      className="spl-vs-pulse absolute w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-gradient-to-tr from-blue-500/40 via-violet-500/40 to-purple-500/40 blur-sm pointer-events-none"
                     />
-                    <div className="relative inline-flex items-center justify-center w-11 h-11 sm:w-12 sm:h-12 rounded-2xl rotate-3 bg-gradient-to-br from-blue-500 via-violet-600 to-purple-600 border border-violet-300/70 text-white font-black italic text-sm sm:text-base font-display tracking-wider shadow-[0_0_24px_rgba(139,92,246,0.75)]">
+                    <div className="relative inline-flex items-center justify-center w-10 h-10 sm:w-12 sm:h-12 rounded-2xl rotate-3 bg-gradient-to-br from-blue-500 via-violet-600 to-purple-600 border border-violet-300/70 text-white font-black italic text-sm sm:text-base font-display tracking-wider shadow-[0_0_24px_rgba(139,92,246,0.75)]">
                       VS
                     </div>
                   </div>
@@ -1329,9 +1354,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   </div>
                 )}
 
-                <div className="space-y-0.5">
+                <div className="space-y-0.5 max-w-full">
                   <span
-                    className={`text-[11px] font-bold uppercase tracking-wider block ${
+                    className={`text-[11px] font-bold uppercase tracking-wider block truncate ${
                       isGrandFinal
                         ? 'text-amber-100'
                         : isSemiFinal
@@ -1352,7 +1377,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                       : 'UPCOMING'}
                   </span>
                   <span
-                    className={`text-[10px] font-medium block ${
+                    className={`text-[10px] font-medium block truncate max-w-[220px] md:max-w-[150px] mx-auto ${
                       isGrandFinal
                         ? 'text-amber-300'
                         : isSemiFinal
@@ -1401,7 +1426,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
               {/* Team B Card */}
               <div
-                className={`lg:col-span-5 flex items-center justify-between gap-3 sm:gap-4 p-3.5 sm:p-5 rounded-2xl border transition-all duration-500 ${
+                className={`spl-landscape-compact-card md:col-span-5 flex items-center justify-between gap-2.5 sm:gap-4 p-3 sm:p-4 lg:p-5 rounded-2xl border transition-colors duration-300 min-w-0 ${
                   showGrandFinalIntro ? 'spl-gf-enter-right' : ''
                 } ${
                   isWinnerB
@@ -1415,14 +1440,14 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     : 'bg-white/[0.03] border-white/10 hover:border-lime-400/30'
                 }`}
               >
-                {/* Score Digit (Left on desktop for symmetry, right on mobile) */}
+                {/* Score Digit (Left on tablet/desktop for symmetry, right on mobile portrait) */}
                 <div
-                  className={`text-right lg:text-left order-2 lg:order-1 shrink-0 pl-2 lg:pl-0 lg:pr-2 ${
+                  className={`text-right md:text-left order-2 md:order-1 shrink-0 pl-2 md:pl-0 md:pr-2 ${
                     showGrandFinalIntro ? 'spl-gf-scoreboard-reveal' : ''
                   }`}
                 >
                   <div
-                    className={`text-3xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums ${
+                    className={`text-4xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums leading-none ${
                       scoreB > scoreA
                         ? isGrandFinal
                           ? 'text-amber-300 drop-shadow-[0_0_22px_rgba(251,191,36,0.75)]'
@@ -1437,7 +1462,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     {scoreB}
                   </div>
                   <span
-                    className={`text-[10px] uppercase font-bold ${
+                    className={`text-[10px] uppercase font-bold block mt-0.5 ${
                       isGrandFinal
                         ? 'text-amber-300/80'
                         : isSemiFinal
@@ -1449,9 +1474,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   </span>
                 </div>
 
-                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 order-1 lg:order-2 text-left lg:text-right justify-start lg:justify-end">
+                <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1 order-1 md:order-2 text-left md:text-right justify-start md:justify-end">
                   <div
-                    className={`relative flex lg:hidden h-12 w-12 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-2xl font-black text-xl sm:text-2xl shadow-lg transition-all duration-500 ${
+                    className={`relative flex md:hidden h-11 w-11 sm:h-14 sm:w-14 shrink-0 items-center justify-center rounded-xl sm:rounded-2xl font-black text-lg sm:text-2xl shadow-lg ${
                       isGrandFinal
                         ? 'bg-gradient-to-tr from-orange-600 via-amber-500 to-yellow-400 text-slate-950 shadow-orange-500/40 ring-1 ring-amber-200/70'
                         : isSemiFinal
@@ -1462,19 +1487,19 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     <span>{teamB?.badge || '🏸'}</span>
                   </div>
 
-                  <div className="min-w-0 flex-1 lg:flex-initial">
-                    <div className="flex flex-wrap items-center justify-start lg:justify-end gap-1.5 sm:gap-2">
+                  <div className="min-w-0 flex-1 md:flex-initial">
+                    <div className="flex flex-wrap items-center justify-start md:justify-end gap-1 sm:gap-2">
                       {isWinnerB && (
-                        <span className="px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase shrink-0 border bg-amber-400/25 text-amber-200 border-amber-300/55">
+                        <span className="px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase shrink-0 border bg-amber-400/25 text-amber-200 border-amber-300/55">
                           {isGrandFinal ? '👑 Champion' : '🏆 Winner'}
                         </span>
                       )}
-                      <h3 className="text-base sm:text-xl font-black text-white font-display truncate">
+                      <h3 className="text-sm sm:text-lg lg:text-xl font-black text-white font-display leading-snug line-clamp-2 sm:truncate">
                         {teamB?.name || 'Awaiting Team'}
                       </h3>
                     </div>
                     <div
-                      className={`text-xs mt-0.5 truncate ${
+                      className={`text-[11px] sm:text-xs mt-0.5 truncate ${
                         isGrandFinal
                           ? 'text-amber-200/85'
                           : isSemiFinal
@@ -1502,7 +1527,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   </div>
 
                   <div
-                    className={`relative hidden lg:flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl font-black text-2xl shadow-lg transition-all duration-500 ${
+                    className={`relative hidden md:flex h-12 w-12 lg:h-14 lg:w-14 shrink-0 items-center justify-center rounded-2xl font-black text-xl lg:text-2xl shadow-lg ${
                       isGrandFinal
                         ? 'bg-gradient-to-tr from-orange-600 via-amber-500 to-yellow-400 text-slate-950 shadow-orange-500/40 ring-1 ring-amber-200/70'
                         : isSemiFinal
@@ -1519,30 +1544,30 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
             {/* PHASE 6: SPECTACULAR GRAND FINAL CHAMPIONSHIP CEREMONY & FINAL CHAMPIONSHIP SCREEN */}
             {isGrandFinalChampionConfirmed && officialWinnerId ? (
-              <div className="mt-6 relative z-30">
+              <div className="mt-5 sm:mt-6 relative z-30">
                 {isGrandFinalCeremonyPlaying ? (
-                  <div className="relative overflow-hidden rounded-3xl border border-amber-300/75 bg-gradient-to-b from-[#171003]/95 via-[#0b0803]/95 to-[#170e03]/95 px-4 py-6 sm:px-8 sm:py-8 text-center shadow-[0_0_55px_-10px_rgba(251,191,36,0.65)]">
+                  <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-amber-300/75 bg-gradient-to-b from-[#171003]/95 via-[#0b0803]/95 to-[#170e03]/95 px-3.5 py-5 sm:px-8 sm:py-8 text-center shadow-[0_0_55px_-10px_rgba(251,191,36,0.65)]">
                     <div
                       aria-hidden="true"
                       className="spl-championship-sheen absolute inset-y-0 w-32 bg-gradient-to-r from-transparent via-amber-200/20 to-transparent skew-x-[-20deg] pointer-events-none"
                     />
 
-                    <div className="relative z-10 flex flex-col items-center space-y-4">
+                    <div className="relative z-10 flex flex-col items-center space-y-3 sm:space-y-4">
                       {/* Step 1 Heading */}
-                      <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-400/20 border border-amber-300/60 text-amber-200 text-xs sm:text-sm font-black uppercase tracking-[0.2em]">
+                      <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-amber-400/20 border border-amber-300/60 text-amber-200 text-xs sm:text-sm font-black uppercase tracking-[0.16em] sm:tracking-[0.2em]">
                         <Sparkles className="w-4 h-4 text-yellow-300 shrink-0" />
                         <span>WE HAVE OUR CHAMPIONS!</span>
                       </div>
 
                       {/* Step 2+: Rising Golden 3D-Spinning Championship Trophy with Halo Glow */}
                       {currentGfCeremonyStep !== 'step1_victory' && (
-                        <div className="relative flex items-center justify-center py-2 spl-gf-trophy-rise">
+                        <div className="relative flex items-center justify-center py-1.5 sm:py-2 spl-gf-trophy-rise">
                           <div
                             aria-hidden="true"
-                            className="spl-trophy-glow absolute w-32 h-32 rounded-full bg-[radial-gradient(circle,rgba(251,191,36,0.55)_0%,rgba(249,115,22,0.25)_50%,transparent_75%)] blur-xl"
+                            className="spl-trophy-glow absolute w-24 h-24 sm:w-32 sm:h-32 rounded-full bg-[radial-gradient(circle,rgba(251,191,36,0.55)_0%,rgba(249,115,22,0.25)_50%,transparent_75%)] blur-xl"
                           />
                           <div className="spl-gf-trophy-spin3d relative z-10 drop-shadow-[0_0_24px_rgba(251,191,36,0.8)]">
-                            <GoldenChampionshipTrophySvg className="w-20 h-20 sm:w-24 sm:h-24" />
+                            <GoldenChampionshipTrophySvg className="w-16 h-16 sm:w-24 sm:h-24" />
                           </div>
                         </div>
                       )}
@@ -1590,7 +1615,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                             curr ? { ...curr, step: 'step5_final_screen' } : null
                           );
                         }}
-                        className="px-3.5 py-1.5 min-h-[36px] rounded-xl text-[11px] font-bold uppercase tracking-wider text-amber-200 hover:text-white bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 transition-colors cursor-pointer"
+                        className="px-4 py-2 min-h-[44px] rounded-xl text-[11px] font-bold uppercase tracking-wider text-amber-200 hover:text-white bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/40 transition-colors cursor-pointer"
                       >
                         Results View
                       </button>
@@ -1598,36 +1623,36 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   </div>
                 ) : (
                   /* Step 5: Final Black-and-Gold Championship Results Screen (refresh-safe, authoritative Supabase scores) */
-                  <div className="relative overflow-hidden rounded-3xl border border-amber-300/75 bg-gradient-to-br from-[#080603] via-[#1b1204] to-[#070502] p-5 sm:p-8 shadow-[0_0_50px_-10px_rgba(251,191,36,0.55),inset_0_1px_0_rgba(253,230,138,0.25)]">
+                  <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl border border-amber-300/75 bg-gradient-to-br from-[#080603] via-[#1b1204] to-[#070502] p-4 sm:p-7 lg:p-8 shadow-[0_0_50px_-10px_rgba(251,191,36,0.55),inset_0_1px_0_rgba(253,230,138,0.25)]">
                     <div
                       aria-hidden="true"
                       className="spl-championship-sheen absolute inset-y-0 w-28 bg-gradient-to-r from-transparent via-amber-200/15 to-transparent skew-x-[-20deg] pointer-events-none"
                     />
 
-                    <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 sm:gap-5 text-center sm:text-left min-w-0">
-                        <div className="relative shrink-0 flex items-center justify-center w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-orange-600/20 border border-amber-300/60 shadow-[0_0_28px_rgba(245,158,11,0.45)]">
+                    <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5 sm:gap-6">
+                      <div className="flex flex-col sm:flex-row items-center sm:items-start gap-3.5 sm:gap-5 text-center sm:text-left min-w-0">
+                        <div className="relative shrink-0 flex items-center justify-center w-16 h-16 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-br from-amber-500/20 via-yellow-500/10 to-orange-600/20 border border-amber-300/60 shadow-[0_0_28px_rgba(245,158,11,0.45)]">
                           <span
                             aria-hidden="true"
                             className="spl-trophy-glow absolute inset-1 rounded-2xl bg-amber-400/20 blur-md"
                           />
-                          <GoldenChampionshipTrophySvg className="w-16 h-16 sm:w-20 sm:h-20 relative z-10" />
+                          <GoldenChampionshipTrophySvg className="w-12 h-12 sm:w-20 sm:h-20 relative z-10" />
                         </div>
 
                         <div className="min-w-0 space-y-1.5">
-                          <div className="text-[11px] sm:text-xs font-extrabold uppercase tracking-[0.22em] text-amber-300">
+                          <div className="text-[10px] sm:text-xs font-extrabold uppercase tracking-[0.18em] sm:tracking-[0.22em] text-amber-300">
                             🏆 SMASH PREMIER LEAGUE 3.0 · 👑 SPL 3.0 CHAMPION EDITION
                           </div>
                           <h4 className="text-2xl sm:text-4xl font-black font-display uppercase tracking-wider bg-gradient-to-r from-amber-100 via-yellow-300 to-orange-400 bg-clip-text text-transparent">
                             CHAMPIONS
                           </h4>
-                          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2.5">
-                            <span className="text-2xl">{winnerTeam?.badge || '🏆'}</span>
-                            <span className="text-lg sm:text-2xl font-black text-white font-display">
+                          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                            <span className="text-xl sm:text-2xl">{winnerTeam?.badge || '🏆'}</span>
+                            <span className="text-base sm:text-2xl font-black text-white font-display break-words">
                               {winnerTeam?.name || 'Grand Final Winner'}
                             </span>
                           </div>
-                          <p className="text-xs sm:text-sm text-amber-100/90 font-medium">
+                          <p className="text-xs sm:text-sm text-amber-100/90 font-medium break-words">
                             {winnerPlayers.length > 0
                               ? `Players: ${winnerPlayers.map((p) => p.name).join(' · ')}`
                               : 'Official Championship Squad'}
@@ -1635,12 +1660,12 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         </div>
                       </div>
 
-                      <div className="flex flex-col items-center lg:items-end gap-3 shrink-0">
-                        <div className="px-4 py-2.5 rounded-2xl border border-amber-400/45 bg-black/50 text-center lg:text-right">
+                      <div className="flex flex-col items-stretch sm:items-center lg:items-end gap-3 shrink-0 w-full lg:w-auto">
+                        <div className="px-3.5 py-2.5 rounded-2xl border border-amber-400/45 bg-black/50 text-center lg:text-right">
                           <div className="text-[10px] font-bold uppercase tracking-widest text-amber-300/85">
                             Grand Final Score · {courtDisplayName}
                           </div>
-                          <div className="text-xl sm:text-2xl font-black font-mono text-amber-200 tabular-nums mt-0.5">
+                          <div className="text-base sm:text-2xl font-black font-mono text-amber-200 tabular-nums mt-0.5 break-words">
                             {teamA?.name?.slice(0, 12) || 'Team A'} {scoreA} – {scoreB} {teamB?.name?.slice(0, 12) || 'Team B'}
                           </div>
                           {sets.length > 1 && (
@@ -1653,7 +1678,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         <button
                           type="button"
                           onClick={() => startGrandFinalCeremony(activeMatch.id, officialWinnerId)}
-                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 hover:from-amber-200 hover:to-orange-300 shadow-lg shadow-amber-500/35 transition-all cursor-pointer whitespace-nowrap"
+                          className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-5 py-2.5 min-h-[44px] rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 hover:from-amber-200 hover:to-orange-300 shadow-lg shadow-amber-500/35 transition-colors cursor-pointer whitespace-nowrap"
                         >
                           <RotateCcw className="w-4 h-4 shrink-0" />
                           <span>Replay Championship Celebration</span>
@@ -1669,7 +1694,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
               officialWinnerId && (
                 <div
                   key={`winner-banner-${activeMatch.id}-${activeMatchCelebration?.runId || 0}`}
-                  className={`mt-5 sm:mt-6 relative overflow-hidden rounded-2xl border px-4 py-3.5 sm:px-6 sm:py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
+                  className={`mt-5 sm:mt-6 relative overflow-hidden rounded-2xl border px-3.5 py-3.5 sm:px-6 sm:py-4 flex flex-col md:flex-row md:items-center justify-between gap-3 ${
                     isCelebratingNow ? 'spl-winner-banner-in' : ''
                   } ${
                     isSemiFinal
@@ -1696,14 +1721,14 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="text-sm sm:text-lg font-black font-display uppercase tracking-wide text-amber-200 truncate">
+                        <span className="text-sm sm:text-lg font-black font-display uppercase tracking-wide text-amber-200 break-words">
                           {isSemiFinal
                             ? `SEMI-FINAL WINNER – ${winnerTeam?.name || 'Winner'}`
                             : isQuarterFinal
                             ? `QUARTER-FINAL WINNER – ${winnerTeam?.name || 'Winner'}`
                             : `MATCH WINNER – ${winnerTeam?.name || 'Winner'}`}
                         </span>
-                        <span className="text-xs font-mono font-bold text-white/90 tabular-nums">
+                        <span className="text-xs font-mono font-bold text-white/90 tabular-nums shrink-0">
                           ({scoreA} - {scoreB})
                         </span>
                       </div>
@@ -1731,7 +1756,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   <button
                     type="button"
                     onClick={() => triggerCelebrationForMatch(activeMatch.id, officialWinnerId)}
-                    className={`shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs font-bold border transition-all cursor-pointer whitespace-nowrap ${
+                    className={`w-full md:w-auto shrink-0 inline-flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-bold border transition-colors cursor-pointer whitespace-nowrap ${
                       isSemiFinal
                         ? 'bg-violet-500/25 hover:bg-violet-500/35 text-violet-100 border-violet-300/50'
                         : 'bg-amber-400/20 hover:bg-amber-400/30 text-amber-100 border-amber-300/55'
@@ -1748,7 +1773,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
         {/* Footer Actions Strip: Match Controls & Details */}
         <div
-          className={`relative z-10 flex flex-col sm:flex-row items-center justify-between gap-4 pt-5 border-t transition-colors duration-500 ${
+          className={`relative z-10 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-4 pt-4 sm:pt-5 border-t transition-colors duration-500 ${
             isGrandFinal
               ? 'border-amber-400/30'
               : isSemiFinal
@@ -1773,11 +1798,11 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
             <span>{venue || 'Maharajganj Indoor Stadium'} · Official Referee Monitored</span>
           </div>
 
-          <div className="flex items-center gap-3 w-full sm:w-auto">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
             {activeMatch && onOpenMatchModal && (
               <button
                 onClick={() => onOpenMatchModal(activeMatch)}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
                   isGrandFinal
                     ? 'text-slate-950 bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 hover:from-amber-200 hover:to-orange-300 shadow-lg shadow-amber-500/35'
                     : isSemiFinal
@@ -1785,7 +1810,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     : 'text-slate-950 bg-lime-400 hover:bg-lime-300 shadow-md shadow-lime-400/20'
                 }`}
               >
-                <Maximize2 className="w-3.5 h-3.5" />
+                <Maximize2 className="w-3.5 h-3.5 shrink-0" />
                 <span>OPEN LIVE MATCH</span>
               </button>
             )}
@@ -1793,7 +1818,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
             {onGoToFixtures && (
               <button
                 onClick={onGoToFixtures}
-                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+                className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-semibold border transition-colors cursor-pointer whitespace-nowrap ${
                   isGrandFinal
                     ? 'text-amber-100 hover:text-white bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40'
                     : isSemiFinal
@@ -1802,7 +1827,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                 }`}
               >
                 <span>Full Match Centre</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <ArrowRight className="w-3.5 h-3.5 shrink-0" />
               </button>
             )}
           </div>

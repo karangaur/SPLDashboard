@@ -471,18 +471,18 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
         {/* 3. LIVE MATCH — THE MAIN FEATURE SECTION */}
         <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="mb-4 flex items-center justify-between">
-            <div>
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div className="min-w-0">
               <span className="text-xs font-bold uppercase tracking-wider text-lime-400 block">
                 Court Action Center
               </span>
-              <h2 className="text-2xl sm:text-3xl font-black text-white font-display uppercase tracking-tight">
+              <h2 className="text-xl sm:text-3xl font-black text-white font-display uppercase tracking-tight">
                 Live Match Broadcast
               </h2>
             </div>
             {liveMatchesCount > 0 && (
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs font-bold">
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/40 text-xs font-bold shrink-0">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
                 <span>{liveMatchesCount} Match{liveMatchesCount > 1 ? 'es' : ''} in Progress</span>
               </div>
             )}

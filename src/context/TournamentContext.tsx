@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import {
   TournamentState,
   Player,
@@ -25,7 +25,6 @@ import {
   progressKnockoutMatches,
   calculateStandings,
 } from '../utils/tournamentEngine';
-import confetti from 'canvas-confetti';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
 import { AuthService } from '../services/authService';
@@ -150,11 +149,30 @@ interface TournamentContextType {
 
 const TournamentContext = createContext<TournamentContextType | null>(null);
 
-// Audio synthesizer using Web Audio API for sports buzzer & fanfares
+// Audio synthesizer using shared lazy Web Audio API context (prevents AudioContext leaks across long matches)
+let sharedAudioContext: AudioContext | null = null;
+const getSharedAudioContext = (): AudioContext | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    if (!sharedAudioContext || sharedAudioContext.state === 'closed') {
+      const AudioCtor = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtor) return null;
+      sharedAudioContext = new AudioCtor();
+    }
+    if (sharedAudioContext.state === 'suspended') {
+      void sharedAudioContext.resume().catch(() => {});
+    }
+    return sharedAudioContext;
+  } catch {
+    return null;
+  }
+};
+
 export const sportsAudio = {
   playScorePing: () => {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = getSharedAudioContext();
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -170,7 +188,8 @@ export const sportsAudio = {
   },
   playFanfare: () => {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = getSharedAudioContext();
+      if (!ctx) return;
       const notes = [523.25, 659.25, 783.99, 1046.5];
       notes.forEach((freq, idx) => {
         const osc = ctx.createOscillator();
@@ -189,7 +208,8 @@ export const sportsAudio = {
   },
   playButtonClick: () => {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = getSharedAudioContext();
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -204,7 +224,8 @@ export const sportsAudio = {
   },
   playTrash: () => {
     try {
-      const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const ctx = getSharedAudioContext();
+      if (!ctx) return;
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sawtooth';
@@ -244,9 +265,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const stateRef = useRef<TournamentState>(state);
   stateRef.current = state;
 
-  const reconnectRealtime = () => {
+  const reconnectRealtime = useCallback(() => {
     reconnectTriggerRef.current?.();
-  };
+  }, []);
 
   useEffect(() => {
     if (typeof document !== 'undefined' && state.settings?.name) {
@@ -312,6 +333,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     let reconnectAttempt = 0;
     let currentChannelHealthy = !SupabaseService.isAvailable();
     let reconcileInFlight: Promise<void> | null = null;
+    let hasStartedInitialReconcile = false;
+    let needsReconcileOnSubscribe = false;
 
     const clearFallbackPolling = () => {
       if (fallbackPollInterval) {
@@ -1051,6 +1074,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         onStatusChange: (status) => {
           if (isDisposed) return;
           if (status === 'SUBSCRIBED') {
+            const shouldReconcile = needsReconcileOnSubscribe || !hasStartedInitialReconcile;
+            needsReconcileOnSubscribe = false;
             currentChannelHealthy = true;
             reconnectAttempt = 0;
             clearFallbackPolling();
@@ -1059,9 +1084,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               reconnectTimer = null;
             }
             setRealtimeStatus('connected');
-            void reconcileAuthoritativeData();
+            if (shouldReconcile) {
+              hasStartedInitialReconcile = true;
+              void reconcileAuthoritativeData();
+            }
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
             currentChannelHealthy = false;
+            needsReconcileOnSubscribe = true;
             const online = typeof navigator === 'undefined' || navigator.onLine;
             setRealtimeStatus(online ? 'reconnecting' : 'offline');
             if (online) {
@@ -1082,7 +1111,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
     };
 
-    // Initial reconciliation + subscribe
+    // Initial reconciliation + subscribe (deduplicated so initial SUBSCRIBED does not double-fetch)
+    hasStartedInitialReconcile = true;
     void reconcileAuthoritativeData();
     subscribeRealtime();
 
@@ -1529,32 +1559,43 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   }, [completedStandingsSignature, state.registrationSettings.seasonSlug]);
 
 
-  // Confetti trigger
-  const triggerCelebration = () => {
+  // Confetti trigger (lazy-loaded and respects prefers-reduced-motion)
+  const triggerCelebration = useCallback(() => {
     sportsAudio.playFanfare();
-    confetti({
-      particleCount: 120,
-      spread: 90,
-      origin: { y: 0.6 },
-      colors: ['#fbbf24', '#f59e0b', '#3b82f6', '#10b981', '#ffffff'],
-    });
-    setTimeout(() => {
-      confetti({
-        particleCount: 60,
-        angle: 60,
-        spread: 60,
-        origin: { x: 0.1, y: 0.7 },
-      });
-    }, 200);
-    setTimeout(() => {
-      confetti({
-        particleCount: 60,
-        angle: 120,
-        spread: 60,
-        origin: { x: 0.9, y: 0.7 },
-      });
-    }, 400);
-  };
+    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      return;
+    }
+    void import('canvas-confetti')
+      .then(({ default: confetti }) => {
+        const isMobileViewport = typeof window !== 'undefined' && window.innerWidth < 640;
+        confetti({
+          particleCount: isMobileViewport ? 60 : 120,
+          spread: 90,
+          origin: { y: 0.6 },
+          colors: ['#fbbf24', '#f59e0b', '#3b82f6', '#10b981', '#ffffff'],
+          disableForReducedMotion: true,
+        });
+        setTimeout(() => {
+          confetti({
+            particleCount: isMobileViewport ? 30 : 60,
+            angle: 60,
+            spread: 60,
+            origin: { x: 0.1, y: 0.7 },
+            disableForReducedMotion: true,
+          });
+        }, 200);
+        setTimeout(() => {
+          confetti({
+            particleCount: isMobileViewport ? 30 : 60,
+            angle: 120,
+            spread: 60,
+            origin: { x: 0.9, y: 0.7 },
+            disableForReducedMotion: true,
+          });
+        }, 400);
+      })
+      .catch(() => {});
+  }, []);
 
   // Settings (Atomic Supabase + Server Persistence & Multi-Device Broadcast)
   const saveAllSettings = async (

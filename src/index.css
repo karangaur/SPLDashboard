@@ -508,6 +508,34 @@
   will-change: transform, opacity;
 }
 
+.spl-broadcast-layer {
+  contain: layout style paint;
+}
+
+@media (max-width: 639px) {
+  .spl-confetti-piece:nth-child(n+11) {
+    display: none;
+  }
+  .spl-spotlight-left,
+  .spl-spotlight-right,
+  .spl-gold-particle,
+  .spl-particle-float,
+  .spl-gf-trophy-spin3d {
+    will-change: auto;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 540px) {
+  .spl-landscape-compact-grid {
+    padding-top: 0.75rem;
+    padding-bottom: 0.75rem;
+    gap: 0.75rem;
+  }
+  .spl-landscape-compact-card {
+    padding: 0.75rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .spl-spotlight-left,
   .spl-spotlight-right,
