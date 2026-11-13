@@ -9,6 +9,7 @@ import {
   Trophy,
   X,
   XCircle,
+  Lock,
 } from 'lucide-react';
 import { KnockoutData, KnockoutMatch, Match, Player, StandingsRecord, Team } from '../../types/tournament';
 
@@ -20,6 +21,7 @@ export interface TeamsShowcaseSectionProps {
   standings: StandingsRecord[];
   courtNames?: string[];
   tournamentName: string;
+  registrationOpen?: boolean;
   onOpenPublicRegister: () => void;
   onSelectMatch?: (match: Match) => void;
   selectedTeamId?: string | null;
@@ -786,6 +788,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
   standings,
   courtNames,
   tournamentName,
+  registrationOpen = true,
   onOpenPublicRegister,
   onSelectMatch,
   selectedTeamId: controlledSelectedTeamId,
@@ -1000,16 +1003,30 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
               Contenders Draft in Progress
             </h3>
             <p className="text-xs sm:text-sm text-slate-400 mt-2 leading-relaxed">
-              Official championship squads for {tournamentName} are being finalized. Register now to enter the athlete draft.
+              {registrationOpen
+                ? `Official championship squads for ${tournamentName} are being finalized. Register now to enter the athlete draft.`
+                : `Official championship squads for ${tournamentName} are being finalized. Registration for Smash Premier League 3.0 is currently closed.`}
             </p>
-            <button
-              type="button"
-              onClick={onOpenPublicRegister}
-              className="mt-6 inline-flex items-center gap-2 px-6 py-3 min-h-[44px] rounded-xl font-display font-black text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:to-orange-400 shadow-lg shadow-amber-500/25 transition-all active:scale-95 cursor-pointer"
-            >
-              <PlusCircle className="w-4 h-4" />
-              <span>Register as an Athlete</span>
-            </button>
+            {registrationOpen ? (
+              <button
+                type="button"
+                onClick={onOpenPublicRegister}
+                className="mt-6 inline-flex items-center gap-2 px-6 py-3 min-h-[44px] rounded-xl font-display font-black text-xs uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:to-orange-400 shadow-lg shadow-amber-500/25 transition-all active:scale-95 cursor-pointer"
+              >
+                <PlusCircle className="w-4 h-4" />
+                <span>Register as an Athlete</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="mt-6 inline-flex items-center gap-2 px-6 py-3 min-h-[44px] rounded-xl font-display font-black text-xs uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 cursor-not-allowed"
+              >
+                <Lock className="w-4 h-4" />
+                <span>REGISTRATION CLOSED</span>
+              </button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 sm:gap-6 items-stretch">

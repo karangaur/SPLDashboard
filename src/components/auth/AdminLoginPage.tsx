@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { AuthService, AdminUser } from '../../services/authService';
 import { ForgotPasswordModal } from './ForgotPasswordModal';
+import { useTournament } from '../../context/TournamentContext';
 
 interface AdminLoginPageProps {
   onLoginSuccess: (user: AdminUser) => void;
@@ -29,6 +30,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   onGoToPublicRegister,
   onBackToHome,
 }) => {
+  const { isRegistrationOpen } = useTournament();
   const [identifier, setIdentifier] = useState('admin');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -131,13 +133,26 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
 
           {/* Quick action: Link to athlete registration form */}
           {onGoToPublicRegister && (
-            <button
-              onClick={onGoToPublicRegister}
-              className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
-            >
-              <span>Public Registration</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </button>
+            isRegistrationOpen ? (
+              <button
+                type="button"
+                onClick={onGoToPublicRegister}
+                className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
+              >
+                <span>Public Registration</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-slate-400 bg-slate-800 border border-slate-700 rounded-xl cursor-not-allowed"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>Registration Closed</span>
+              </button>
+            )
           )}
         </div>
       </header>
@@ -224,16 +239,31 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
                   </div>
                   <div>
                     <p className="text-sm font-bold text-white">Are you an athlete participating in SPL?</p>
-                    <p className="text-xs text-slate-400">No admin account needed. Open the public player entry form.</p>
+                    <p className="text-xs text-slate-400">
+                      {isRegistrationOpen
+                        ? 'No admin account needed. Open the public player entry form.'
+                        : 'Registration for Smash Premier League 3.0 is currently closed.'}
+                    </p>
                   </div>
                 </div>
-                <button
-                  type="button"
-                  onClick={onGoToPublicRegister}
-                  className="px-3.5 py-2 text-xs font-black uppercase tracking-wider text-slate-950 bg-lime-400 hover:bg-lime-300 rounded-lg shadow-md transition-all shrink-0"
-                >
-                  Register Now
-                </button>
+                {isRegistrationOpen ? (
+                  <button
+                    type="button"
+                    onClick={onGoToPublicRegister}
+                    className="px-3.5 py-2 text-xs font-black uppercase tracking-wider text-slate-950 bg-lime-400 hover:bg-lime-300 rounded-lg shadow-md transition-all shrink-0"
+                  >
+                    Register Now
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    className="px-3.5 py-2 text-xs font-black uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded-lg cursor-not-allowed shrink-0"
+                  >
+                    Registration Closed
+                  </button>
+                )}
               </div>
             )}
           </div>

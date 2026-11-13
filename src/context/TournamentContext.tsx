@@ -120,16 +120,22 @@ interface TournamentContextType {
   
   // Form Builder & Links / Tokens
   formConfig: RegistrationFormConfig;
+  isRegistrationOpen: boolean;
+  isRegistrationStatusHydrated: boolean;
   tokens: RegistrationTokenRecord[];
   activeToken: RegistrationTokenRecord | null;
   fetchFormConfig: (seasonSlug?: string) => Promise<RegistrationFormConfig>;
   saveFormConfig: (config: RegistrationFormConfig, publish?: boolean) => Promise<{ success: boolean; config?: RegistrationFormConfig; error?: string }>;
+  toggleRegistrationStatus: (
+    nextEnabled: boolean,
+    closedNotice?: string
+  ) => Promise<{ success: boolean; enabled: boolean; error?: string }>;
   fetchTokens: (seasonSlug?: string) => Promise<{ tokens: RegistrationTokenRecord[]; activeToken: RegistrationTokenRecord | null }>;
   regenerateToken: (seasonSlug: string, invalidatePrevious: boolean, label?: string) => Promise<{ success: boolean; tokenRecord?: RegistrationTokenRecord; error?: string }>;
   toggleTokenStatus: (tokenId: string) => Promise<{ success: boolean; token?: RegistrationTokenRecord }>;
 
   // Registrations (Applicants & Management)
-  submitPublicRegistration: (formData: any) => Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean }>;
+  submitPublicRegistration: (formData: any) => Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean; registrationClosed?: boolean }>;
   addRegistration: (reg: Partial<Registration> & { name: string; mobile: string }) => Registration;
   updateRegistration: (id: string, updates: Partial<Registration>) => void;
   approveRegistration: (id: string) => void;
@@ -247,6 +253,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() =>
     createDefaultFormConfig()
   );
+  const [isRegistrationStatusHydrated, setIsRegistrationStatusHydrated] = useState<boolean>(false);
   const [tokens, setTokens] = useState<RegistrationTokenRecord[]>([]);
   const [activeToken, setActiveToken] = useState<RegistrationTokenRecord | null>(null);
   const [isCentralizedDbConnected, setIsCentralizedDbConnected] = useState<boolean>(true); // Persistent Express server storage is always active
@@ -261,9 +268,50 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const localMatchGuardRef = useRef<
     Map<string, { updatedAt: number; scoreA?: number; scoreB?: number; status?: string; court?: number }>
   >(new Map());
+  const regToggleGuardRef = useRef<{ seq: number; enabled: boolean; updatedAt: number }>({
+    seq: 0,
+    enabled: true,
+    updatedAt: 0,
+  });
+  const regToggleChainRef = useRef<Promise<any>>(Promise.resolve());
+  const formConfigRef = useRef<RegistrationFormConfig>(formConfig);
+  formConfigRef.current = formConfig;
   const reconnectTriggerRef = useRef<(() => void) | null>(null);
   const stateRef = useRef<TournamentState>(state);
   stateRef.current = state;
+
+  const isRegistrationOpen =
+    formConfig.enabled !== false && state.registrationSettings.enabled !== false;
+
+  const syncRegistrationEnabledState = useCallback(
+    (enabled: boolean, closedNotice?: string, markHydrated = true) => {
+      const normalizedEnabled = Boolean(enabled);
+      setFormConfig((prev) => {
+        const next: RegistrationFormConfig = {
+          ...prev,
+          enabled: normalizedEnabled,
+          ...(closedNotice !== undefined ? { closedNotice } : {}),
+        };
+        try {
+          const slug = next.seasonSlug || 'season-4';
+          localStorage.setItem(`spl_forms_cache_${slug}`, JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+      setState((prev) => ({
+        ...prev,
+        registrationSettings: {
+          ...prev.registrationSettings,
+          enabled: normalizedEnabled,
+          ...(closedNotice !== undefined ? { closedNotice } : {}),
+        },
+      }));
+      if (markHydrated) {
+        setIsRegistrationStatusHydrated(true);
+      }
+    },
+    []
+  );
 
   const reconnectRealtime = useCallback(() => {
     reconnectTriggerRef.current?.();
@@ -370,8 +418,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             if (isDisposed) return;
 
             const extractedFromSupabase = SupabaseService.extractTournamentSettingsFromConfig(cfg);
+            const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+            const resolvedEnabled =
+              isRegGuardActive
+                ? regToggleGuardRef.current.enabled
+                : cfg !== null
+                ? cfg.enabled !== false
+                : undefined;
+
             if (cfg !== null && Array.isArray(cfg.fields) && cfg.fields.length > 0) {
-              setFormConfig(cfg);
+              const nextCfg =
+                resolvedEnabled !== undefined ? { ...cfg, enabled: resolvedEnabled } : cfg;
+              setFormConfig(nextCfg);
+              setIsRegistrationStatusHydrated(true);
+              try {
+                localStorage.setItem(`spl_forms_cache_${seasonSlug}`, JSON.stringify(nextCfg));
+              } catch {}
+            } else if (cfg !== null && resolvedEnabled !== undefined) {
+              syncRegistrationEnabledState(resolvedEnabled, cfg.closedNotice, true);
             }
             if (tokData !== null) {
               setTokens(tokData.tokens);
@@ -440,6 +504,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   matches: matchData !== null ? progressKnockoutMatches(nextKoMatchesRaw, inferredFormat) : prev.knockout.matches,
                 },
                 registrations: regs !== null ? regs : prev.registrations,
+                registrationSettings: {
+                  ...prev.registrationSettings,
+                  ...(resolvedEnabled !== undefined ? { enabled: resolvedEnabled } : {}),
+                  ...(cfg?.closedNotice !== undefined ? { closedNotice: cfg.closedNotice } : {}),
+                },
                 settings: dbSettings
                   ? {
                       ...prev.settings,
@@ -503,10 +572,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 })
                 .then((serverForm) => {
                   if (serverForm && serverForm.fields && !isDisposed) {
-                    setFormConfig(serverForm);
+                    const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+                    const effectiveEnabled = isRegGuardActive
+                      ? regToggleGuardRef.current.enabled
+                      : serverForm.enabled !== false;
+                    setFormConfig({ ...serverForm, enabled: effectiveEnabled });
+                    setState((prev) => ({
+                      ...prev,
+                      registrationSettings: {
+                        ...prev.registrationSettings,
+                        enabled: effectiveEnabled,
+                        ...(serverForm.closedNotice !== undefined ? { closedNotice: serverForm.closedNotice } : {}),
+                      },
+                    }));
                   }
                 })
-                .catch(() => {});
+                .catch(() => {})
+                .finally(() => {
+                  if (!isDisposed) setIsRegistrationStatusHydrated(true);
+                });
             }
           } else {
             // Fallback to local server state only if Supabase is not configured
@@ -544,10 +628,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               })
               .then((serverForm) => {
                 if (serverForm && serverForm.fields && !isDisposed) {
-                  setFormConfig(serverForm);
+                  const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+                  const effectiveEnabled = isRegGuardActive
+                    ? regToggleGuardRef.current.enabled
+                    : serverForm.enabled !== false;
+                  setFormConfig({ ...serverForm, enabled: effectiveEnabled });
+                  setState((prev) => ({
+                    ...prev,
+                    registrationSettings: {
+                      ...prev.registrationSettings,
+                      enabled: effectiveEnabled,
+                      ...(serverForm.closedNotice !== undefined ? { closedNotice: serverForm.closedNotice } : {}),
+                    },
+                  }));
                 }
               })
-              .catch(() => {});
+              .catch(() => {})
+              .finally(() => {
+                if (!isDisposed) setIsRegistrationStatusHydrated(true);
+              });
           }
 
           fetch(`/api/tokens/${seasonSlug}`)
@@ -1058,32 +1157,62 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onFormConfigChange: (payload) => {
-          if (payload.new) {
-            SupabaseService.fetchFormConfig(seasonSlug).then((cfg) => {
-              if (!cfg || isDisposed) return;
-              if (Array.isArray(cfg.fields) && cfg.fields.length > 0) {
-                setFormConfig(cfg);
-              }
-              const extracted = SupabaseService.extractTournamentSettingsFromConfig(cfg);
-              if (extracted.settings || extracted.payment) {
-                setState((prev) => ({
-                  ...prev,
-                  settings: extracted.settings
-                    ? {
-                        ...prev.settings,
-                        ...extracted.settings,
-                        scoringRules: extracted.settings.scoringRules
-                          ? { ...prev.settings.scoringRules, ...extracted.settings.scoringRules }
-                          : prev.settings.scoringRules,
-                      }
-                    : prev.settings,
-                  payment: extracted.payment
-                    ? { ...prev.payment, ...extracted.payment }
-                    : prev.payment,
-                }));
-              }
-            });
+          const row = payload?.new;
+          if (!row) return;
+          const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+          if (typeof row.enabled === 'boolean' && !isRegGuardActive) {
+            const incomingEnabled = row.enabled !== false;
+            const incomingNotice = row.closed_notice !== undefined ? row.closed_notice || undefined : undefined;
+            syncRegistrationEnabledState(incomingEnabled, incomingNotice, true);
           }
+
+          SupabaseService.fetchFormConfig(seasonSlug).then((cfg) => {
+            if (!cfg || isDisposed) return;
+            const guardStillActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+            const resolvedEnabled = guardStillActive ? regToggleGuardRef.current.enabled : cfg.enabled !== false;
+            const normalizedCfg: RegistrationFormConfig = {
+              ...cfg,
+              enabled: resolvedEnabled,
+            };
+            if (Array.isArray(normalizedCfg.fields) && normalizedCfg.fields.length > 0) {
+              setFormConfig(normalizedCfg);
+              try {
+                localStorage.setItem(`spl_forms_cache_${seasonSlug}`, JSON.stringify(normalizedCfg));
+              } catch {}
+            }
+            setIsRegistrationStatusHydrated(true);
+
+            // Broadcast across open browser tabs immediately
+            if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+              try {
+                const fch = new BroadcastChannel('spl_form_config_channel');
+                fch.postMessage({ type: 'FORM_PUBLISHED', config: normalizedCfg, seasonSlug });
+                fch.close();
+              } catch {}
+            }
+
+            const extracted = SupabaseService.extractTournamentSettingsFromConfig(normalizedCfg);
+            setState((prev) => ({
+              ...prev,
+              registrationSettings: {
+                ...prev.registrationSettings,
+                enabled: resolvedEnabled,
+                ...(normalizedCfg.closedNotice !== undefined ? { closedNotice: normalizedCfg.closedNotice } : {}),
+              },
+              settings: extracted.settings
+                ? {
+                    ...prev.settings,
+                    ...extracted.settings,
+                    scoringRules: extracted.settings.scoringRules
+                      ? { ...prev.settings.scoringRules, ...extracted.settings.scoringRules }
+                      : prev.settings.scoringRules,
+                  }
+                : prev.settings,
+              payment: extracted.payment
+                ? { ...prev.payment, ...extracted.payment }
+                : prev.payment,
+            }));
+          });
         },
 
         onStatusChange: (status) => {
@@ -1327,7 +1456,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         try {
           const data = JSON.parse(event.data);
           if (data && data.config) {
-            setFormConfig(data.config);
+            const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+            const effectiveEnabled = isRegGuardActive
+              ? regToggleGuardRef.current.enabled
+              : data.config.enabled !== false;
+            setFormConfig({ ...data.config, enabled: effectiveEnabled });
+            setIsRegistrationStatusHydrated(true);
+            setState((prev) => ({
+              ...prev,
+              registrationSettings: {
+                ...prev.registrationSettings,
+                enabled: effectiveEnabled,
+                ...(data.config.closedNotice !== undefined ? { closedNotice: data.config.closedNotice } : {}),
+              },
+            }));
           }
         } catch {}
       });
@@ -1441,7 +1583,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       formChannel.onmessage = (event) => {
         if (event.data?.type === 'FORM_PUBLISHED' && event.data.config) {
-          setFormConfig(event.data.config);
+          const nextCfg = event.data.config as RegistrationFormConfig;
+          setFormConfig(nextCfg);
+          setIsRegistrationStatusHydrated(true);
+          if (typeof nextCfg.enabled === 'boolean') {
+            setState((prev) => ({
+              ...prev,
+              registrationSettings: {
+                ...prev.registrationSettings,
+                enabled: nextCfg.enabled !== false,
+                ...(nextCfg.closedNotice !== undefined ? { closedNotice: nextCfg.closedNotice } : {}),
+              },
+            }));
+          }
         }
       };
     }
@@ -1465,6 +1619,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const parsedForm = JSON.parse(e.newValue);
           if (parsedForm && Array.isArray(parsedForm.fields)) {
             setFormConfig(parsedForm);
+            setIsRegistrationStatusHydrated(true);
+            if (typeof parsedForm.enabled === 'boolean') {
+              setState((prev) => ({
+                ...prev,
+                registrationSettings: {
+                  ...prev.registrationSettings,
+                  enabled: parsedForm.enabled !== false,
+                  ...(parsedForm.closedNotice !== undefined ? { closedNotice: parsedForm.closedNotice } : {}),
+                },
+              }));
+            }
           }
         } catch {}
       }
@@ -1739,6 +1904,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateRegistrationSettings = (settingsUpdate: Partial<RegistrationSettings>) => {
+    if (typeof settingsUpdate.enabled === 'boolean') {
+      regToggleGuardRef.current = {
+        seq: regToggleGuardRef.current.seq + 1,
+        enabled: settingsUpdate.enabled,
+        updatedAt: Date.now(),
+      };
+      setFormConfig((prev) => ({
+        ...prev,
+        enabled: settingsUpdate.enabled as boolean,
+        ...(settingsUpdate.closedNotice !== undefined ? { closedNotice: settingsUpdate.closedNotice } : {}),
+      }));
+    }
     setState((prev) => {
       const nextSettings = {
         ...prev.registrationSettings,
@@ -3061,9 +3238,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const currentVersion = config.version || formConfig.version || 1;
       const nextVersion = publish ? currentVersion + 1 : currentVersion;
+      const nextEnabled = config.enabled !== undefined ? Boolean(config.enabled) : formConfig.enabled !== false;
+
+      regToggleGuardRef.current = {
+        seq: regToggleGuardRef.current.seq + 1,
+        enabled: nextEnabled,
+        updatedAt: Date.now(),
+      };
 
       const payload: RegistrationFormConfig = {
         ...config,
+        enabled: nextEnabled,
         version: nextVersion,
         isPublished: publish ? true : config.isPublished,
         lastUpdatedAt: Date.now(),
@@ -3075,23 +3260,32 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         payload.appearance.submitButtonText = 'Submit Registration';
       }
 
-      // Synchronize state.payment and state.settings.entryFee
-      if (config.payment) {
-        setState((prev) => ({
-          ...prev,
-          settings: {
-            ...prev.settings,
-            entryFee: config.entryFee != null ? config.entryFee : prev.settings.entryFee,
-          },
-          payment: {
-            ...prev.payment,
-            enabled: config.payment?.enabled ?? prev.payment.enabled,
-            upiId: config.payment?.upiId || prev.payment.upiId,
-            accountName: config.payment?.accountName || prev.payment.accountName,
-            note: config.payment?.note || prev.payment.note,
-          },
-        }));
-      }
+      // Synchronize registrationSettings.enabled, state.payment, and state.settings.entryFee
+      setState((prev) => ({
+        ...prev,
+        registrationSettings: {
+          ...prev.registrationSettings,
+          enabled: nextEnabled,
+          ...(payload.closedNotice !== undefined ? { closedNotice: payload.closedNotice } : {}),
+        },
+        settings: config.payment
+          ? {
+              ...prev.settings,
+              entryFee: config.entryFee != null ? config.entryFee : prev.settings.entryFee,
+            }
+          : prev.settings,
+        payment: config.payment
+          ? {
+              ...prev.payment,
+              enabled: config.payment?.enabled ?? prev.payment.enabled,
+              upiId: config.payment?.upiId || prev.payment.upiId,
+              accountName: config.payment?.accountName || prev.payment.accountName,
+              note: config.payment?.note || prev.payment.note,
+            }
+          : prev.payment,
+      }));
+      setFormConfig(payload);
+      setIsRegistrationStatusHydrated(true);
 
       // Save locally first so UI is instantly updated
       try {
@@ -3114,12 +3308,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       // Synchronize to centralized Supabase backend directly
       if (SupabaseService.isAvailable()) {
-        SupabaseService.saveFormConfig(payload, publish).catch(() => {});
+        await SupabaseService.saveFormConfig(payload, publish);
         SupabaseService.logAudit(
           publish ? 'form_published' : 'form_draft_saved',
           'form',
           slug,
-          { version: nextVersion, fieldsCount: payload.fields.length }
+          { version: nextVersion, fieldsCount: payload.fields.length, enabled: nextEnabled }
         ).catch(() => {});
       }
 
@@ -3130,11 +3324,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       if (res.ok && res.data) {
-        setFormConfig(res.data);
+        const synced = { ...res.data, enabled: nextEnabled };
+        setFormConfig(synced);
         if (publish) {
           triggerCelebration();
         }
-        return { success: true, config: res.data };
+        return { success: true, config: synced };
       }
 
       setFormConfig(payload);
@@ -3146,6 +3341,111 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setFormConfig(config);
       return { success: true, config };
     }
+  };
+
+  const toggleRegistrationStatus = (
+    nextEnabled: boolean,
+    closedNotice?: string
+  ): Promise<{ success: boolean; enabled: boolean; error?: string }> => {
+    const task = regToggleChainRef.current.then(async () => {
+      const normalizedNext = Boolean(nextEnabled);
+      const prevEnabled =
+        formConfigRef.current.enabled !== false &&
+        stateRef.current.registrationSettings.enabled !== false;
+      const slug =
+        formConfigRef.current.seasonSlug ||
+        stateRef.current.registrationSettings.seasonSlug ||
+        'season-4';
+      const seq = regToggleGuardRef.current.seq + 1;
+      regToggleGuardRef.current = { seq, enabled: normalizedNext, updatedAt: Date.now() };
+
+      const optimisticConfig: RegistrationFormConfig = {
+        ...formConfigRef.current,
+        seasonSlug: slug,
+        enabled: normalizedNext,
+        ...(closedNotice !== undefined ? { closedNotice } : {}),
+        lastUpdatedAt: Date.now(),
+      };
+
+      // Optimistic local state + multi-tab broadcast
+      syncRegistrationEnabledState(normalizedNext, closedNotice, true);
+
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const fch = new BroadcastChannel('spl_form_config_channel');
+          fch.postMessage({ type: 'FORM_PUBLISHED', config: optimisticConfig, seasonSlug: slug });
+          fch.close();
+        } catch {}
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('spl-form-published', { detail: optimisticConfig }));
+      }
+
+      try {
+        if (SupabaseService.isAvailable()) {
+          const sbRes = await SupabaseService.setRegistrationOpenStatus(slug, normalizedNext, closedNotice);
+          if (!sbRes.success) {
+            if (regToggleGuardRef.current.seq === seq) {
+              regToggleGuardRef.current = { seq: seq + 1, enabled: prevEnabled, updatedAt: Date.now() };
+              syncRegistrationEnabledState(prevEnabled, undefined, true);
+            }
+            return {
+              success: false,
+              enabled: prevEnabled,
+              error: sbRes.error || 'Could not update registration status in Supabase.',
+            };
+          }
+          if (sbRes.config && regToggleGuardRef.current.seq === seq) {
+            setFormConfig(sbRes.config);
+            try {
+              localStorage.setItem(`${FORMS_CACHE_PREFIX}${slug}`, JSON.stringify(sbRes.config));
+            } catch {}
+          }
+          SupabaseService.logAudit(
+            normalizedNext ? 'registration_opened' : 'registration_closed',
+            'form',
+            slug,
+            { enabled: normalizedNext }
+          ).catch(() => {});
+        }
+
+        // Mirror to local Express server when present (non-fatal on static hosting)
+        await Promise.allSettled([
+          safeFetchJson('/api/registration-settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...stateRef.current.registrationSettings,
+              enabled: normalizedNext,
+              ...(closedNotice !== undefined ? { closedNotice } : {}),
+            }),
+          }),
+          safeFetchJson(`/api/forms/${encodeURIComponent(slug)}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...optimisticConfig,
+              isPublished: true,
+            }),
+          }),
+        ]);
+
+        return { success: true, enabled: normalizedNext };
+      } catch (err: any) {
+        if (regToggleGuardRef.current.seq === seq) {
+          regToggleGuardRef.current = { seq: seq + 1, enabled: prevEnabled, updatedAt: Date.now() };
+          syncRegistrationEnabledState(prevEnabled, undefined, true);
+        }
+        return {
+          success: false,
+          enabled: prevEnabled,
+          error: err?.message || 'Failed to update registration status.',
+        };
+      }
+    });
+
+    regToggleChainRef.current = task.catch(() => undefined);
+    return task;
   };
 
 
@@ -3318,13 +3618,26 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Registrations (Public submissions & Admin vetting)
   const submitPublicRegistration = async (
     formData: any
-  ): Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean }> => {
+  ): Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean; registrationClosed?: boolean }> => {
     const cleanMobile = formData.mobile ? formData.mobile.replace(/\D/g, '') : '';
     const targetSeason = formData.season || state.registrationSettings.seasonSlug || 'season-4';
 
     // 1. Primary path: Supabase PostgreSQL direct database persistence
     if (SupabaseService.isAvailable()) {
       try {
+        // Authoritative Registration Open/Closed enforcement before any submission
+        const liveStatus = await SupabaseService.fetchRegistrationOpenStatus(targetSeason);
+        if (liveStatus && !liveStatus.enabled) {
+          syncRegistrationEnabledState(false, liveStatus.closedNotice, true);
+          return {
+            success: false,
+            registrationClosed: true,
+            error:
+              liveStatus.closedNotice ||
+              'Registration for Smash Premier League 3.0 is currently closed.',
+          };
+        }
+
         // Direct duplicate mobile check in Supabase
         const dupCheck = await SupabaseService.checkDuplicateRegistration(cleanMobile, targetSeason);
         if (dupCheck?.isDuplicate) {
@@ -3380,11 +3693,31 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         const saveRes = await SupabaseService.saveRegistrationWithDetail(newReg);
         if (!saveRes.success) {
+          if (saveRes.registrationClosed) {
+            syncRegistrationEnabledState(false, saveRes.error, true);
+            return {
+              success: false,
+              registrationClosed: true,
+              error:
+                saveRes.error ||
+                'Registration for Smash Premier League 3.0 is currently closed.',
+            };
+          }
           // Retry once with alternative salt in case of any rare ID collision
           const altSalt = Math.floor(1000 + Math.random() * 9000);
           newReg.regId = `SPL-2026-${Date.now().toString(36).toUpperCase().slice(-3)}-${altSalt}`;
           const retryRes = await SupabaseService.saveRegistrationWithDetail(newReg);
           if (!retryRes.success) {
+            if (retryRes.registrationClosed) {
+              syncRegistrationEnabledState(false, retryRes.error, true);
+              return {
+                success: false,
+                registrationClosed: true,
+                error:
+                  retryRes.error ||
+                  'Registration for Smash Premier League 3.0 is currently closed.',
+              };
+            }
             return {
               success: false,
               error: `Database insertion error: ${retryRes.error || saveRes.error || 'Could not record registration in Supabase.'}`,
@@ -3433,6 +3766,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
 
     // 2. Fallback when Supabase credentials are not configured (local dev server):
+    if (!isRegistrationOpen) {
+      return {
+        success: false,
+        registrationClosed: true,
+        error:
+          formConfig.closedNotice ||
+          state.registrationSettings.closedNotice ||
+          'Registration for Smash Premier League 3.0 is currently closed.',
+      };
+    }
+
     try {
       const res = await safeFetchJson<{
         success: boolean;
@@ -3458,10 +3802,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       if (res.data && res.data.error) {
+        if ((res.data as any).registrationClosed) {
+          syncRegistrationEnabledState(false, res.data.error, true);
+        }
         return {
           success: false,
           error: res.data.error,
           linkRevoked: Boolean(res.data.linkRevoked),
+          registrationClosed: Boolean((res.data as any).registrationClosed),
         };
       }
     } catch {}
@@ -3969,10 +4317,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         updateKnockoutMatch,
         clearKnockout,
         formConfig,
+        isRegistrationOpen,
+        isRegistrationStatusHydrated,
         tokens,
         activeToken,
         fetchFormConfig,
         saveFormConfig,
+        toggleRegistrationStatus,
         fetchTokens,
         regenerateToken,
         toggleTokenStatus,

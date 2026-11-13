@@ -23,6 +23,7 @@ import {
   Play,
   Sliders,
   Menu,
+  Lock,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { BadmintonHeroVisual } from './BadmintonHeroVisual';
@@ -44,7 +45,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   onOpenLogin,
   onGoToAdmin,
 }) => {
-  const { state, standings, realtimeStatus, reconnectRealtime } = useTournament();
+  const { state, standings, realtimeStatus, reconnectRealtime, isRegistrationOpen } = useTournament();
 
   const [detailMatchSnapshot, setDetailMatch] = useState<Match | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
@@ -306,14 +307,28 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           {/* Right Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
             {/* Athlete Registration Button */}
-            <button
-              onClick={onOpenPublicRegister}
-              className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95 whitespace-nowrap"
-            >
-              <PlusCircle className="w-3.5 h-3.5 shrink-0" />
-              <span className="hidden sm:inline">Register Player</span>
-              <span className="sm:hidden">Register</span>
-            </button>
+            {isRegistrationOpen ? (
+              <button
+                type="button"
+                onClick={onOpenPublicRegister}
+                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95 whitespace-nowrap"
+              >
+                <PlusCircle className="w-3.5 h-3.5 shrink-0" />
+                <span className="hidden sm:inline">Register Player</span>
+                <span className="sm:hidden">Register</span>
+              </button>
+            ) : (
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-400 bg-slate-800/90 border border-slate-700 rounded-xl cursor-not-allowed whitespace-nowrap"
+              >
+                <Lock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                <span className="hidden sm:inline">Registration Closed</span>
+                <span className="sm:hidden">Closed</span>
+              </button>
+            )}
 
 
 
@@ -374,16 +389,29 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <MapPin className="w-4 h-4 text-amber-400" />
               </button>
 
-              <button
-                onClick={() => {
-                  setMobileNavOpen(false);
-                  onOpenPublicRegister();
-                }}
-                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Register as an Athlete</span>
-              </button>
+              {isRegistrationOpen ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMobileNavOpen(false);
+                    onOpenPublicRegister();
+                  }}
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Register as an Athlete</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 cursor-not-allowed"
+                >
+                  <Lock className="w-4 h-4 text-slate-400" />
+                  <span>REGISTRATION CLOSED</span>
+                </button>
+              )}
 
 
             </div>
@@ -479,16 +507,28 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
                 {/* Phase 4: Premium Championship Action CTAs */}
                 <div className="spl-hero-stagger-3 flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center justify-center lg:justify-start gap-3 pt-1">
-                  {/* 1. Primary CTA: REGISTER NOW */}
-                  <button
-                    type="button"
-                    onClick={onOpenPublicRegister}
-                    className="group relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:via-amber-300 hover:to-orange-400 shadow-[0_12px_30px_-8px_rgba(245,158,11,0.55)] transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer whitespace-nowrap"
-                  >
-                    <PlusCircle className="w-4 h-4 shrink-0 text-slate-950" />
-                    <span>REGISTER NOW</span>
-                    <ArrowRight className="w-4 h-4 shrink-0 text-slate-950 transition-transform group-hover:translate-x-0.5" />
-                  </button>
+                  {/* 1. Primary CTA: REGISTER NOW / REGISTRATION CLOSED */}
+                  {isRegistrationOpen ? (
+                    <button
+                      type="button"
+                      onClick={onOpenPublicRegister}
+                      className="group relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:via-amber-300 hover:to-orange-400 shadow-[0_12px_30px_-8px_rgba(245,158,11,0.55)] transition-all duration-200 hover:-translate-y-0.5 active:scale-95 cursor-pointer whitespace-nowrap"
+                    >
+                      <PlusCircle className="w-4 h-4 shrink-0 text-slate-950" />
+                      <span>REGISTER NOW</span>
+                      <ArrowRight className="w-4 h-4 shrink-0 text-slate-950 transition-transform group-hover:translate-x-0.5" />
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      aria-disabled="true"
+                      className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-400 bg-slate-800/90 border border-slate-700 cursor-not-allowed whitespace-nowrap"
+                    >
+                      <Lock className="w-4 h-4 shrink-0 text-slate-400" />
+                      <span>REGISTRATION CLOSED</span>
+                    </button>
+                  )}
 
                   {/* 2. Secondary CTA: WATCH LIVE MATCHES */}
                   <button
@@ -517,6 +557,13 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     <span>VIEW MATCH SCHEDULE</span>
                   </button>
                 </div>
+
+                {!isRegistrationOpen && (
+                  <p className="text-xs sm:text-sm text-slate-400 font-medium flex items-center justify-center lg:justify-start gap-2">
+                    <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>Registration for Smash Premier League 3.0 is currently closed.</span>
+                  </p>
+                )}
               </div>
 
               {/* RIGHT Column: Dramatic Jump-Smash Championship Showcase */}
@@ -690,6 +737,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           standings={standings}
           courtNames={state.settings.courtNames}
           tournamentName={tournamentName}
+          registrationOpen={isRegistrationOpen}
           onOpenPublicRegister={onOpenPublicRegister}
           onSelectMatch={handleOpenMatchModal}
         />
@@ -920,17 +968,32 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               <div className="lg:col-span-4 p-5 sm:p-6 rounded-2xl bg-slate-950/80 border border-white/10 text-center space-y-4 shadow-xl">
                 <span className="text-4xl">🏆</span>
                 <h3 className="font-display font-black text-lg text-white uppercase">
-                  Ready to Compete?
+                  {isRegistrationOpen ? 'Ready to Compete?' : 'Tournament Registration Closed'}
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Join the official athlete draft of {tournamentName}. Open to singles and doubles competitors.
+                  {isRegistrationOpen
+                    ? `Join the official athlete draft of ${tournamentName}. Open to singles and doubles competitors.`
+                    : 'Registration for Smash Premier League 3.0 is currently closed.'}
                 </p>
-                <button
-                  onClick={onOpenPublicRegister}
-                  className="w-full py-3 px-4 min-h-[44px] rounded-xl font-display font-black uppercase tracking-wider text-xs text-slate-950 bg-gradient-to-r from-lime-400 to-emerald-400 hover:from-lime-300 hover:to-emerald-300 shadow-lg shadow-lime-400/25 active:scale-95 transition-all"
-                >
-                  Register as an Athlete Now
-                </button>
+                {isRegistrationOpen ? (
+                  <button
+                    type="button"
+                    onClick={onOpenPublicRegister}
+                    className="w-full py-3 px-4 min-h-[44px] rounded-xl font-display font-black uppercase tracking-wider text-xs text-slate-950 bg-gradient-to-r from-lime-400 to-emerald-400 hover:from-lime-300 hover:to-emerald-300 shadow-lg shadow-lime-400/25 active:scale-95 transition-all"
+                  >
+                    Register as an Athlete Now
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    disabled
+                    aria-disabled="true"
+                    className="w-full py-3 px-4 min-h-[44px] rounded-xl font-display font-black uppercase tracking-wider text-xs text-slate-400 bg-slate-800 border border-slate-700 cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>REGISTRATION CLOSED</span>
+                  </button>
+                )}
               </div>
 
             </div>
@@ -966,9 +1029,20 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 Back to Top ↑
               </button>
               <span>•</span>
-              <button onClick={onOpenPublicRegister} className="hover:text-lime-400 transition-colors">
-                Athlete Entry Form
-              </button>
+              {isRegistrationOpen ? (
+                <button onClick={onOpenPublicRegister} className="hover:text-lime-400 transition-colors">
+                  Athlete Entry Form
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  className="text-slate-500 cursor-not-allowed"
+                >
+                  Registration Closed
+                </button>
+              )}
             </div>
           </div>
 

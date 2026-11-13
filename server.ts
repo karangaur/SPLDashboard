@@ -532,14 +532,92 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  // 1. Get Registration Settings (legacy)
-  app.get('/api/registration-settings', (_req, res) => {
+  async function fetchServerSupabaseFormRow(seasonSlug = 'season-4'): Promise<any | null> {
+    if (!serverSupabase) return null;
+    try {
+      const { data: exact } = await serverSupabase
+        .from('registration_form_config')
+        .select('*')
+        .eq('season_slug', seasonSlug)
+        .maybeSingle();
+      if (exact) return exact;
+
+      const { data: published } = await serverSupabase
+        .from('registration_form_config')
+        .select('*')
+        .eq('is_published', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (published) return published;
+
+      const { data: fallbackSeason } = await serverSupabase
+        .from('registration_form_config')
+        .select('*')
+        .eq('season_slug', 'season-4')
+        .maybeSingle();
+      if (fallbackSeason) return fallbackSeason;
+
+      const { data: anyRow } = await serverSupabase
+        .from('registration_form_config')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return anyRow || null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function getAuthoritativeRegistrationOpenStatus(
+    seasonSlug = 'season-4'
+  ): Promise<{ enabled: boolean; closedNotice?: string }> {
+    const supabaseRow = await fetchServerSupabaseFormRow(seasonSlug);
+    if (supabaseRow && typeof supabaseRow.enabled === 'boolean') {
+      return {
+        enabled: supabaseRow.enabled !== false,
+        closedNotice:
+          supabaseRow.closed_notice ||
+          'Registration for Smash Premier League 3.0 is currently closed.',
+      };
+    }
+
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    const formConfig = forms[seasonSlug] || forms['season-4'];
+    if (formConfig && typeof formConfig.enabled === 'boolean') {
+      return {
+        enabled: formConfig.enabled !== false,
+        closedNotice:
+          formConfig.closedNotice ||
+          'Registration for Smash Premier League 3.0 is currently closed.',
+      };
+    }
+
     const settings = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
-    res.json(settings);
+    return {
+      enabled: settings.enabled !== false,
+      closedNotice:
+        settings.closedNotice ||
+        'Registration for Smash Premier League 3.0 is currently closed.',
+    };
+  }
+
+  // 1. Get Registration Settings (legacy + authoritative Supabase sync)
+  app.get('/api/registration-settings', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const settings = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
+    const authStatus = await getAuthoritativeRegistrationOpenStatus(settings.seasonSlug || 'season-4');
+    res.json({
+      ...settings,
+      enabled: authStatus.enabled,
+      closedNotice: authStatus.closedNotice || settings.closedNotice,
+    });
   });
 
-  // 2. Update Registration Settings (legacy)
-  app.post('/api/registration-settings', (req, res) => {
+  // 2. Update Registration Settings (legacy + mirrored into FORMS_FILE and Supabase)
+  app.post('/api/registration-settings', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     const current = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
     const updated = {
       ...current,
@@ -550,11 +628,49 @@ async function startServer() {
       },
     };
     writeJSON(SETTINGS_FILE, updated);
+
+    const slug = updated.seasonSlug || 'season-4';
+    if (typeof req.body?.enabled === 'boolean') {
+      const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+      const targetForm = forms[slug] || forms['season-4'] || createDefaultForm(slug);
+      targetForm.enabled = updated.enabled;
+      if (req.body.closedNotice !== undefined) {
+        targetForm.closedNotice = req.body.closedNotice;
+      }
+      targetForm.lastUpdatedAt = Date.now();
+      forms[slug] = targetForm;
+      if (slug !== 'season-4' && forms['season-4']) {
+        forms['season-4'] = { ...forms['season-4'], enabled: updated.enabled, lastUpdatedAt: Date.now() };
+      }
+      writeJSON(FORMS_FILE, forms);
+
+      if (serverSupabase) {
+        try {
+          const existingRow = await fetchServerSupabaseFormRow(slug);
+          const nowIso = new Date().toISOString();
+          if (existingRow?.id) {
+            await serverSupabase
+              .from('registration_form_config')
+              .update({
+                enabled: updated.enabled,
+                ...(req.body.closedNotice !== undefined ? { closed_notice: req.body.closedNotice || null } : {}),
+                updated_at: nowIso,
+              })
+              .eq('id', existingRow.id);
+          }
+        } catch (err) {
+          console.warn('Supabase registration-settings status sync warning:', err);
+        }
+      }
+
+      broadcastSse('form_published', { config: targetForm });
+    }
+
     res.json(updated);
   });
 
   // 3. Dynamic Form Configuration (Drafts & Published)
-  app.get('/api/forms/:seasonSlug', (req, res) => {
+  app.get('/api/forms/:seasonSlug', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let seasonSlug = req.params.seasonSlug;
     if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
@@ -577,6 +693,15 @@ async function startServer() {
         }
       }
     }
+
+    // Reconcile authoritative enabled & closedNotice from Supabase PostgreSQL if active
+    const authStatus = await getAuthoritativeRegistrationOpenStatus(seasonSlug);
+    targetForm = {
+      ...targetForm,
+      enabled: authStatus.enabled,
+      ...(authStatus.closedNotice ? { closedNotice: authStatus.closedNotice } : {}),
+    };
+
     // Ensure default submit button text matches exact requirement
     if (targetForm && targetForm.appearance) {
       targetForm.appearance.submitButtonText = targetForm.appearance.submitButtonText || 'Submit Registration & Confirm Entry';
@@ -584,7 +709,7 @@ async function startServer() {
     res.json(targetForm);
   });
 
-  app.post('/api/forms/:seasonSlug', (req, res) => {
+  app.post('/api/forms/:seasonSlug', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let seasonSlug = req.params.seasonSlug;
     if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
@@ -618,44 +743,59 @@ async function startServer() {
     }
     writeJSON(FORMS_FILE, forms);
 
+    // Mirror enabled status into legacy SETTINGS_FILE
+    if (typeof updated.enabled === 'boolean') {
+      const currentSettings = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
+      writeJSON(SETTINGS_FILE, {
+        ...currentSettings,
+        enabled: updated.enabled,
+        ...(updated.closedNotice !== undefined ? { closedNotice: updated.closedNotice } : {}),
+      });
+    }
+
     // Sync to Supabase PostgreSQL if active
     if (serverSupabase) {
-      const nowIso = new Date().toISOString();
-      serverSupabase
-        .from('registration_form_config')
-        .upsert({
-          id: seasonSlug,
-          season_slug: seasonSlug,
-          tournament_name: updated.tournamentName,
-          season_title: updated.seasonTitle,
-          deadline: updated.deadline ? new Date(updated.deadline).toISOString() : null,
-          max_slots: updated.maxSlots ?? 32,
-          entry_fee: updated.entryFee ?? 500,
-          venue: updated.venue || null,
-          date: updated.date || null,
-          enabled: updated.enabled ?? true,
-          closed_notice: updated.closedNotice || null,
-          is_published: updated.isPublished,
-          payment_config_json: updated.payment || {},
-          appearance_json: updated.appearance || {},
-          fields_json: updated.fields || [],
-          version: nextVersion,
-          published_at: isPublishing ? nowIso : undefined,
-          updated_at: nowIso,
-        })
-        .then(() => {});
+      try {
+        const nowIso = new Date().toISOString();
+        const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+        const rowId = existingRow?.id || seasonSlug;
+        await serverSupabase
+          .from('registration_form_config')
+          .upsert({
+            id: rowId,
+            season_slug: seasonSlug,
+            tournament_name: updated.tournamentName,
+            season_title: updated.seasonTitle,
+            deadline: updated.deadline ? new Date(updated.deadline).toISOString() : null,
+            max_slots: updated.maxSlots ?? 32,
+            entry_fee: updated.entryFee ?? 500,
+            venue: updated.venue || null,
+            date: updated.date || null,
+            enabled: updated.enabled ?? true,
+            closed_notice: updated.closedNotice || null,
+            is_published: updated.isPublished,
+            payment_config_json: updated.payment || {},
+            appearance_json: updated.appearance || {},
+            fields_json: updated.fields || [],
+            version: nextVersion,
+            published_at: isPublishing ? nowIso : undefined,
+            updated_at: nowIso,
+          });
 
-      serverSupabase
-        .from('registration_form_versions')
-        .insert({
-          form_config_id: seasonSlug,
-          season_slug: seasonSlug,
-          version_num: nextVersion,
-          snapshot_json: updated,
-          created_by: 'admin',
-          created_at: nowIso,
-        })
-        .then(() => {});
+        serverSupabase
+          .from('registration_form_versions')
+          .insert({
+            form_config_id: rowId,
+            season_slug: seasonSlug,
+            version_num: nextVersion,
+            snapshot_json: updated,
+            created_by: 'admin',
+            created_at: nowIso,
+          })
+          .then(() => {});
+      } catch (err) {
+        console.warn('Supabase form config upsert warning:', err);
+      }
     }
 
     broadcastSse('form_published', { config: updated });
@@ -1727,14 +1867,19 @@ async function startServer() {
       }
     }
 
-    // Validate settings & published form
-    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[season] || forms['season-4'] || createDefaultForm(season);
-    if (!formConfig.enabled) {
+    // Validate authoritative open/closed status (Supabase first, then FORMS_FILE / SETTINGS_FILE)
+    const authStatus = await getAuthoritativeRegistrationOpenStatus(season);
+    if (!authStatus.enabled) {
       return res.status(403).json({
-        error: formConfig.closedNotice || 'Registrations are currently closed by the tournament committee.',
+        registrationClosed: true,
+        error:
+          authStatus.closedNotice ||
+          'Registration for Smash Premier League 3.0 is currently closed.',
       });
     }
+
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    const formConfig = forms[season] || forms['season-4'] || createDefaultForm(season);
 
     // Name validation
     if (!name || typeof name !== 'string' || name.trim().length < 2) {

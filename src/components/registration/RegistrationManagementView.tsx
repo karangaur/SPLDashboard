@@ -65,10 +65,12 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   const {
     state,
     formConfig,
+    isRegistrationOpen,
     tokens,
     activeToken,
     fetchFormConfig,
     saveFormConfig,
+    toggleRegistrationStatus,
     fetchTokens,
     regenerateToken,
     toggleTokenStatus,
@@ -83,6 +85,11 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   } = useTournament();
 
   const regSettings = state.registrationSettings;
+  const [isUpdatingRegStatus, setIsUpdatingRegStatus] = useState(false);
+  const [regStatusFeedback, setRegStatusFeedback] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
   const stats = calculateRegistrationStats(state.registrations);
 
   // Active view tab inside Player Registration Hub
@@ -290,10 +297,30 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   };
   const handleShareCustomWhatsApp = handleShareWhatsApp;
 
-  const handleToggleRegistrationStatus = () => {
-    const nextVal = !regSettings.enabled;
-    updateRegistrationSettings({ enabled: nextVal });
-    saveFormConfig({ ...formConfig, enabled: nextVal });
+  const handleToggleRegistrationStatus = async () => {
+    if (isUpdatingRegStatus) return;
+    const targetEnabled = !isRegistrationOpen;
+    setIsUpdatingRegStatus(true);
+    setRegStatusFeedback(null);
+    try {
+      const res = await toggleRegistrationStatus(targetEnabled);
+      if (res.success) {
+        sportsAudio.playButtonClick();
+        setRegStatusFeedback({
+          type: 'success',
+          message: res.enabled
+            ? 'Registration is now OPEN. Athletes can submit entries on the public website and registration links.'
+            : 'Registration is now CLOSED. All public registration buttons and direct registration links have been disabled.',
+        });
+      } else {
+        setRegStatusFeedback({
+          type: 'error',
+          message: res.error || 'Could not update registration status in Supabase. Please try again.',
+        });
+      }
+    } finally {
+      setIsUpdatingRegStatus(false);
+    }
   };
 
   const handleExportCSV = () => {
@@ -438,15 +465,24 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
 
           {/* Quick Registration Status Toggle */}
           <button
+            type="button"
+            disabled={isUpdatingRegStatus}
             onClick={handleToggleRegistrationStatus}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border ${
-              regSettings.enabled
+            aria-pressed={!isRegistrationOpen}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border disabled:opacity-60 disabled:cursor-wait ${
+              isRegistrationOpen
                 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
                 : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
             }`}
           >
-            <Power className="w-3.5 h-3.5" />
-            <span>{regSettings.enabled ? 'Registration is OPEN' : 'Registration is DISABLED'}</span>
+            {isUpdatingRegStatus ? (
+              <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <Power className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {isRegistrationOpen ? 'Registration is Open' : 'Registration is Closed'}
+            </span>
           </button>
 
           {/* Open Public Form Preview */}
@@ -459,6 +495,40 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           </button>
         </div>
       </div>
+
+      {/* Registration Status Confirmation / Error Banner */}
+      {regStatusFeedback && (
+        <div
+          role="status"
+          className={`flex items-center justify-between gap-3 px-4 py-3 rounded-2xl border text-xs font-semibold animate-fade-in ${
+            regStatusFeedback.type === 'success'
+              ? isRegistrationOpen
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
+                : 'bg-rose-500/10 border-rose-500/30 text-rose-200'
+              : 'bg-amber-500/10 border-amber-500/30 text-amber-200'
+          }`}
+        >
+          <div className="flex items-center gap-2.5">
+            {regStatusFeedback.type === 'success' ? (
+              isRegistrationOpen ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              ) : (
+                <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+              )
+            ) : (
+              <AlertCircle className="w-4 h-4 text-amber-400 shrink-0" />
+            )}
+            <span>{regStatusFeedback.message}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setRegStatusFeedback(null)}
+            className="px-2 py-1 rounded-lg hover:bg-white/10 text-[11px] font-bold opacity-80 hover:opacity-100 shrink-0"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* Navigation Sub-Tabs */}
       <div className="flex items-center gap-2 border-b border-white/10 pb-2 overflow-x-auto">
@@ -605,15 +675,16 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    disabled={isUpdatingRegStatus}
                     onClick={handleToggleRegistrationStatus}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors ${
-                      regSettings.enabled
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-colors disabled:opacity-60 ${
+                      isRegistrationOpen
                         ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
                         : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
                     }`}
                   >
                     <Power className="w-3.5 h-3.5" />
-                    <span>{regSettings.enabled ? 'Public Link: Active' : 'Public Link: Disabled'}</span>
+                    <span>{isRegistrationOpen ? 'Public Link: Open' : 'Public Link: Closed'}</span>
                   </button>
                 </div>
               </div>

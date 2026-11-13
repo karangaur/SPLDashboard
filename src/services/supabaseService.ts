@@ -1064,9 +1064,24 @@ export class SupabaseService {
     return res.success;
   }
 
-  static async saveRegistrationWithDetail(reg: Registration): Promise<{ success: boolean; error?: string }> {
+  static async saveRegistrationWithDetail(
+    reg: Registration
+  ): Promise<{ success: boolean; error?: string; registrationClosed?: boolean }> {
     if (!this.isAvailable()) return { success: false, error: 'Supabase credentials not configured' };
     try {
+      // Enforce Registration Open/Closed status at database persistence layer
+      const targetSeason = reg.season || 'season-4';
+      const cfgRow = await this.fetchFormConfigRow(targetSeason);
+      if (cfgRow && cfgRow.enabled === false) {
+        return {
+          success: false,
+          registrationClosed: true,
+          error:
+            cfgRow.closed_notice ||
+            'Registration for Smash Premier League 3.0 is currently closed.',
+        };
+      }
+
       // 1. Normalize gender to match PostgreSQL CHECK (gender IN ('M', 'F', 'Other'))
       const rawGender = String(reg.gender || '').trim().toLowerCase();
       let normalizedGender: 'M' | 'F' | 'Other' = 'M';
@@ -1361,6 +1376,108 @@ export class SupabaseService {
       return !error;
     } catch {
       return false;
+    }
+  }
+
+  static async fetchRegistrationOpenStatus(
+    seasonSlug = 'season-4'
+  ): Promise<{ enabled: boolean; closedNotice?: string } | null> {
+    if (!this.isAvailable()) return null;
+    try {
+      const row = await this.fetchFormConfigRow(seasonSlug);
+      if (!row) return null;
+      return {
+        enabled: row.enabled !== false,
+        closedNotice: row.closed_notice || undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  static async setRegistrationOpenStatus(
+    seasonSlug = 'season-4',
+    enabled: boolean,
+    closedNotice?: string
+  ): Promise<{ success: boolean; config?: RegistrationFormConfig; error?: string }> {
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Supabase credentials are not configured.' };
+    }
+    try {
+      const targetSlug = seasonSlug || 'season-4';
+      const now = new Date().toISOString();
+      const existingRow = await this.fetchFormConfigRow(targetSlug);
+
+      if (existingRow) {
+        const updatePayload: Record<string, any> = {
+          enabled: Boolean(enabled),
+          updated_at: now,
+        };
+        if (closedNotice !== undefined) {
+          updatePayload.closed_notice = closedNotice || null;
+        }
+        const { data: savedRow, error } = await (supabase.from('registration_form_config') as any)
+          .update(updatePayload)
+          .eq('id', existingRow.id)
+          .select('*')
+          .single();
+
+        if (error || !savedRow) {
+          return {
+            success: false,
+            error: error?.message || 'Failed to update registration status in Supabase.',
+          };
+        }
+        return {
+          success: true,
+          config: this.mapDbFormRow(savedRow as DbRegistrationFormConfig),
+        };
+      }
+
+      const defaultForm = createDefaultFormConfig(targetSlug);
+      const insertPayload = {
+        id: targetSlug,
+        season_slug: targetSlug,
+        tournament_name: defaultForm.tournamentName,
+        season_title: defaultForm.seasonTitle,
+        deadline: defaultForm.deadline ? new Date(defaultForm.deadline).toISOString() : null,
+        max_slots: defaultForm.maxSlots ?? 32,
+        entry_fee: defaultForm.entryFee ?? 500,
+        venue: defaultForm.venue || null,
+        date: defaultForm.date || null,
+        enabled: Boolean(enabled),
+        closed_notice: closedNotice ?? defaultForm.closedNotice ?? null,
+        is_published: true,
+        payment_config_json: defaultForm.payment || {},
+        appearance_json: defaultForm.appearance || {},
+        fields_json: defaultForm.fields || [],
+        version: 1,
+        published_at: now,
+        updated_at: now,
+      };
+
+      const { data: savedRow, error } = await supabase
+        .from('registration_form_config')
+        .upsert(insertPayload as any, { onConflict: 'season_slug' })
+        .select('*')
+        .single();
+
+      if (error || !savedRow) {
+        return {
+          success: false,
+          error: error?.message || 'Failed to persist registration status in Supabase.',
+        };
+      }
+
+      return {
+        success: true,
+        config: this.mapDbFormRow(savedRow as DbRegistrationFormConfig),
+      };
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e?.message || 'Unexpected error updating registration status in Supabase.',
+      };
     }
   }
 

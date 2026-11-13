@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   Check,
   QrCode,
+  Lock,
 } from 'lucide-react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 import {
@@ -44,7 +45,13 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   onBackToApp,
   seasonParam,
 }) => {
-  const { state, submitPublicRegistration, formConfig: contextFormConfig } = useTournament();
+  const {
+    state,
+    submitPublicRegistration,
+    formConfig: contextFormConfig,
+    isRegistrationOpen: contextRegistrationOpen,
+    isRegistrationStatusHydrated,
+  } = useTournament();
 
   const activeSeasonSlug = seasonParam || state.registrationSettings.seasonSlug || 'season-4';
 
@@ -56,10 +63,24 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     return createDefaultFormConfig(activeSeasonSlug);
   });
 
-  const [loadingConfig, setLoadingConfig] = useState<boolean>(() => {
-    if (contextFormConfig && Array.isArray(contextFormConfig.fields) && contextFormConfig.fields.length > 0) return false;
-    return true;
-  });
+  // Wait for authoritative status check from Supabase/server before rendering form (prevents flash)
+  const [loadingConfig, setLoadingConfig] = useState<boolean>(() => !isRegistrationStatusHydrated);
+
+  // Sync live updates from TournamentContext (Supabase Realtime + multi-tab BroadcastChannel)
+  useEffect(() => {
+    if (contextFormConfig && Array.isArray(contextFormConfig.fields) && contextFormConfig.fields.length > 0) {
+      setFormConfig(contextFormConfig);
+    } else if (typeof contextFormConfig?.enabled === 'boolean') {
+      setFormConfig((prev) => ({
+        ...prev,
+        enabled: contextFormConfig.enabled,
+        ...(contextFormConfig.closedNotice !== undefined ? { closedNotice: contextFormConfig.closedNotice } : {}),
+      }));
+    }
+    if (isRegistrationStatusHydrated) {
+      setLoadingConfig(false);
+    }
+  }, [contextFormConfig, isRegistrationStatusHydrated]);
 
   // Link token status
   const [tokenParam, setTokenParam] = useState<string | null>(null);
@@ -284,13 +305,18 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     handleFieldChange('photo', undefined);
   };
 
+  const isClosed = !contextRegistrationOpen || formConfig.enabled === false;
+
   // Submit Handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (!formConfig.enabled) {
-      setErrorMsg(formConfig.closedNotice || 'Registrations are currently closed.');
+    if (isClosed) {
+      setErrorMsg(
+        formConfig.closedNotice ||
+          'Registration for Smash Premier League 3.0 is currently closed.'
+      );
       return;
     }
 
@@ -365,6 +391,13 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       } else {
         if (result.linkRevoked) {
           setIsTokenRevoked(true);
+        }
+        if (result.registrationClosed) {
+          setFormConfig((prev) => ({
+            ...prev,
+            enabled: false,
+            ...(result.error ? { closedNotice: result.error } : {}),
+          }));
         }
         setErrorMsg(
           result.error ||
@@ -478,6 +511,62 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                 <span>Return to Dashboard</span>
               </button>
             )}
+          </div>
+        ) : isClosed ? (
+          /* Registration Closed Blocking Screen */
+          <div className="rounded-3xl bg-[#0b1120] p-6 sm:p-10 border border-slate-700/70 text-center space-y-6 shadow-2xl animate-fade-in">
+            <div className="flex flex-col items-center justify-center">
+              <img
+                src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
+                alt="Smash Premier League Official Logo"
+                className="max-w-[180px] sm:max-w-[220px] h-auto object-contain mx-auto opacity-90"
+              />
+            </div>
+
+            <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300">
+              <Lock className="w-8 h-8" />
+            </div>
+
+            <div className="space-y-2.5">
+              <span className="inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-slate-800 text-slate-300 border border-slate-700">
+                Registration Closed
+              </span>
+              <h2 className="font-display text-2xl sm:text-3xl font-black text-white uppercase tracking-tight">
+                REGISTRATION CLOSED
+              </h2>
+              <p className="text-sm sm:text-base text-slate-300 max-w-md mx-auto leading-relaxed">
+                Registration for Smash Premier League 3.0 is currently closed.
+              </p>
+              {formConfig.closedNotice &&
+                formConfig.closedNotice.trim() !==
+                  'Registration for Smash Premier League 3.0 is currently closed.' && (
+                  <p className="text-xs text-slate-400 max-w-md mx-auto leading-relaxed pt-1">
+                    {formConfig.closedNotice}
+                  </p>
+                )}
+            </div>
+
+            <div className="max-w-sm mx-auto space-y-3 pt-2">
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className="w-full py-3.5 px-6 rounded-2xl font-display font-black text-xs sm:text-sm uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700 cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <Lock className="w-4 h-4 shrink-0" />
+                <span>REGISTRATION CLOSED</span>
+              </button>
+
+              {onBackToApp && (
+                <button
+                  type="button"
+                  onClick={onBackToApp}
+                  className="w-full py-2.5 px-5 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 text-slate-200 transition-colors"
+                >
+                  Return to Homepage
+                </button>
+              )}
+            </div>
           </div>
         ) : successReg ? (
           /* State 2: Successful Registration Confirmation Card */
