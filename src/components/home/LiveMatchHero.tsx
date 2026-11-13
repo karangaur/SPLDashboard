@@ -721,26 +721,39 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
     leadText = `Scores tied at ${scoreA} — All`;
   }
 
+  // Subtle match index readout for League vs Knockout
+  const activeMatchOrdinal = useMemo(() => {
+    if (!activeMatch) return '';
+    if (activeMatch.matchType === 'knockout') {
+      if (activeMatch.stage === 'F') return 'GRAND FINAL';
+      if (activeMatch.stage === 'SF') return `SEMI-FINAL ${activeMatch.slot || 1}`;
+      return `QUARTER-FINAL ${activeMatch.slot || 1}`;
+    }
+    const leagueOnly = matches.filter((m) => m.matchType !== 'knockout');
+    const idx = leagueOnly.findIndex((m) => m.id === activeMatch.id);
+    return idx >= 0 ? `MATCH #${String(idx + 1).padStart(2, '0')}` : `ROUND ${activeMatch.round}`;
+  }, [activeMatch, matches]);
+
   return (
     <section id="live-match" className="relative scroll-mt-24">
-      {/* Ambient Stage Aura (transitions smoothly across League, Semi-Final, and Grand Final) */}
+      {/* Ambient Stage Aura (transitions smoothly across League Championship Arena, Semi-Final, and Grand Final) */}
       <div
         className={`absolute inset-0 rounded-3xl blur-2xl pointer-events-none transition-all duration-500 ${
           isGrandFinal
             ? 'bg-gradient-to-r from-amber-500/35 via-orange-600/25 to-yellow-500/35 opacity-100'
             : isSemiFinal
             ? 'bg-gradient-to-r from-blue-600/30 via-purple-600/25 to-violet-500/30 opacity-100'
-            : 'bg-gradient-to-r from-rose-500/10 via-amber-500/5 to-lime-500/10 opacity-90'
+            : 'bg-gradient-to-r from-red-600/18 via-amber-500/10 to-orange-500/15 opacity-95'
         }`}
       />
 
       <div
         className={`relative w-full max-w-full rounded-2xl sm:rounded-3xl border p-3.5 sm:p-6 lg:p-8 shadow-2xl overflow-hidden transition-colors duration-500 ease-out ${
           isGrandFinal
-            ? 'border-amber-400/60 bg-gradient-to-br from-[#060503] via-[#170f04] to-[#050403] shadow-[0_0_65px_-12px_rgba(245,158,11,0.55),0_0_32px_-8px_rgba(249,115,22,0.35)]'
+            ? 'border-amber-400/65 bg-gradient-to-br from-[#060503] via-[#170f04] to-[#050403] shadow-[0_0_65px_-12px_rgba(245,158,11,0.55),0_0_32px_-8px_rgba(249,115,22,0.35)]'
             : isSemiFinal
-            ? 'border-violet-400/50 bg-gradient-to-br from-[#090d29] via-[#1b0b3d] to-[#06081c] shadow-[0_0_55px_-12px_rgba(139,92,246,0.5),0_0_28px_-8px_rgba(59,130,246,0.35)]'
-            : 'border-white/15 bg-gradient-to-b from-[#0a0e1c] via-[#070a14] to-[#04060d]'
+            ? 'border-violet-400/55 bg-gradient-to-br from-[#090d29] via-[#1b0b3d] to-[#06081c] shadow-[0_0_55px_-12px_rgba(139,92,246,0.5),0_0_28px_-8px_rgba(59,130,246,0.35)]'
+            : 'border-amber-400/25 bg-gradient-to-br from-[#07080e] via-[#0c0e18] to-[#05060b] shadow-[0_24px_64px_-16px_rgba(0,0,0,0.95),0_0_36px_-18px_rgba(239,68,68,0.28)]'
         }`}
       >
         {/* Top Metallic Neon Accent Bar */}
@@ -751,9 +764,17 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
               ? 'bg-gradient-to-r from-amber-300 via-orange-500 to-yellow-300 opacity-100'
               : isSemiFinal
               ? 'bg-gradient-to-r from-blue-400 via-violet-400 to-fuchsia-400 opacity-100'
-              : 'opacity-0'
+              : 'bg-gradient-to-r from-red-500 via-amber-400 to-orange-500 opacity-90'
           }`}
         />
+
+        {/* League Stage Championship Arena Soft Spotlight Ambience */}
+        {!isGrandFinal && !isSemiFinal && (
+          <div aria-hidden="true" className="spl-broadcast-layer absolute inset-0 pointer-events-none overflow-hidden">
+            <div className="absolute -top-28 -left-20 w-80 h-80 rounded-full bg-red-600/12 blur-3xl" />
+            <div className="absolute -top-28 -right-20 w-80 h-80 rounded-full bg-amber-500/12 blur-3xl" />
+          </div>
+        )}
 
         {/* Animated Fiery Gold Spotlights & Golden Particles (Grand Final Championship Only, mobile GPU budgeted) */}
         {isGrandFinal && (
@@ -964,15 +985,21 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   </span>
                 ) : (
                   <span
-                    className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider border ${
+                    className={`px-2.5 py-1 rounded-full text-[11px] font-display font-black uppercase tracking-wider border ${
                       stageMeta.isKnockout
-                        ? 'bg-sky-500/20 text-sky-300 border-sky-500/40'
-                        : 'bg-white/5 text-slate-300 border-white/10'
+                        ? 'bg-sky-500/20 text-sky-200 border-sky-400/45'
+                        : 'bg-amber-500/12 text-amber-300 border-amber-400/35'
                     }`}
                   >
                     {stageMeta.label}
                   </span>
                 )
+              )}
+
+              {activeMatchOrdinal && (
+                <span className="text-[11px] font-mono font-bold uppercase tracking-wider text-slate-300 hidden sm:inline">
+                  · {activeMatchOrdinal}
+                </span>
               )}
 
               <span
@@ -984,7 +1011,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     : 'text-slate-400'
                 }`}
               >
-                BWF {targetScore}-pt Rally Format
+                · SPL 3.0 · BWF {targetScore}-pt Rally
               </span>
             </div>
 
@@ -1140,26 +1167,26 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     role="tab"
                     aria-selected={isSelected}
                     onClick={() => setSelectedMatchId(m.id)}
-                    className={`snap-start px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-colors whitespace-nowrap flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                      className={`snap-start px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2 shrink-0 cursor-pointer ${
                       isSelected
                         ? mIsGf
-                          ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-orange-400 text-slate-950 border border-amber-200/80 shadow-lg shadow-amber-500/35'
+                          ? 'bg-gradient-to-r from-amber-300 via-yellow-300 to-orange-400 text-slate-950 border border-amber-200/90 shadow-lg shadow-amber-500/35'
                           : mIsSf
-                          ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border border-violet-300/60 shadow-lg shadow-purple-500/30'
-                          : 'bg-lime-400 text-slate-950 shadow-md shadow-lime-400/20'
+                          ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border border-violet-300/65 shadow-lg shadow-purple-500/30'
+                          : 'bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 text-slate-950 border border-amber-200/75 shadow-lg shadow-amber-500/25'
                         : mIsGf
                         ? 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-100 border border-amber-400/45'
                         : mIsSf
                         ? 'bg-violet-500/15 hover:bg-violet-500/25 text-violet-100 border border-violet-400/40'
                         : m.status === 'live'
-                        ? 'bg-rose-500/15 hover:bg-rose-500/25 text-white border border-rose-500/40'
-                        : 'bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10'
+                        ? 'bg-red-500/15 hover:bg-red-500/25 text-white border border-red-500/45'
+                        : 'bg-white/[0.04] hover:bg-white/10 text-slate-300 border border-white/10'
                     }`}
                   >
                     {m.status === 'live' && (
                       <span
                         className={`w-1.5 h-1.5 rounded-full animate-pulse shrink-0 ${
-                          isSelected ? (mIsSf ? 'bg-white' : 'bg-slate-950') : mIsGf ? 'bg-amber-400' : 'bg-rose-500'
+                          isSelected ? (mIsSf ? 'bg-white' : 'bg-slate-950') : mIsGf ? 'bg-amber-400' : 'bg-red-500'
                         }`}
                       />
                     )}
@@ -1182,11 +1209,11 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         {mStage.shortTag}
                       </span>
                     )}
-                    <span className="opacity-75 font-mono text-[10px]">
-                      {mCourt.replace(/^Court\s+/i, 'C')}:
+                    <span className="opacity-80 font-mono text-[10px]">
+                      {mCourt}:
                     </span>
-                    <span className="truncate max-w-[130px] sm:max-w-[160px]">
-                      {tA?.badge || ''} {tA?.name?.slice(0, 10) || 'TBD'} v {tB?.name?.slice(0, 10) || 'TBD'}
+                    <span className="truncate max-w-[140px] sm:max-w-[175px]">
+                      {tA?.badge || ''} {tA?.name?.slice(0, 12) || 'TBD'} vs {tB?.name?.slice(0, 12) || 'TBD'}
                     </span>
                     {hasScore && (
                       <span
@@ -1201,7 +1228,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                             ? 'text-amber-300'
                             : mIsSf
                             ? 'text-violet-300'
-                            : 'text-lime-400'
+                            : 'text-amber-300'
                         }`}
                       >
                         {m.scoreA ?? 0}-{m.scoreB ?? 0}
@@ -1240,7 +1267,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     ? 'bg-[#120d05]/85 border-amber-400/55 shadow-[0_0_32px_-8px_rgba(245,158,11,0.45)] hover:border-amber-300/80'
                     : isSemiFinal
                     ? 'bg-[#0b1335]/80 border-blue-400/45 shadow-[0_0_28px_-8px_rgba(59,130,246,0.45)] hover:border-blue-300/70'
-                    : 'bg-white/[0.03] border-white/10 hover:border-lime-400/30'
+                    : (isLive || isPaused) && scoreA > scoreB
+                    ? 'bg-gradient-to-br from-amber-500/[0.08] via-[#111422] to-[#0a0c15] border-amber-400/50 shadow-[0_0_24px_-10px_rgba(245,158,11,0.38)]'
+                    : 'bg-white/[0.03] border-white/10 hover:border-amber-400/35'
                 }`}
               >
                 <div className="flex items-center gap-2.5 sm:gap-3 min-w-0 flex-1">
@@ -1250,7 +1279,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         ? 'bg-gradient-to-tr from-amber-500 via-yellow-400 to-orange-400 text-slate-950 shadow-amber-500/40 ring-1 ring-amber-200/70'
                         : isSemiFinal
                         ? 'bg-gradient-to-tr from-blue-600 via-indigo-500 to-cyan-400 text-white shadow-blue-500/35 ring-1 ring-blue-300/40'
-                        : 'bg-gradient-to-tr from-amber-500 to-amber-400 text-slate-950 shadow-amber-500/20'
+                        : 'bg-gradient-to-tr from-amber-400 via-amber-500 to-orange-500 text-slate-950 shadow-amber-500/25 ring-1 ring-amber-200/40'
                     }`}
                   >
                     <span>{teamA?.badge || '🏸'}</span>
@@ -1263,6 +1292,11 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                       {isWinnerA && (
                         <span className="px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase shrink-0 border bg-amber-400/25 text-amber-200 border-amber-300/55">
                           {isGrandFinal ? '👑 Champion' : '🏆 Winner'}
+                        </span>
+                      )}
+                      {!isCompleted && (isLive || isPaused) && scoreA > scoreB && (
+                        <span className="text-[9px] sm:text-[10px] font-display font-black uppercase tracking-wider text-amber-300 shrink-0">
+                          · LEADING
                         </span>
                       )}
                     </div>
@@ -1286,7 +1320,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                             ? 'text-amber-100 bg-orange-500/30 border border-amber-400/50'
                             : isSemiFinal
                             ? 'text-blue-200 bg-blue-500/25 border border-blue-400/40'
-                            : 'text-amber-300 bg-amber-500/20'
+                            : 'text-red-200 bg-red-500/25 border border-red-400/45'
                         }`}
                       >
                         🔥 {setEval.isMatchPointA ? 'CHAMPIONSHIP POINT' : 'GAME POINT'}
@@ -1304,13 +1338,15 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                           ? 'text-amber-300 drop-shadow-[0_0_22px_rgba(251,191,36,0.75)]'
                           : isSemiFinal
                           ? 'text-blue-300 drop-shadow-[0_0_18px_rgba(96,165,250,0.65)]'
-                          : 'text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,0.4)]'
+                          : 'text-amber-300 drop-shadow-[0_0_18px_rgba(251,191,36,0.55)]'
                         : isGrandFinal
                         ? 'text-amber-50'
                         : 'text-white'
                     }`}
                   >
-                    {scoreA}
+                    <span key={`${activeMatch.id}-a-${scoreA}`} className="spl-score-tick">
+                      {scoreA}
+                    </span>
                   </div>
                   <span
                     className={`text-[10px] uppercase font-bold block mt-0.5 ${
@@ -1349,7 +1385,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     </div>
                   </div>
                 ) : (
-                  <div className="inline-flex items-center justify-center w-9 h-9 sm:w-10 sm:h-10 rounded-full bg-white/5 border border-white/10 text-slate-400 font-black text-xs font-mono">
+                  <div className="inline-flex items-center justify-center w-10 h-10 sm:w-11 sm:h-11 rounded-2xl bg-gradient-to-br from-[#19140a] to-[#1a0b0d] border border-amber-400/35 text-amber-300 font-display font-black italic text-xs sm:text-sm shadow-md">
                     VS
                   </div>
                 )}
@@ -1382,7 +1418,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         ? 'text-amber-300'
                         : isSemiFinal
                         ? 'text-blue-300'
-                        : 'text-lime-400'
+                        : 'text-amber-300'
                     }`}
                   >
                     {leadText}
@@ -1437,7 +1473,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     ? 'bg-[#170f04]/85 border-orange-400/55 shadow-[0_0_32px_-8px_rgba(249,115,22,0.45)] hover:border-amber-300/80'
                     : isSemiFinal
                     ? 'bg-[#190e3c]/80 border-purple-400/45 shadow-[0_0_28px_-8px_rgba(168,85,247,0.45)] hover:border-purple-300/70'
-                    : 'bg-white/[0.03] border-white/10 hover:border-lime-400/30'
+                    : (isLive || isPaused) && scoreB > scoreA
+                    ? 'bg-gradient-to-br from-red-500/[0.08] via-[#111422] to-[#0a0c15] border-red-400/50 shadow-[0_0_24px_-10px_rgba(239,68,68,0.38)]'
+                    : 'bg-white/[0.03] border-white/10 hover:border-amber-400/35'
                 }`}
               >
                 {/* Score Digit (Left on tablet/desktop for symmetry, right on mobile portrait) */}
@@ -1453,13 +1491,15 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                           ? 'text-amber-300 drop-shadow-[0_0_22px_rgba(251,191,36,0.75)]'
                           : isSemiFinal
                           ? 'text-purple-300 drop-shadow-[0_0_18px_rgba(192,132,252,0.65)]'
-                          : 'text-lime-400 drop-shadow-[0_0_15px_rgba(163,230,53,0.4)]'
+                          : 'text-amber-300 drop-shadow-[0_0_18px_rgba(251,191,36,0.55)]'
                         : isGrandFinal
                         ? 'text-amber-50'
                         : 'text-white'
                     }`}
                   >
-                    {scoreB}
+                    <span key={`${activeMatch.id}-b-${scoreB}`} className="spl-score-tick">
+                      {scoreB}
+                    </span>
                   </div>
                   <span
                     className={`text-[10px] uppercase font-bold block mt-0.5 ${
@@ -1481,7 +1521,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         ? 'bg-gradient-to-tr from-orange-600 via-amber-500 to-yellow-400 text-slate-950 shadow-orange-500/40 ring-1 ring-amber-200/70'
                         : isSemiFinal
                         ? 'bg-gradient-to-tr from-purple-600 via-violet-500 to-fuchsia-500 text-white shadow-purple-500/35 ring-1 ring-purple-300/40'
-                        : 'bg-gradient-to-tr from-cyan-500 to-blue-500 text-white shadow-cyan-500/20'
+                        : 'bg-gradient-to-tr from-red-600 via-rose-500 to-orange-500 text-white shadow-red-500/25 ring-1 ring-red-300/35'
                     }`}
                   >
                     <span>{teamB?.badge || '🏸'}</span>
@@ -1489,6 +1529,11 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
                   <div className="min-w-0 flex-1 md:flex-initial">
                     <div className="flex flex-wrap items-center justify-start md:justify-end gap-1 sm:gap-2">
+                      {!isCompleted && (isLive || isPaused) && scoreB > scoreA && (
+                        <span className="text-[9px] sm:text-[10px] font-display font-black uppercase tracking-wider text-amber-300 shrink-0">
+                          LEADING ·
+                        </span>
+                      )}
                       {isWinnerB && (
                         <span className="px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase shrink-0 border bg-amber-400/25 text-amber-200 border-amber-300/55">
                           {isGrandFinal ? '👑 Champion' : '🏆 Winner'}
@@ -1518,7 +1563,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                             ? 'text-amber-100 bg-orange-500/30 border border-amber-400/50'
                             : isSemiFinal
                             ? 'text-purple-200 bg-purple-500/25 border border-purple-400/40'
-                            : 'text-amber-300 bg-amber-500/20'
+                            : 'text-red-200 bg-red-500/25 border border-red-400/45'
                         }`}
                       >
                         🔥 {setEval.isMatchPointB ? 'CHAMPIONSHIP POINT' : 'GAME POINT'}
@@ -1532,7 +1577,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                         ? 'bg-gradient-to-tr from-orange-600 via-amber-500 to-yellow-400 text-slate-950 shadow-orange-500/40 ring-1 ring-amber-200/70'
                         : isSemiFinal
                         ? 'bg-gradient-to-tr from-purple-600 via-violet-500 to-fuchsia-500 text-white shadow-purple-500/35 ring-1 ring-purple-300/40'
-                        : 'bg-gradient-to-tr from-cyan-500 to-blue-500 text-white shadow-cyan-500/20'
+                        : 'bg-gradient-to-tr from-red-600 via-rose-500 to-orange-500 text-white shadow-red-500/25 ring-1 ring-red-300/35'
                     }`}
                   >
                     <span>{teamB?.badge || '🏸'}</span>
@@ -1792,22 +1837,22 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
           >
             <span
               className={`w-2 h-2 rounded-full shrink-0 ${
-                isGrandFinal ? 'bg-amber-400' : isSemiFinal ? 'bg-violet-400' : 'bg-emerald-400'
+                isGrandFinal ? 'bg-amber-400' : isSemiFinal ? 'bg-violet-400' : 'bg-amber-400'
               }`}
             />
-            <span>{venue || 'Maharajganj Indoor Stadium'} · Official Referee Monitored</span>
+            <span>{venue || 'Maharajganj Indoor Stadium'} · {stageMeta.label} · Official Referee Monitored</span>
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
             {activeMatch && onOpenMatchModal && (
               <button
                 onClick={() => onOpenMatchModal(activeMatch)}
-                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap ${
                   isGrandFinal
                     ? 'text-slate-950 bg-gradient-to-r from-amber-300 via-yellow-400 to-orange-400 hover:from-amber-200 hover:to-orange-300 shadow-lg shadow-amber-500/35'
                     : isSemiFinal
                     ? 'text-white bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 border border-violet-300/40 shadow-lg shadow-purple-600/30'
-                    : 'text-slate-950 bg-lime-400 hover:bg-lime-300 shadow-md shadow-lime-400/20'
+                    : 'text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:to-orange-400 shadow-md shadow-amber-500/25'
                 }`}
               >
                 <Maximize2 className="w-3.5 h-3.5 shrink-0" />
@@ -1823,7 +1868,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     ? 'text-amber-100 hover:text-white bg-amber-500/15 hover:bg-amber-500/25 border-amber-400/40'
                     : isSemiFinal
                     ? 'text-violet-100 hover:text-white bg-violet-500/15 hover:bg-violet-500/25 border-violet-400/35'
-                    : 'text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border-white/10'
+                    : 'text-slate-200 hover:text-white bg-white/[0.04] hover:bg-white/10 border-white/15'
                 }`}
               >
                 <span>Full Match Centre</span>

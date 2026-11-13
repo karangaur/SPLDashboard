@@ -22,6 +22,8 @@ export interface TeamsShowcaseSectionProps {
   tournamentName: string;
   onOpenPublicRegister: () => void;
   onSelectMatch?: (match: Match) => void;
+  selectedTeamId?: string | null;
+  onSelectTeamChange?: (teamId: string | null) => void;
 }
 
 type TeamTournamentStatus = 'CHAMPION' | 'QUALIFIED' | 'ELIMINATED' | 'ACTIVE';
@@ -786,8 +788,21 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
   tournamentName,
   onOpenPublicRegister,
   onSelectMatch,
+  selectedTeamId: controlledSelectedTeamId,
+  onSelectTeamChange,
 }) => {
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
+  const [internalSelectedTeamId, setInternalSelectedTeamId] = useState<string | null>(null);
+  const selectedTeamId = controlledSelectedTeamId !== undefined ? controlledSelectedTeamId : internalSelectedTeamId;
+  const setSelectedTeamId = useCallback(
+    (teamId: string | null) => {
+      if (onSelectTeamChange) {
+        onSelectTeamChange(teamId);
+      } else {
+        setInternalSelectedTeamId(teamId);
+      }
+    },
+    [onSelectTeamChange]
+  );
 
   useEffect(() => {
     if (!selectedTeamId) return;
@@ -796,7 +811,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedTeamId]);
+  }, [selectedTeamId, setSelectedTeamId]);
 
   const playerMap = useMemo(() => {
     const map = new Map<string, Player>();
@@ -900,7 +915,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
 
   const handleSelectTeam = useCallback((teamId: string) => {
     setSelectedTeamId(teamId);
-  }, []);
+  }, [setSelectedTeamId]);
 
   const selectedTeamIndex = selectedTeamId ? teams.findIndex((t) => t.id === selectedTeamId) : -1;
   const selectedTeam = selectedTeamIndex >= 0 ? teams[selectedTeamIndex] : null;
