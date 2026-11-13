@@ -6,6 +6,7 @@ import {
   KnockoutMatch,
   StandingsRecord,
   Registration,
+  PaymentStatus,
   PaymentSettings,
   RegistrationFormField,
   RegistrationFormConfig,
@@ -516,45 +517,143 @@ export function validateIndianMobile(raw: string): { isValid: boolean; cleanMobi
   return { isValid: true, cleanMobile: clean };
 }
 
-// Registration Summary Analytics
-export function calculateRegistrationStats(registrations: Registration[]) {
-  const approved = registrations.filter((r) => r.status === 'approved' || r.status === 'paid');
-  const pending = registrations.filter((r) => r.status === 'pending');
-  const rejected = registrations.filter((r) => r.status === 'rejected');
-  const comp = registrations.filter((r) => r.status === 'complimentary');
+export interface RegistrationPaymentBreakdown {
+  isExcluded: boolean;
+  isComplimentary: boolean;
+  payableFee: number;
+  verifiedPaidAmount: number;
+  outstandingDue: number;
+  effectivePaymentStatus: PaymentStatus;
+}
 
-  // Payment statuses
-  const paid = registrations.filter((r) => r.paymentStatus === 'paid' || r.status === 'paid');
-  const pendingVerification = registrations.filter(
-    (r) => r.paymentStatus === 'pending_verification' || (r.txnId && r.paymentStatus !== 'paid' && r.paymentStatus !== 'failed' && r.paymentStatus !== 'cancelled')
-  );
-  const unpaid = registrations.filter(
-    (r) => !r.paymentStatus || r.paymentStatus === 'unpaid' || r.paymentStatus === 'pending'
-  );
-  const failedOrCancelled = registrations.filter(
-    (r) => r.paymentStatus === 'failed' || r.paymentStatus === 'cancelled'
-  );
+export function getRegistrationPaymentBreakdown(reg: Registration): RegistrationPaymentBreakdown {
+  const isRejected = reg.status === 'rejected';
+  const isCancelled = reg.paymentStatus === 'cancelled';
+  const isRefunded = reg.paymentStatus === 'refunded';
+  const isExcluded = isRejected || isCancelled || isRefunded;
+  const isComplimentary = reg.status === 'complimentary' || reg.method === 'complimentary';
 
-  const totalVerifiedAmount = paid.reduce((sum, r) => sum + (r.fee || 0), 0);
-  const pendingVerificationAmount = pendingVerification.reduce((sum, r) => sum + (r.fee || 0), 0);
-  const collected = totalVerifiedAmount || approved.reduce((sum, r) => sum + (r.fee || 0), 0);
-  const pendingAmount = pending.reduce((sum, r) => sum + (r.fee || 0), 0);
+  const rawFee = Number(reg.fee);
+  const sanitizedFee = Number.isFinite(rawFee) ? Math.max(0, Math.round(rawFee)) : 0;
+  const payableFee = isExcluded || isComplimentary ? 0 : sanitizedFee;
 
-  const byUpi = paid.filter((r) => r.method === 'upi').reduce((sum, r) => sum + r.fee, 0);
-  const byCash = paid.filter((r) => r.method === 'cash').reduce((sum, r) => sum + r.fee, 0);
-  const byBank = paid.filter((r) => r.method === 'bank').reduce((sum, r) => sum + r.fee, 0);
+  let effectivePaymentStatus: PaymentStatus = reg.paymentStatus || (reg.status === 'paid' ? 'paid' : reg.txnId ? 'pending_verification' : 'unpaid');
+  if (reg.status === 'paid' && !reg.paymentStatus) {
+    effectivePaymentStatus = 'paid';
+  }
+
+  let verifiedPaidAmount = 0;
+  if (!isExcluded && !isComplimentary) {
+    if (effectivePaymentStatus === 'paid' || reg.status === 'paid') {
+      verifiedPaidAmount = payableFee;
+    } else if (
+      typeof reg.paidAmount === 'number' &&
+      Number.isFinite(reg.paidAmount) &&
+      reg.paidAmount > 0 &&
+      effectivePaymentStatus !== 'failed'
+    ) {
+      verifiedPaidAmount = Math.min(payableFee, Math.max(0, Math.round(reg.paidAmount)));
+    }
+  }
+
+  const outstandingDue = Math.max(0, payableFee - verifiedPaidAmount);
 
   return {
-    total: registrations.length,
+    isExcluded,
+    isComplimentary,
+    payableFee,
+    verifiedPaidAmount,
+    outstandingDue,
+    effectivePaymentStatus,
+  };
+}
+
+// Registration Summary Analytics (Authoritative Financial & Roster Totals)
+export function calculateRegistrationStats(registrations: Registration[]) {
+  // Deduplicate strictly by registration ID to prevent double counting
+  const uniqueMap = new Map<string, Registration>();
+  for (const reg of registrations) {
+    if (reg && reg.id) {
+      uniqueMap.set(reg.id, reg);
+    }
+  }
+  const uniqueRegs = Array.from(uniqueMap.values());
+
+  const approved = uniqueRegs.filter((r) => r.status === 'approved' || r.status === 'paid');
+  const pending = uniqueRegs.filter((r) => r.status === 'pending');
+  const rejected = uniqueRegs.filter((r) => r.status === 'rejected');
+  const comp = uniqueRegs.filter((r) => r.status === 'complimentary' || r.method === 'complimentary');
+
+  let totalPayableAmount = 0;
+  let totalVerifiedAmount = 0;
+  let pendingVerificationAmount = 0;
+  let pendingVerificationCount = 0;
+  let paidCount = 0;
+  let unpaidPlayersCount = 0;
+  let failedCount = 0;
+  let activePayableCount = 0;
+  let byUpi = 0;
+  let byCash = 0;
+  let byBank = 0;
+
+  for (const r of uniqueRegs) {
+    const b = getRegistrationPaymentBreakdown(r);
+
+    if (b.effectivePaymentStatus === 'failed' || b.effectivePaymentStatus === 'cancelled' || b.effectivePaymentStatus === 'refunded') {
+      failedCount += 1;
+    }
+
+    if (b.isExcluded) {
+      continue;
+    }
+
+    if (!b.isComplimentary) {
+      activePayableCount += 1;
+      totalPayableAmount += b.payableFee;
+      totalVerifiedAmount += b.verifiedPaidAmount;
+
+      if (b.verifiedPaidAmount > 0) {
+        if (r.method === 'upi') byUpi += b.verifiedPaidAmount;
+        else if (r.method === 'cash') byCash += b.verifiedPaidAmount;
+        else if (r.method === 'bank') byBank += b.verifiedPaidAmount;
+      }
+
+      if (b.outstandingDue > 0) {
+        unpaidPlayersCount += 1;
+      } else if (b.payableFee > 0 && b.verifiedPaidAmount >= b.payableFee) {
+        paidCount += 1;
+      }
+
+      if (
+        b.effectivePaymentStatus === 'pending_verification' ||
+        (r.txnId && b.effectivePaymentStatus !== 'paid' && b.effectivePaymentStatus !== 'failed')
+      ) {
+        pendingVerificationCount += 1;
+        pendingVerificationAmount += b.outstandingDue;
+      }
+    }
+  }
+
+  // Authoritative equations:
+  // Collected Entry Fees = Sum of verified paid amounts only
+  // Pending Dues = Total Entry Fees Payable - Collected Entry Fees (never negative)
+  const collected = Math.max(0, totalVerifiedAmount);
+  const pendingAmount = Math.max(0, totalPayableAmount - collected);
+
+  return {
+    total: uniqueRegs.length,
+    activePayableCount,
     approvedCount: approved.length,
-    paidCount: paid.length,
-    unpaidCount: unpaid.length,
+    paidCount,
+    unpaidCount: unpaidPlayersCount,
+    unpaidPlayersCount,
     pendingCount: pending.length,
-    pendingVerificationCount: pendingVerification.length,
-    failedCount: failedOrCancelled.length,
+    pendingVerificationCount,
+    failedCount,
     rejectedCount: rejected.length,
     compCount: comp.length,
-    totalVerifiedAmount,
+    totalPayableAmount,
+    totalVerifiedAmount: collected,
     pendingVerificationAmount,
     collected,
     pendingAmount,

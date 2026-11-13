@@ -12,8 +12,10 @@ import {
   ChevronRight,
   IndianRupee,
   Activity,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react';
-import { useTournament, sportsAudio } from '../../context/TournamentContext';
+import { useTournament } from '../../context/TournamentContext';
 import { formatINR, calculateRegistrationStats } from '../../utils/tournamentEngine';
 import { NavTab } from '../common/Header';
 
@@ -22,7 +24,14 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectTab }) => {
-  const { state, standings, updateMatch } = useTournament();
+  const {
+    state,
+    standings,
+    updateMatch,
+    isRegistrationsLoading,
+    registrationsSyncError,
+    refreshRegistrations,
+  } = useTournament();
 
   const totalMatches = state.matches.length;
   const completedMatches = state.matches.filter((m) => m.status === 'completed').length;
@@ -370,27 +379,71 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectTab }) => 
           </div>
         </div>
 
+        {registrationsSyncError && (
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border border-rose-500/30 bg-rose-500/10 text-xs text-rose-200"
+          >
+            <span className="flex items-center gap-2">
+              <AlertCircle className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+              <span>{registrationsSyncError}</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => void refreshRegistrations()}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 font-bold text-rose-100"
+            >
+              <RefreshCw className="w-3 h-3" />
+              <span>Retry</span>
+            </button>
+          </div>
+        )}
+
         {/* 4 Financial Sub-KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-2">
-          <div className="rounded-xl bg-white/5 p-3">
+          <div className="rounded-xl bg-white/5 p-3 space-y-0.5">
             <span className="text-xs text-slate-400 block">Total Registered</span>
-            <span className="font-mono text-xl font-bold text-white tabular-nums">{regStats.total}</span>
-          </div>
-          <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3">
-            <span className="text-xs text-emerald-400 block">Fees Collected</span>
-            <span className="font-mono text-xl font-bold text-emerald-300 tabular-nums">
-              {formatINR(regStats.collected)}
+            <span className="font-mono text-xl font-bold text-white tabular-nums block">
+              {isRegistrationsLoading && state.registrations.length === 0 ? '...' : regStats.total}
+            </span>
+            <span className="text-[11px] text-slate-400 block tabular-nums">
+              {regStats.approvedCount} approved to roster
             </span>
           </div>
-          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3">
-            <span className="text-xs text-amber-400 block">Pending Payments</span>
-            <span className="font-mono text-xl font-bold text-amber-300 tabular-nums">
-              {regStats.pendingCount} ({formatINR(regStats.pendingAmount)})
+          <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3 space-y-0.5">
+            <span className="text-xs text-emerald-400 flex items-center gap-1">
+              <IndianRupee className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Collected Entry Fees</span>
+            </span>
+            <span className="font-mono text-xl font-bold text-emerald-300 tabular-nums block">
+              {isRegistrationsLoading && state.registrations.length === 0
+                ? '...'
+                : formatINR(regStats.collected)}
+            </span>
+            <span className="text-[11px] text-emerald-400/80 block tabular-nums">
+              {regStats.paidCount} of {regStats.activePayableCount} players confirmed paid
             </span>
           </div>
-          <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 p-3">
+          <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3 space-y-0.5">
+            <span className="text-xs text-amber-400 flex items-center gap-1">
+              <Clock className="w-3.5 h-3.5 text-amber-400" />
+              <span>Pending Dues</span>
+            </span>
+            <span className="font-mono text-xl font-bold text-amber-300 tabular-nums block">
+              {isRegistrationsLoading && state.registrations.length === 0
+                ? '...'
+                : formatINR(regStats.pendingAmount)}
+            </span>
+            <span className="text-[11px] text-amber-400/80 block tabular-nums">
+              {regStats.unpaidPlayersCount} {regStats.unpaidPlayersCount === 1 ? 'player' : 'players'} unpaid · Total {formatINR(regStats.totalPayableAmount)}
+            </span>
+          </div>
+          <div className="rounded-xl bg-blue-500/10 border border-blue-500/20 p-3 space-y-0.5">
             <span className="text-xs text-blue-400 block">Open Slots</span>
-            <span className="font-mono text-xl font-bold text-blue-300 tabular-nums">{slotsRemaining}</span>
+            <span className="font-mono text-xl font-bold text-blue-300 tabular-nums block">{slotsRemaining}</span>
+            <span className="text-[11px] text-blue-400/80 block tabular-nums">
+              of {state.settings.slotLimit} capacity
+            </span>
           </div>
         </div>
       </section>

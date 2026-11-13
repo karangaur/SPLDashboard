@@ -142,12 +142,21 @@ interface TournamentContextType {
   toggleTokenStatus: (tokenId: string) => Promise<{ success: boolean; token?: RegistrationTokenRecord }>;
 
   // Registrations (Applicants & Management)
+  isRegistrationsLoading: boolean;
+  registrationsSyncError: string | null;
+  refreshRegistrations: () => Promise<void>;
   submitPublicRegistration: (formData: any) => Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean; registrationClosed?: boolean }>;
   addRegistration: (reg: Partial<Registration> & { name: string; mobile: string }) => Registration;
   updateRegistration: (id: string, updates: Partial<Registration>) => void;
   approveRegistration: (id: string) => void;
   rejectRegistration: (id: string, reason?: string) => void;
-  verifyPayment: (id: string, paymentStatus: PaymentStatus, note?: string, verifiedBy?: string) => Promise<{ success: boolean; registration?: Registration }>;
+  verifyPayment: (
+    id: string,
+    paymentStatus: PaymentStatus,
+    note?: string,
+    verifiedBy?: string,
+    paidAmount?: number
+  ) => Promise<{ success: boolean; registration?: Registration; error?: string }>;
   deleteRegistration: (id: string) => void;
   deleteRegistrationsBulk: (ids: string[]) => void;
   bulkApproveRegistrations: (ids: string[]) => void;
@@ -296,6 +305,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } catch {}
   }, []);
   const [isRegistrationStatusHydrated, setIsRegistrationStatusHydrated] = useState<boolean>(false);
+  const [isRegistrationsLoading, setIsRegistrationsLoading] = useState<boolean>(true);
+  const [registrationsSyncError, setRegistrationsSyncError] = useState<string | null>(null);
   const [tokens, setTokens] = useState<RegistrationTokenRecord[]>([]);
   const [activeToken, setActiveToken] = useState<RegistrationTokenRecord | null>(null);
   const [isCentralizedDbConnected, setIsCentralizedDbConnected] = useState<boolean>(true); // Persistent Express server storage is always active
@@ -357,6 +368,49 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const reconnectRealtime = useCallback(() => {
     reconnectTriggerRef.current?.();
+  }, []);
+
+  const broadcastRegistrationsSync = useCallback((action: 'upsert' | 'delete' | 'bulk_delete' | 'refresh', payload?: any) => {
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const ch = new BroadcastChannel('spl_registrations_channel');
+        ch.postMessage({ type: 'REGISTRATION_SYNC', action, payload, at: Date.now() });
+        ch.close();
+      } catch {}
+    }
+  }, []);
+
+  const refreshRegistrations = useCallback(async () => {
+    try {
+      setIsRegistrationsLoading(true);
+      if (SupabaseService.isAvailable()) {
+        const regs = await SupabaseService.fetchRegistrations('all');
+        if (regs !== null) {
+          setState((prev) => ({ ...prev, registrations: regs }));
+          setRegistrationsSyncError(null);
+        } else {
+          setRegistrationsSyncError('Unable to fetch latest payment & registration records from Supabase.');
+        }
+      } else {
+        const res = await fetch(`/api/registrations?season=all&t=${Date.now()}`, {
+          cache: 'no-store',
+          headers: { ...AuthService.getAuthHeader() },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data)) {
+            setState((prev) => ({ ...prev, registrations: data }));
+            setRegistrationsSyncError(null);
+          }
+        } else {
+          setRegistrationsSyncError('Unable to refresh registration ledger from server.');
+        }
+      }
+    } catch (err: any) {
+      setRegistrationsSyncError(err?.message || 'Registration sync error.');
+    } finally {
+      setIsRegistrationsLoading(false);
+    }
   }, []);
 
   useEffect(() => {
@@ -458,6 +512,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             ]);
 
             if (isDisposed) return;
+
+            if (regs !== null) {
+              setRegistrationsSyncError(null);
+            } else {
+              setRegistrationsSyncError('Failed to retrieve registrations from Supabase.');
+            }
+            setIsRegistrationsLoading(false);
 
             const extractedFromSupabase = SupabaseService.extractTournamentSettingsFromConfig(cfg);
             const isHeroGuardActive = Date.now() - heroPublishGuardRef.current < 2500;
@@ -672,6 +733,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 }
               })
               .catch(() => {});
+
+            fetch(`/api/registrations?season=all&t=${Date.now()}`, {
+              cache: 'no-store',
+              headers: { ...AuthService.getAuthHeader() },
+            })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((data) => {
+                if (Array.isArray(data) && !isDisposed) {
+                  setState((prev) => ({ ...prev, registrations: data }));
+                  setRegistrationsSyncError(null);
+                }
+              })
+              .catch(() => {})
+              .finally(() => {
+                if (!isDisposed) setIsRegistrationsLoading(false);
+              });
 
             fetch(`/api/hero/published?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
               .then((res) => (res.ok ? res.json() : null))
@@ -1154,61 +1231,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
         onRegistrationChange: (payload) => {
           if (payload.eventType === 'INSERT' && payload.new) {
-            const newReg = payload.new;
+            const mapped = SupabaseService.mapDbRegistration(payload.new);
             setState((prev) => {
-              if (prev.registrations.some((r) => r.id === newReg.id)) return prev;
-              const mapped: Registration = {
-                id: newReg.id,
-                regId: newReg.reg_id,
-                name: newReg.name,
-                mobile: newReg.mobile,
-                whatsapp: newReg.whatsapp || undefined,
-                age: newReg.age || undefined,
-                gender: newReg.gender,
-                experience: newReg.experience || undefined,
-                category: newReg.category || undefined,
-                style: newReg.style || undefined,
-                city: newReg.city || undefined,
-                notes: newReg.notes || undefined,
-                fee: newReg.fee,
-                status: newReg.status,
-                paymentStatus: newReg.payment_status,
-                method: newReg.method,
-                txnId: newReg.txn_id || undefined,
-                season: newReg.season_slug,
-                createdAt: new Date(newReg.created_at).getTime(),
-                paidAt: newReg.paid_at ? new Date(newReg.paid_at).getTime() : undefined,
-                approvedAt: newReg.approved_at ? new Date(newReg.approved_at).getTime() : undefined,
-                verifiedBy: newReg.verified_by || undefined,
-                verifiedAt: newReg.verified_at ? new Date(newReg.verified_at).getTime() : undefined,
-                auditLog: newReg.audit_log_json || [],
-                answers: newReg.answers_json || {},
-                photoUrl: newReg.photo_url || undefined,
-                tokenUsed: newReg.token_used || undefined,
-                formVersion: newReg.form_version || 1,
-              };
-              return { ...prev, registrations: [mapped, ...prev.registrations] };
+              const filtered = prev.registrations.filter((r) => r.id !== mapped.id);
+              return { ...prev, registrations: [mapped, ...filtered] };
             });
+            setRegistrationsSyncError(null);
           } else if (payload.eventType === 'UPDATE' && payload.new) {
-            const updatedReg = payload.new;
-            setState((prev) => ({
-              ...prev,
-              registrations: prev.registrations.map((r) =>
-                r.id === updatedReg.id
-                  ? {
-                      ...r,
-                      status: updatedReg.status,
-                      paymentStatus: updatedReg.payment_status,
-                      txnId: updatedReg.txn_id || r.txnId,
-                      approvedAt: updatedReg.approved_at ? new Date(updatedReg.approved_at).getTime() : r.approvedAt,
-                      paidAt: updatedReg.paid_at ? new Date(updatedReg.paid_at).getTime() : r.paidAt,
-                      verifiedBy: updatedReg.verified_by || r.verifiedBy,
-                      verifiedAt: updatedReg.verified_at ? new Date(updatedReg.verified_at).getTime() : r.verifiedAt,
-                      auditLog: updatedReg.audit_log_json || r.auditLog,
-                    }
-                  : r
-              ),
-            }));
+            const mapped = SupabaseService.mapDbRegistration(payload.new);
+            setState((prev) => {
+              const exists = prev.registrations.some((r) => r.id === mapped.id);
+              const nextRegs = exists
+                ? prev.registrations.map((r) => (r.id === mapped.id ? mapped : r))
+                : [mapped, ...prev.registrations];
+              return { ...prev, registrations: nextRegs };
+            });
+            setRegistrationsSyncError(null);
           } else if (payload.eventType === 'DELETE' && payload.old) {
             const delId = payload.old.id;
             setState((prev) => ({
@@ -1631,11 +1669,42 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     let liveChannel: BroadcastChannel | null = null;
     let formChannel: BroadcastChannel | null = null;
     let heroChannel: BroadcastChannel | null = null;
+    let regChannel: BroadcastChannel | null = null;
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       liveChannel = new BroadcastChannel('spl_live_scores_channel');
       formChannel = new BroadcastChannel('spl_form_config_channel');
       heroChannel = new BroadcastChannel('spl_hero_config_channel');
+      regChannel = new BroadcastChannel('spl_registrations_channel');
+
+      regChannel.onmessage = (event) => {
+        if (event.data?.type !== 'REGISTRATION_SYNC') return;
+        const { action, payload } = event.data;
+        if (action === 'upsert' && payload?.id) {
+          setState((prev) => {
+            const exists = prev.registrations.some((r) => r.id === payload.id);
+            return {
+              ...prev,
+              registrations: exists
+                ? prev.registrations.map((r) => (r.id === payload.id ? payload : r))
+                : [payload, ...prev.registrations],
+            };
+          });
+        } else if (action === 'delete' && payload?.id) {
+          setState((prev) => ({
+            ...prev,
+            registrations: prev.registrations.filter((r) => r.id !== payload.id),
+          }));
+        } else if (action === 'bulk_delete' && Array.isArray(payload?.ids)) {
+          const delSet = new Set(payload.ids);
+          setState((prev) => ({
+            ...prev,
+            registrations: prev.registrations.filter((r) => !delSet.has(r.id)),
+          }));
+        } else {
+          void refreshRegistrations();
+        }
+      };
 
       heroChannel.onmessage = (event) => {
         if (event.data?.type === 'HERO_PUBLISHED' && event.data.heroConfig) {
@@ -1798,6 +1867,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       liveChannel?.close();
       formChannel?.close();
       heroChannel?.close();
+      regChannel?.close();
       unsubMaster?.();
     };
   }, []);
@@ -3842,14 +3912,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           body: JSON.stringify(newReg),
         }).catch(() => {});
 
-        // Update local React state immediately so confirmation card displays
+        // Update local React state immediately and broadcast across tabs
         setState((prev) => ({
           ...prev,
           registrations: [
-            ...prev.registrations.filter((r) => r.id !== newReg.id),
             newReg,
+            ...prev.registrations.filter((r) => r.id !== newReg.id),
           ],
         }));
+        broadcastRegistrationsSync('upsert', newReg);
 
         return { success: true, registration: newReg };
       } catch (err: any) {
@@ -4011,15 +4082,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ? {
               ...r,
               ...updates,
-              paidAt: updates.status === 'paid' && !r.paidAt ? Date.now() : r.paidAt,
+              paidAt:
+                updates.paymentStatus === 'paid' || updates.status === 'paid'
+                  ? r.paidAt || Date.now()
+                  : updates.paymentStatus
+                  ? undefined
+                  : r.paidAt,
             }
           : r
       );
-      if (SupabaseService.isAvailable()) {
-        const item = updated.find((r) => r.id === id);
-        if (item) {
-          SupabaseService.saveRegistration(item).catch(() => {});
-        }
+      const item = updated.find((r) => r.id === id);
+      if (item) {
+        broadcastRegistrationsSync('upsert', item);
       }
       return {
         ...prev,
@@ -4031,15 +4105,32 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     });
 
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.updateRegistrationFieldsAtomic(id, updates)
+        .then((res) => {
+          if (res.success && res.registration) {
+            setState((prev) => ({
+              ...prev,
+              registrations: prev.registrations.map((r) => (r.id === id ? res.registration! : r)),
+            }));
+            broadcastRegistrationsSync('upsert', res.registration);
+          }
+        })
+        .catch(() => {});
+    }
+
     fetch(`/api/registrations/${id}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify(updates),
     }).catch(() => {});
   };
 
   const approveRegistration = (id: string) => {
     triggerCelebration();
+    const nowTs = Date.now();
+    let targetPlayerId: string | undefined;
+
     setState((prev) => {
       const reg = prev.registrations.find((r) => r.id === id);
       if (!reg) return prev;
@@ -4052,6 +4143,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       );
 
       const playerId = existingPlayer ? existingPlayer.id : (reg.playerId || crypto.randomUUID());
+      targetPlayerId = playerId;
       let updatedPlayers = prev.players;
 
       if (!existingPlayer) {
@@ -4080,18 +4172,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ? {
               ...r,
               status: 'approved' as const,
-              approvedAt: Date.now(),
+              approvedAt: r.approvedAt || nowTs,
               playerId,
             }
           : r
       );
 
-      if (SupabaseService.isAvailable()) {
-        const approvedReg = updatedRegistrations.find((r) => r.id === id);
-        if (approvedReg) {
-          SupabaseService.saveRegistration(approvedReg).catch(() => {});
-          SupabaseService.logAudit('registration_approved', 'registration', id, { playerId }).catch(() => {});
-        }
+      const approvedReg = updatedRegistrations.find((r) => r.id === id);
+      if (approvedReg) {
+        broadcastRegistrationsSync('upsert', approvedReg);
       }
 
       return {
@@ -4101,24 +4190,52 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     });
 
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.updateRegistrationFieldsAtomic(id, {
+        status: 'approved',
+        approvedAt: nowTs,
+        ...(targetPlayerId ? { playerId: targetPlayerId } : {}),
+      })
+        .then((res) => {
+          if (res.success && res.registration) {
+            setState((prev) => ({
+              ...prev,
+              registrations: prev.registrations.map((r) => (r.id === id ? res.registration! : r)),
+            }));
+            broadcastRegistrationsSync('upsert', res.registration);
+          }
+          SupabaseService.logAudit('registration_approved', 'registration', id, { playerId: targetPlayerId }).catch(() => {});
+        })
+        .catch(() => {});
+    }
+
     fetch(`/api/registrations/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ status: 'approved', approvedAt: Date.now() }),
+      body: JSON.stringify({ status: 'approved', approvedAt: nowTs, ...(targetPlayerId ? { playerId: targetPlayerId } : {}) }),
     }).catch(() => {});
   };
 
   const rejectRegistration = (id: string, reason?: string) => {
+    const existingReg = stateRef.current.registrations.find((r) => r.id === id);
+    const nextNotes = reason ? `${existingReg?.notes || ''} [Rejected: ${reason}]`.trim() : existingReg?.notes;
+
     if (SupabaseService.isAvailable()) {
-      const rejectedReg = state.registrations.find((r) => r.id === id);
-      if (rejectedReg) {
-        SupabaseService.saveRegistration({
-          ...rejectedReg,
-          status: 'rejected',
-          notes: reason ? `${rejectedReg.notes || ''} [Rejected: ${reason}]`.trim() : rejectedReg.notes,
-        }).catch(() => {});
-        SupabaseService.logAudit('registration_rejected', 'registration', id, { reason }).catch(() => {});
-      }
+      SupabaseService.updateRegistrationFieldsAtomic(id, {
+        status: 'rejected',
+        ...(nextNotes !== undefined ? { notes: nextNotes } : {}),
+      })
+        .then((res) => {
+          if (res.success && res.registration) {
+            setState((prev) => ({
+              ...prev,
+              registrations: prev.registrations.map((r) => (r.id === id ? res.registration! : r)),
+            }));
+            broadcastRegistrationsSync('upsert', res.registration);
+          }
+          SupabaseService.logAudit('registration_rejected', 'registration', id, { reason }).catch(() => {});
+        })
+        .catch(() => {});
     }
 
     setState((prev) => ({
@@ -4137,7 +4254,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     fetch(`/api/registrations/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ status: 'rejected' }),
+      body: JSON.stringify({ status: 'rejected', ...(nextNotes !== undefined ? { notes: nextNotes } : {}) }),
     }).catch(() => {});
   };
 
@@ -4145,82 +4262,106 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     id: string,
     paymentStatus: PaymentStatus,
     note?: string,
-    verifiedBy = 'Tournament Director'
-  ): Promise<{ success: boolean; registration?: Registration }> => {
-    const now = Date.now();
+    verifiedBy = 'Tournament Director',
+    paidAmount?: number
+  ): Promise<{ success: boolean; registration?: Registration; error?: string }> => {
+    // 1. Primary path when Supabase client is configured: atomic DB update directly on PostgreSQL
+    if (SupabaseService.isAvailable()) {
+      const atomicRes = await SupabaseService.verifyRegistrationPaymentAtomic({
+        id,
+        paymentStatus,
+        verifiedBy,
+        note,
+        paidAmount,
+      });
+
+      if (atomicRes.success && atomicRes.registration) {
+        const authoritative = atomicRes.registration;
+        setState((prev) => ({
+          ...prev,
+          registrations: prev.registrations.map((r) => (r.id === id ? authoritative : r)),
+        }));
+        setRegistrationsSyncError(null);
+        broadcastRegistrationsSync('upsert', authoritative);
+
+        // Mirror update cleanly to Express backend SSE stream (best-effort)
+        safeFetchJson(`/api/registrations/${id}/verify-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ paymentStatus, verifiedBy, note, paidAmount }),
+        }).catch(() => {});
+
+        if (paymentStatus === 'paid') {
+          triggerCelebration();
+        }
+        return { success: true, registration: authoritative };
+      }
+
+      // If direct Supabase call failed (e.g. RLS/network), try authenticated Express backend API which persists to Supabase + mirrors SSE
+      try {
+        const apiRes = await safeFetchJson<{ success: boolean; registration?: Registration; error?: string }>(
+          `/api/registrations/${id}/verify-payment`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+            body: JSON.stringify({ paymentStatus, verifiedBy, note, paidAmount }),
+          }
+        );
+        if (apiRes.ok && apiRes.data?.registration) {
+          const updated = apiRes.data.registration;
+          setState((prev) => ({
+            ...prev,
+            registrations: prev.registrations.map((r) => (r.id === id ? updated : r)),
+          }));
+          setRegistrationsSyncError(null);
+          broadcastRegistrationsSync('upsert', updated);
+          if (paymentStatus === 'paid') triggerCelebration();
+          return { success: true, registration: updated };
+        }
+      } catch {}
+
+      return {
+        success: false,
+        error: atomicRes.error || 'Could not save payment status to Supabase database.',
+      };
+    }
+
+    // 2. Express server mode (when Supabase env is not set)
     try {
-      const res = await safeFetchJson<{ success: boolean; registration?: Registration }>(
+      const res = await safeFetchJson<{ success: boolean; registration?: Registration; error?: string }>(
         `/api/registrations/${id}/verify-payment`,
         {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ paymentStatus, verifiedBy, note }),
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ paymentStatus, verifiedBy, note, paidAmount }),
         }
       );
 
       if (res.ok && res.data && res.data.registration) {
         const updated = res.data.registration;
-        if (SupabaseService.isAvailable()) {
-          SupabaseService.saveRegistration(updated).catch(() => {});
-          SupabaseService.logAudit('payment_verified', 'registration', id, { paymentStatus, verifiedBy, note }).catch(() => {});
-        }
         setState((prev) => ({
           ...prev,
           registrations: prev.registrations.map((r) => (r.id === id ? updated : r)),
         }));
+        broadcastRegistrationsSync('upsert', updated);
         if (paymentStatus === 'paid') {
           triggerCelebration();
         }
         return { success: true, registration: updated };
       }
-    } catch {}
-
-    // Resilient local fallback
-    let updatedReg: Registration | undefined;
-    setState((prev) => {
-      const target = prev.registrations.find((r) => r.id === id);
-      if (!target) return prev;
-
-      const prevStatus = target.paymentStatus || (target.status === 'paid' ? 'paid' : target.txnId ? 'pending_verification' : 'unpaid');
-      const auditEntry = {
-        action: 'verify_payment',
-        by: verifiedBy,
-        at: now,
-        fromStatus: prevStatus,
-        toStatus: paymentStatus,
-        note,
-      };
-
-      updatedReg = {
-        ...target,
-        paymentStatus,
-        verifiedBy,
-        verifiedAt: now,
-        paidAt: paymentStatus === 'paid' ? target.paidAt || now : target.paidAt,
-        status: paymentStatus === 'paid' && target.status === 'pending' ? 'approved' : target.status,
-        auditLog: [...(target.auditLog || []), auditEntry],
-      };
-
-      if (SupabaseService.isAvailable()) {
-        SupabaseService.saveRegistration(updatedReg).catch(() => {});
-        SupabaseService.logAudit('payment_verified', 'registration', id, { paymentStatus, verifiedBy, note }).catch(() => {});
-      }
-
-      return {
-        ...prev,
-        registrations: prev.registrations.map((r) => (r.id === id ? updatedReg! : r)),
-      };
-    });
-
-    if (paymentStatus === 'paid') {
-      triggerCelebration();
+      return { success: false, error: res.data?.error || res.errorText || 'Server rejected payment update.' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to update payment status.' };
     }
-    return { success: true, registration: updatedReg };
   };
 
   const deleteRegistration = (id: string) => {
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deleteRegistration(id).catch(() => {});
+      SupabaseService.deleteRegistration(id)
+        .then((ok) => {
+          if (ok) void refreshRegistrations();
+        })
+        .catch(() => {});
       SupabaseService.logAudit('registration_deleted', 'registration', id).catch(() => {});
     }
 
@@ -4228,6 +4369,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       registrations: prev.registrations.filter((r) => r.id !== id),
     }));
+    broadcastRegistrationsSync('delete', { id });
 
     fetch(`/api/registrations/${id}`, {
       method: 'DELETE',
@@ -4240,7 +4382,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const idSet = new Set(ids);
 
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deleteRegistrationsBulk(ids).catch(() => {});
+      SupabaseService.deleteRegistrationsBulk(ids)
+        .then((ok) => {
+          if (ok) void refreshRegistrations();
+        })
+        .catch(() => {});
       SupabaseService.logAudit('registrations_bulk_deleted', 'registration', undefined, { count: ids.length }).catch(() => {});
     }
 
@@ -4248,6 +4394,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ...prev,
       registrations: prev.registrations.filter((r) => !idSet.has(r.id)),
     }));
+    broadcastRegistrationsSync('bulk_delete', { ids });
 
     fetch('/api/registrations/bulk-delete', {
       method: 'POST',
@@ -4260,6 +4407,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     if (!ids || ids.length === 0) return;
     triggerCelebration();
     const idSet = new Set(ids);
+    const nowTs = Date.now();
 
     setState((prev) => {
       const newPlayers = [...prev.players];
@@ -4292,12 +4440,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const approvedReg: Registration = {
           ...r,
           status: 'approved' as const,
-          approvedAt: Date.now(),
+          approvedAt: r.approvedAt || nowTs,
           playerId,
         };
 
         if (SupabaseService.isAvailable()) {
-          SupabaseService.saveRegistration(approvedReg).catch(() => {});
+          SupabaseService.updateRegistrationFieldsAtomic(r.id, {
+            status: 'approved',
+            approvedAt: approvedReg.approvedAt,
+            playerId,
+          }).catch(() => {});
         }
 
         return approvedReg;
@@ -4306,6 +4458,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (SupabaseService.isAvailable() && newlyCreatedPlayers.length > 0) {
         SupabaseService.upsertPlayersBulk(newlyCreatedPlayers).catch(() => {});
       }
+
+      broadcastRegistrationsSync('refresh');
 
       return {
         ...prev,
@@ -4479,6 +4633,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         fetchTokens,
         regenerateToken,
         toggleTokenStatus,
+        isRegistrationsLoading,
+        registrationsSyncError,
+        refreshRegistrations,
         submitPublicRegistration,
         addRegistration,
         updateRegistration,

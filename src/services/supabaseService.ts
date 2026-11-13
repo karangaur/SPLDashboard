@@ -974,6 +974,49 @@ export class SupabaseService {
   // ============================================================================
   // 4. REGISTRATIONS & APPLICANTS
   // ============================================================================
+  static mapDbRegistration(r: any): Registration {
+    const rawAnswers = (r.answers_json && typeof r.answers_json === 'object' ? r.answers_json : {}) as Record<string, any>;
+    const rawPaidAmount = rawAnswers._paidAmount;
+    const feeVal = typeof r.fee === 'number' && Number.isFinite(r.fee) ? Math.max(0, Math.round(r.fee)) : 0;
+    const paidAmount =
+      typeof rawPaidAmount === 'number' && Number.isFinite(rawPaidAmount)
+        ? Math.min(feeVal, Math.max(0, Math.round(rawPaidAmount)))
+        : undefined;
+
+    return {
+      id: r.id,
+      regId: r.reg_id,
+      playerId: r.player_id || undefined,
+      name: r.name,
+      mobile: r.mobile,
+      whatsapp: r.whatsapp || undefined,
+      age: r.age || undefined,
+      gender: r.gender,
+      experience: r.experience || undefined,
+      category: r.category || undefined,
+      style: r.style || undefined,
+      city: r.city || undefined,
+      notes: r.notes || undefined,
+      fee: feeVal,
+      paidAmount,
+      status: r.status,
+      paymentStatus: r.payment_status,
+      method: r.method,
+      txnId: r.txn_id || undefined,
+      season: r.season_slug,
+      createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+      paidAt: r.paid_at ? new Date(r.paid_at).getTime() : undefined,
+      approvedAt: r.approved_at ? new Date(r.approved_at).getTime() : undefined,
+      verifiedBy: r.verified_by || undefined,
+      verifiedAt: r.verified_at ? new Date(r.verified_at).getTime() : undefined,
+      auditLog: Array.isArray(r.audit_log_json) ? r.audit_log_json : [],
+      answers: rawAnswers,
+      photoUrl: r.photo_url || undefined,
+      tokenUsed: r.token_used || undefined,
+      formVersion: r.form_version || 1,
+    };
+  }
+
   static async fetchRegistrations(season = 'all'): Promise<Registration[] | null> {
     if (!this.isAvailable()) return null;
     try {
@@ -990,37 +1033,7 @@ export class SupabaseService {
 
       if (error || !data) return null;
 
-      return (data as DbRegistration[]).map((r) => ({
-        id: r.id,
-        regId: r.reg_id,
-        playerId: r.player_id || undefined,
-        name: r.name,
-        mobile: r.mobile,
-        whatsapp: r.whatsapp || undefined,
-        age: r.age || undefined,
-        gender: r.gender,
-        experience: r.experience || undefined,
-        category: r.category || undefined,
-        style: r.style || undefined,
-        city: r.city || undefined,
-        notes: r.notes || undefined,
-        fee: r.fee,
-        status: r.status,
-        paymentStatus: r.payment_status,
-        method: r.method,
-        txnId: r.txn_id || undefined,
-        season: r.season_slug,
-        createdAt: new Date(r.created_at).getTime(),
-        paidAt: r.paid_at ? new Date(r.paid_at).getTime() : undefined,
-        approvedAt: r.approved_at ? new Date(r.approved_at).getTime() : undefined,
-        verifiedBy: r.verified_by || undefined,
-        verifiedAt: r.verified_at ? new Date(r.verified_at).getTime() : undefined,
-        auditLog: r.audit_log_json || [],
-        answers: r.answers_json || {},
-        photoUrl: r.photo_url || undefined,
-        tokenUsed: r.token_used || undefined,
-        formVersion: (r as any).form_version || 1,
-      }));
+      return (data as DbRegistration[]).map((r) => this.mapDbRegistration(r));
     } catch {
       return null;
     }
@@ -1120,6 +1133,17 @@ export class SupabaseService {
       const validMethods = ['cash', 'upi', 'bank', 'complimentary'];
       const normalizedMethod = validMethods.includes(reg.method as any) ? (reg.method as any) : 'upi';
 
+      const resolvedFee =
+        reg.fee != null && !Number.isNaN(Number(reg.fee)) ? Math.max(0, Math.round(Number(reg.fee))) : 250;
+      const nextAnswers: Record<string, any> = { ...(reg.answers || {}) };
+      if (normalizedPaymentStatus === 'paid') {
+        nextAnswers._paidAmount = resolvedFee;
+      } else if (typeof reg.paidAmount === 'number' && Number.isFinite(reg.paidAmount) && reg.paidAmount > 0 && normalizedPaymentStatus !== 'failed' && normalizedPaymentStatus !== 'cancelled' && normalizedPaymentStatus !== 'refunded') {
+        nextAnswers._paidAmount = Math.min(resolvedFee, Math.max(0, Math.round(reg.paidAmount)));
+      } else {
+        delete nextAnswers._paidAmount;
+      }
+
       const payload = {
         id: reg.id,
         reg_id: reg.regId,
@@ -1135,17 +1159,17 @@ export class SupabaseService {
         style: reg.style || null,
         city: reg.city || null,
         notes: reg.notes || null,
-        fee: Math.round(Number(reg.fee) || 250),
+        fee: resolvedFee,
         status: normalizedStatus,
         payment_status: normalizedPaymentStatus,
         method: normalizedMethod,
         txn_id: reg.txnId || null,
-        answers_json: reg.answers || {},
+        answers_json: nextAnswers,
         photo_url: reg.photoUrl || null,
         token_used: reg.tokenUsed || null,
         form_version: reg.formVersion || 1,
         approved_at: reg.approvedAt ? new Date(reg.approvedAt).toISOString() : null,
-        paid_at: reg.paidAt ? new Date(reg.paidAt).toISOString() : null,
+        paid_at: normalizedPaymentStatus === 'paid' && reg.paidAt ? new Date(reg.paidAt).toISOString() : null,
         verified_by: reg.verifiedBy || null,
         verified_at: reg.verifiedAt ? new Date(reg.verifiedAt).toISOString() : null,
         audit_log_json: reg.auditLog || [],
@@ -1162,6 +1186,211 @@ export class SupabaseService {
     } catch (e: any) {
       console.error('Supabase saveRegistration exception:', e?.message);
       return { success: false, error: e?.message || 'Database error recording registration' };
+    }
+  }
+
+  /**
+   * Authoritatively update a registration's payment status directly in Supabase PostgreSQL.
+   * Reads fresh row state before applying patch so concurrent updates cannot clobber unrelated fields.
+   */
+  static async verifyRegistrationPaymentAtomic(params: {
+    id: string;
+    paymentStatus: Registration['paymentStatus'];
+    verifiedBy?: string;
+    note?: string;
+    paidAmount?: number;
+    method?: Registration['method'];
+  }): Promise<{ success: boolean; registration?: Registration; error?: string }> {
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Supabase credentials not configured' };
+    }
+    try {
+      const validPaymentStatuses = [
+        'unpaid',
+        'pending',
+        'initiated',
+        'pending_verification',
+        'paid',
+        'failed',
+        'cancelled',
+        'refunded',
+      ];
+      const nextStatus = validPaymentStatuses.includes(params.paymentStatus as any)
+        ? (params.paymentStatus as string)
+        : 'unpaid';
+
+      const { data: existingRow, error: fetchErr } = await supabase
+        .from('registrations')
+        .select('*')
+        .eq('id', params.id)
+        .maybeSingle();
+
+      if (fetchErr) {
+        return { success: false, error: fetchErr.message };
+      }
+      if (!existingRow) {
+        return { success: false, error: 'Registration record not found in Supabase.' };
+      }
+
+      const existing = existingRow as any;
+      const nowMs = Date.now();
+      const nowIso = new Date(nowMs).toISOString();
+      const feeVal = typeof existing.fee === 'number' && Number.isFinite(existing.fee) ? Math.max(0, Math.round(existing.fee)) : 0;
+      const verifier = (params.verifiedBy || 'Tournament Director').trim() || 'Tournament Director';
+      const prevPaymentStatus = existing.payment_status || (existing.status === 'paid' ? 'paid' : 'unpaid');
+
+      const existingAnswers =
+        existing.answers_json && typeof existing.answers_json === 'object' ? { ...existing.answers_json } : {};
+
+      let resolvedPaidAt: string | null = null;
+      if (nextStatus === 'paid') {
+        resolvedPaidAt = existing.paid_at || nowIso;
+        existingAnswers._paidAmount = feeVal;
+      } else if (
+        typeof params.paidAmount === 'number' &&
+        Number.isFinite(params.paidAmount) &&
+        params.paidAmount > 0 &&
+        nextStatus !== 'failed' &&
+        nextStatus !== 'cancelled' &&
+        nextStatus !== 'refunded'
+      ) {
+        const clampedPartial = Math.min(feeVal, Math.max(0, Math.round(params.paidAmount)));
+        existingAnswers._paidAmount = clampedPartial;
+        resolvedPaidAt = clampedPartial >= feeVal ? existing.paid_at || nowIso : null;
+      } else {
+        // Explicit reversal / unpaid / pending / failed / cancelled / refunded clears partial/paid markers
+        delete existingAnswers._paidAmount;
+        resolvedPaidAt = null;
+      }
+
+      const auditEntry = {
+        action: nextStatus === 'paid' ? 'verify_payment' : prevPaymentStatus === 'paid' ? 'reverse_payment' : 'update_payment_status',
+        by: verifier,
+        at: nowMs,
+        fromStatus: prevPaymentStatus,
+        toStatus: nextStatus,
+        ...(params.note ? { note: params.note } : {}),
+        ...(typeof params.paidAmount === 'number' ? { paidAmount: params.paidAmount } : {}),
+      };
+
+      const nextAuditLog = Array.isArray(existing.audit_log_json)
+        ? [...existing.audit_log_json, auditEntry]
+        : [auditEntry];
+
+      const validMethods = ['cash', 'upi', 'bank', 'complimentary'];
+      const nextMethod =
+        params.method && validMethods.includes(params.method) ? params.method : existing.method || 'upi';
+
+      // Auto-promote admission status from 'pending' -> 'approved' when verified as paid (preserve already approved/rejected otherwise)
+      const nextRegStatus =
+        nextStatus === 'paid' && existing.status === 'pending'
+          ? 'approved'
+          : existing.status === 'paid' && nextStatus !== 'paid'
+          ? 'approved'
+          : existing.status;
+
+      const patch: Record<string, any> = {
+        payment_status: nextStatus,
+        status: nextRegStatus,
+        method: nextMethod,
+        paid_at: resolvedPaidAt,
+        verified_by: verifier,
+        verified_at: nowIso,
+        answers_json: existingAnswers,
+        audit_log_json: nextAuditLog,
+        updated_at: nowIso,
+      };
+      if (nextRegStatus === 'approved' && !existing.approved_at) {
+        patch.approved_at = nowIso;
+      }
+      if (params.note !== undefined && params.note !== existing.notes) {
+        patch.notes = params.note || null;
+      }
+
+      const { data: updatedRow, error: updateErr } = await (supabase.from('registrations') as any)
+        .update(patch)
+        .eq('id', params.id)
+        .select('*')
+        .single();
+
+      if (updateErr || !updatedRow) {
+        return { success: false, error: updateErr?.message || 'Failed to persist payment update.' };
+      }
+
+      const mapped = this.mapDbRegistration(updatedRow);
+      this.logAudit(
+        nextStatus === 'paid' ? 'payment_verified' : 'payment_status_updated',
+        'registration',
+        params.id,
+        {
+          regId: mapped.regId,
+          playerName: mapped.name,
+          fee: mapped.fee,
+          fromStatus: prevPaymentStatus,
+          toStatus: nextStatus,
+          paidAmount: mapped.paidAmount,
+          verifiedBy: verifier,
+          note: params.note,
+        }
+      ).catch(() => {});
+
+      return { success: true, registration: mapped };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Database error verifying payment.' };
+    }
+  }
+
+  /**
+   * Partial column-scoped update so admission approval / profile edits never overwrite concurrent payment updates.
+   */
+  static async updateRegistrationFieldsAtomic(
+    id: string,
+    updates: Partial<Registration>
+  ): Promise<{ success: boolean; registration?: Registration; error?: string }> {
+    if (!this.isAvailable()) return { success: false, error: 'Supabase not configured' };
+    try {
+      const nowIso = new Date().toISOString();
+      const patch: Record<string, any> = { updated_at: nowIso };
+
+      if (updates.name !== undefined) patch.name = updates.name.trim();
+      if (updates.mobile !== undefined) patch.mobile = updates.mobile.replace(/\D/g, '');
+      if (updates.whatsapp !== undefined) patch.whatsapp = updates.whatsapp ? updates.whatsapp.replace(/\D/g, '') : null;
+      if (updates.age !== undefined) patch.age = typeof updates.age === 'number' && !isNaN(updates.age) ? Math.round(updates.age) : null;
+      if (updates.gender !== undefined) patch.gender = updates.gender;
+      if (updates.experience !== undefined) patch.experience = updates.experience || null;
+      if (updates.category !== undefined) patch.category = updates.category || null;
+      if (updates.style !== undefined) patch.style = updates.style || null;
+      if (updates.city !== undefined) patch.city = updates.city || null;
+      if (updates.notes !== undefined) patch.notes = updates.notes || null;
+      if (updates.playerId !== undefined) patch.player_id = updates.playerId || null;
+      if (updates.fee !== undefined && !Number.isNaN(Number(updates.fee))) {
+        patch.fee = Math.max(0, Math.round(Number(updates.fee)));
+      }
+      if (updates.status !== undefined) {
+        patch.status = updates.status;
+        if (updates.status === 'approved') {
+          patch.approved_at = updates.approvedAt ? new Date(updates.approvedAt).toISOString() : nowIso;
+        }
+      }
+      if (updates.paymentStatus !== undefined) {
+        patch.payment_status = updates.paymentStatus;
+        patch.paid_at = updates.paymentStatus === 'paid' ? (updates.paidAt ? new Date(updates.paidAt).toISOString() : nowIso) : null;
+      }
+      if (updates.method !== undefined) patch.method = updates.method;
+      if (updates.txnId !== undefined) patch.txn_id = updates.txnId || null;
+
+      const { data: updatedRow, error } = await (supabase.from('registrations') as any)
+        .update(patch)
+        .eq('id', id)
+        .select('*')
+        .single();
+
+      if (error || !updatedRow) {
+        return { success: false, error: error?.message || 'Failed updating registration' };
+      }
+      return { success: true, registration: this.mapDbRegistration(updatedRow) };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Database update exception' };
     }
   }
 

@@ -46,6 +46,7 @@ import { SupabaseService } from '../../services/supabaseService';
 import {
   formatINR,
   calculateRegistrationStats,
+  getRegistrationPaymentBreakdown,
   exportRegistrationsToCSV,
   downloadFile,
   validateIndianMobile,
@@ -68,6 +69,9 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
     isRegistrationOpen,
     tokens,
     activeToken,
+    isRegistrationsLoading,
+    registrationsSyncError,
+    refreshRegistrations,
     fetchFormConfig,
     saveFormConfig,
     toggleRegistrationStatus,
@@ -102,9 +106,29 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   // Payment Verification Modal
   const [verifyTarget, setVerifyTarget] = useState<Registration | null>(null);
   const [verifyStatus, setVerifyStatus] = useState<PaymentStatus>('paid');
+  const [verifyPaidAmount, setVerifyPaidAmount] = useState<string>('');
   const [verifyNote, setVerifyNote] = useState('');
   const [verifyAdminName, setVerifyAdminName] = useState('Admin');
+  const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [copiedTxn, setCopiedTxn] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+
+  const openVerifyModal = (r: Registration) => {
+    const b = getRegistrationPaymentBreakdown(r);
+    setVerifyTarget(r);
+    setVerifyStatus(b.effectivePaymentStatus);
+    setVerifyPaidAmount(
+      b.effectivePaymentStatus === 'paid'
+        ? String(b.payableFee)
+        : b.verifiedPaidAmount > 0
+        ? String(b.verifiedPaidAmount)
+        : ''
+    );
+    setVerifyNote(r.notes || '');
+    setVerifyAdminName(r.verifiedBy || 'Admin');
+    setVerifyError(null);
+    setCopiedTxn(false);
+  };
 
   // Copy link feedback
   const [copiedLink, setCopiedLink] = useState(false);
@@ -112,7 +136,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
 
   // Search & Filters in Roster
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'pending_verification' | 'paid' | 'failed'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'approved' | 'rejected' | 'pending_verification' | 'unpaid' | 'paid' | 'failed'>('all');
 
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
@@ -335,17 +359,27 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
   // Filtered registrations
   const filteredRegistrations = state.registrations.filter((r) => {
     if (statusFilter !== 'all') {
+      const b = getRegistrationPaymentBreakdown(r);
       if (statusFilter === 'approved' && r.status !== 'approved') return false;
       if (statusFilter === 'pending' && r.status !== 'pending') return false;
       if (statusFilter === 'rejected' && r.status !== 'rejected') return false;
       if (
         statusFilter === 'pending_verification' &&
-        r.paymentStatus !== 'pending_verification' &&
-        (!r.txnId || r.paymentStatus === 'paid')
+        (b.isExcluded ||
+          (b.effectivePaymentStatus !== 'pending_verification' &&
+            (!r.txnId || b.effectivePaymentStatus === 'paid' || b.effectivePaymentStatus === 'failed')))
       )
         return false;
-      if (statusFilter === 'paid' && r.paymentStatus !== 'paid' && r.status !== 'paid') return false;
-      if (statusFilter === 'failed' && r.paymentStatus !== 'failed' && r.paymentStatus !== 'cancelled')
+      if (statusFilter === 'unpaid' && (b.isExcluded || b.isComplimentary || b.outstandingDue <= 0))
+        return false;
+      if (statusFilter === 'paid' && (b.isExcluded || b.payableFee <= 0 || b.outstandingDue > 0))
+        return false;
+      if (
+        statusFilter === 'failed' &&
+        b.effectivePaymentStatus !== 'failed' &&
+        b.effectivePaymentStatus !== 'cancelled' &&
+        b.effectivePaymentStatus !== 'refunded'
+      )
         return false;
     }
     if (search.trim()) {
@@ -930,6 +964,27 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
       {/* TAB 2: Registered Applicants Vetting Roster */}
       {activeTab === 'roster' && (
         <div className="space-y-4 animate-fade-in">
+          {/* Sync Error Banner */}
+          {registrationsSyncError && (
+            <div
+              role="alert"
+              className="flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border border-rose-500/30 bg-rose-500/10 text-xs text-rose-200"
+            >
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{registrationsSyncError}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshRegistrations()}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-100 font-bold transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Retry Sync</span>
+              </button>
+            </div>
+          )}
+
           {/* Financial & Application Summary Metrics */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             <div className="rounded-2xl p-4 glass-card border border-white/10 space-y-1">
@@ -937,69 +992,50 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 <Users2 className="w-3.5 h-3.5 text-amber-400" />
                 <span>Total Submissions</span>
               </span>
-              <div className="text-2xl sm:text-3xl font-black text-white font-mono">
-                {stats.total}
+              <div className="text-2xl sm:text-3xl font-black text-white font-mono tabular-nums">
+                {isRegistrationsLoading && state.registrations.length === 0 ? '...' : stats.total}
               </div>
-              <span className="text-[11px] text-slate-500 block">
-                Across {regSettings.seasonSlug || 'season-4'}
+              <span className="text-[11px] text-slate-400 block tabular-nums">
+                {stats.approvedCount} approved · {regSettings.seasonSlug || 'season-4'}
               </span>
             </div>
 
             <div className="rounded-2xl p-4 glass-card border border-emerald-500/20 bg-emerald-500/5 space-y-1">
               <span className="text-[10px] uppercase font-bold text-emerald-400 tracking-wider flex items-center gap-1.5">
                 <IndianRupee className="w-3.5 h-3.5 text-emerald-400" />
-                <span>Verified Revenue</span>
+                <span>Collected Entry Fees</span>
               </span>
-              <div className="text-2xl sm:text-3xl font-black text-emerald-300 font-mono">
-                {formatINR(
-                  state.registrations
-                    .filter((r) => r.paymentStatus === 'paid' || r.status === 'paid' || r.status === 'approved')
-                    .reduce((acc, r) => acc + (r.fee || 0), 0)
-                )}
+              <div className="text-2xl sm:text-3xl font-black text-emerald-300 font-mono tabular-nums">
+                {isRegistrationsLoading && state.registrations.length === 0 ? '...' : formatINR(stats.collected)}
               </div>
-              <span className="text-[11px] text-emerald-400/70 block">
-                Confirmed in tournament account
+              <span className="text-[11px] text-emerald-400/80 block tabular-nums">
+                {stats.paidCount} of {stats.activePayableCount} players confirmed paid
               </span>
             </div>
 
             <div className="rounded-2xl p-4 glass-card border border-amber-500/20 bg-amber-500/5 space-y-1">
               <span className="text-[10px] uppercase font-bold text-amber-400 tracking-wider flex items-center gap-1.5">
                 <Clock className="w-3.5 h-3.5 text-amber-400" />
-                <span>Pending Verification</span>
+                <span>Pending Dues</span>
               </span>
-              <div className="text-2xl sm:text-3xl font-black text-amber-300 font-mono">
-                {
-                  state.registrations.filter(
-                    (r) =>
-                      r.paymentStatus === 'pending_verification' ||
-                      (r.txnId && r.paymentStatus !== 'paid' && r.status !== 'approved')
-                  ).length
-                }
+              <div className="text-2xl sm:text-3xl font-black text-amber-300 font-mono tabular-nums">
+                {isRegistrationsLoading && state.registrations.length === 0 ? '...' : formatINR(stats.pendingAmount)}
               </div>
-              <span className="text-[11px] text-amber-400/70 block">
-                {formatINR(
-                  state.registrations
-                    .filter(
-                      (r) =>
-                        r.paymentStatus === 'pending_verification' ||
-                        (r.txnId && r.paymentStatus !== 'paid' && r.status !== 'approved')
-                    )
-                    .reduce((acc, r) => acc + (r.fee || 0), 0)
-                )}{' '}
-                awaiting admin audit
+              <span className="text-[11px] text-amber-400/80 block tabular-nums">
+                {stats.unpaidPlayersCount} {stats.unpaidPlayersCount === 1 ? 'player' : 'players'} unpaid · Total {formatINR(stats.totalPayableAmount)}
               </span>
             </div>
 
             <div className="rounded-2xl p-4 glass-card border border-blue-500/20 bg-blue-500/5 space-y-1">
               <span className="text-[10px] uppercase font-bold text-blue-400 tracking-wider flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
-                <span>Confirmed Players</span>
+                <span>Total Entry Fees Payable</span>
               </span>
-              <div className="text-2xl sm:text-3xl font-black text-blue-300 font-mono">
-                {stats.approvedCount}
+              <div className="text-2xl sm:text-3xl font-black text-blue-300 font-mono tabular-nums">
+                {isRegistrationsLoading && state.registrations.length === 0 ? '...' : formatINR(stats.totalPayableAmount)}
               </div>
-              <span className="text-[11px] text-blue-400/70 block">
-                Vetted & added to roster
+              <span className="text-[11px] text-blue-400/80 block tabular-nums">
+                {stats.pendingVerificationCount} awaiting payment audit
               </span>
             </div>
           </div>
@@ -1022,23 +1058,11 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
               <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl shrink-0 overflow-x-auto">
                 {[
                   { id: 'all', label: `All (${stats.total})` },
+                  { id: 'paid', label: `Paid (${stats.paidCount})` },
+                  { id: 'unpaid', label: `Unpaid / Due (${stats.unpaidPlayersCount})` },
                   {
                     id: 'pending_verification',
-                    label: `🟡 Verify Payments (${
-                      state.registrations.filter(
-                        (r) =>
-                          r.paymentStatus === 'pending_verification' ||
-                          (r.txnId && r.paymentStatus !== 'paid' && r.status !== 'approved')
-                      ).length
-                    })`,
-                  },
-                  {
-                    id: 'paid',
-                    label: `🟢 Paid (${
-                      state.registrations.filter(
-                        (r) => r.paymentStatus === 'paid' || r.status === 'paid'
-                      ).length
-                    })`,
+                    label: `Verify Audit (${stats.pendingVerificationCount})`,
                   },
                   { id: 'pending', label: `Pending Approval (${stats.pendingCount})` },
                   { id: 'approved', label: `Approved (${stats.approvedCount})` },
@@ -1131,7 +1155,31 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                   <tbody className="divide-y divide-white/5">
                     {filteredRegistrations.map((r) => {
                       const isSelected = selectedIds.includes(r.id);
-                      const paymentStat = r.paymentStatus || (r.status === 'approved' ? 'paid' : (r.txnId ? 'pending_verification' : 'pending'));
+                      const breakdown = getRegistrationPaymentBreakdown(r);
+                      const paymentStat = breakdown.effectivePaymentStatus;
+                      const isPartial =
+                        !breakdown.isExcluded &&
+                        breakdown.verifiedPaidAmount > 0 &&
+                        breakdown.outstandingDue > 0;
+                      const paymentLabel = breakdown.isExcluded
+                        ? paymentStat === 'refunded'
+                          ? 'Refunded'
+                          : paymentStat === 'cancelled'
+                          ? 'Cancelled'
+                          : 'Excluded'
+                        : breakdown.isComplimentary
+                        ? 'Complimentary'
+                        : paymentStat === 'paid' || (breakdown.payableFee > 0 && breakdown.outstandingDue === 0)
+                        ? 'Paid'
+                        : isPartial
+                        ? `Partial (${formatINR(breakdown.verifiedPaidAmount)})`
+                        : paymentStat === 'pending_verification'
+                        ? 'Audit Pending'
+                        : paymentStat === 'failed'
+                        ? 'Failed'
+                        : paymentStat === 'pending'
+                        ? 'Pending'
+                        : 'Unpaid';
                       return (
                         <tr
                           key={r.id}
@@ -1205,25 +1253,31 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
 
                           <td className="py-3.5">
                             <div className="flex items-center gap-2">
-                              <span className="font-mono text-xs font-bold text-white">
+                              <span className="font-mono text-xs font-bold text-white tabular-nums">
                                 {formatINR(r.fee)}
                               </span>
                               <span
                                 className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                                  paymentStat === 'paid'
+                                  paymentStat === 'paid' && !breakdown.isExcluded
                                     ? 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30'
+                                    : isPartial
+                                    ? 'bg-amber-500/15 text-amber-300 border border-amber-500/30'
                                     : paymentStat === 'pending_verification'
                                     ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                                     : paymentStat === 'failed'
                                     ? 'bg-rose-500/15 text-rose-400 border border-rose-500/30'
-                                    : 'bg-slate-700/50 text-slate-400 border border-white/10'
+                                    : 'bg-slate-700/50 text-slate-300 border border-white/10'
                                 }`}
                               >
-                                {paymentStat === 'paid' ? 'Paid' : paymentStat === 'pending_verification' ? 'Audit Pending' : paymentStat}
+                                {paymentLabel}
                               </span>
                             </div>
-                            <span className="text-[10px] text-slate-400 font-mono block mt-0.5">
-                              {r.txnId ? `UTR: ${r.txnId}` : (r.method || 'UPI')}
+                            <span className="text-[10px] text-slate-400 font-mono block mt-0.5 tabular-nums">
+                              {breakdown.outstandingDue > 0 && !breakdown.isExcluded
+                                ? `Due: ${formatINR(breakdown.outstandingDue)} · ${r.txnId ? `UTR: ${r.txnId}` : r.method || 'UPI'}`
+                                : r.txnId
+                                ? `UTR: ${r.txnId}`
+                                : r.method || 'UPI'}
                             </span>
                           </td>
 
@@ -1231,12 +1285,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                             <div className="flex items-center justify-end gap-1.5">
                               {/* Payment Verify Modal Trigger */}
                               <button
-                                onClick={() => {
-                                  setVerifyTarget(r);
-                                  setVerifyStatus((r.paymentStatus as any) || (r.txnId ? 'paid' : 'pending_verification'));
-                                  setVerifyNote(r.notes || '');
-                                  setVerifyAdminName('Admin');
-                                }}
+                                onClick={() => openVerifyModal(r)}
                                 title="Audit & verify UPI payment / UTR"
                                 className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-amber-400/15 hover:bg-amber-400/25 text-amber-300 border border-amber-400/30 transition-colors"
                               >
@@ -1306,7 +1355,31 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
               <div className="md:hidden divide-y divide-white/10">
                 {filteredRegistrations.map((r) => {
                   const isSelected = selectedIds.includes(r.id);
-                  const paymentStat = r.paymentStatus || (r.status === 'approved' ? 'paid' : (r.txnId ? 'pending_verification' : 'pending'));
+                  const breakdown = getRegistrationPaymentBreakdown(r);
+                  const paymentStat = breakdown.effectivePaymentStatus;
+                  const isPartial =
+                    !breakdown.isExcluded &&
+                    breakdown.verifiedPaidAmount > 0 &&
+                    breakdown.outstandingDue > 0;
+                  const paymentLabel = breakdown.isExcluded
+                    ? paymentStat === 'refunded'
+                      ? 'Refunded'
+                      : paymentStat === 'cancelled'
+                      ? 'Cancelled'
+                      : 'Excluded'
+                    : breakdown.isComplimentary
+                    ? 'Complimentary'
+                    : paymentStat === 'paid' || (breakdown.payableFee > 0 && breakdown.outstandingDue === 0)
+                    ? 'Paid'
+                    : isPartial
+                    ? `Partial ${formatINR(breakdown.verifiedPaidAmount)}`
+                    : paymentStat === 'pending_verification'
+                    ? 'Audit Pending'
+                    : paymentStat === 'failed'
+                    ? 'Failed'
+                    : paymentStat === 'pending'
+                    ? 'Pending'
+                    : 'Unpaid';
                   return (
                     <div
                       key={r.id}
@@ -1356,20 +1429,29 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                           </p>
                         </div>
                         <div className="text-right">
-                          <span className="font-mono text-xs font-bold text-white block">
+                          <span className="font-mono text-xs font-bold text-white block tabular-nums">
                             {formatINR(r.fee)}
                           </span>
                           <span
                             className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                              paymentStat === 'paid'
+                              paymentStat === 'paid' && !breakdown.isExcluded
                                 ? 'bg-emerald-500/15 text-emerald-400'
+                                : isPartial
+                                ? 'bg-amber-500/15 text-amber-300'
                                 : paymentStat === 'pending_verification'
                                 ? 'bg-amber-500/15 text-amber-400'
-                                : 'bg-slate-700/50 text-slate-400'
+                                : paymentStat === 'failed'
+                                ? 'bg-rose-500/15 text-rose-400'
+                                : 'bg-slate-700/50 text-slate-300'
                             }`}
                           >
-                            {paymentStat === 'paid' ? 'Paid' : paymentStat === 'pending_verification' ? 'Audit Pending' : paymentStat}
+                            {paymentLabel}
                           </span>
+                          {breakdown.outstandingDue > 0 && !breakdown.isExcluded && (
+                            <span className="text-[10px] text-amber-300/90 font-mono block mt-0.5 tabular-nums">
+                              Due: {formatINR(breakdown.outstandingDue)}
+                            </span>
+                          )}
                         </div>
                       </div>
 
@@ -1390,7 +1472,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                           {r.status === 'pending' && (
                             <button
                               onClick={() => approveRegistration(r.id)}
-                              className="px-3 py-1.5 rounded-lg text-xs font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 hover:bg-emerald-500/30"
+                              className="px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 hover:bg-emerald-500/30"
                             >
                               Approve
                             </button>
@@ -1398,16 +1480,16 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                           {r.status === 'pending' && (
                             <button
                               onClick={() => rejectRegistration(r.id)}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold text-rose-400 hover:bg-rose-500/10"
+                              className="px-3 py-2 min-h-[44px] rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10"
                             >
                               Reject
                             </button>
                           )}
                         </div>
-                        <div className="flex items-center gap-1">
+                        <div className="flex items-center gap-1.5">
                           <button
-                            onClick={() => setVerifyTarget(r)}
-                            className="p-2 text-slate-300 hover:text-white bg-white/5 rounded-lg text-xs flex items-center gap-1"
+                            onClick={() => openVerifyModal(r)}
+                            className="px-3 py-2 min-h-[44px] text-amber-300 hover:text-white bg-amber-400/10 border border-amber-400/25 rounded-xl text-xs font-bold flex items-center gap-1.5"
                             title="Verify Payment"
                           >
                             <CreditCard className="w-3.5 h-3.5 text-amber-400" />
@@ -1415,24 +1497,24 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                           </button>
                           <button
                             onClick={() => setViewDetailsTarget(r)}
-                            className="p-2 text-slate-300 hover:text-white bg-white/5 rounded-lg"
+                            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-300 hover:text-white bg-white/5 rounded-xl"
                             title="View details"
                           >
-                            <Eye className="w-3.5 h-3.5" />
+                            <Eye className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => openEditModal(r)}
-                            className="p-2 text-slate-300 hover:text-amber-400 bg-white/5 rounded-lg"
+                            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-300 hover:text-amber-400 bg-white/5 rounded-xl"
                             title="Edit applicant"
                           >
-                            <Edit className="w-3.5 h-3.5" />
+                            <Edit className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => setDeleteTargetId(r.id)}
-                            className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 rounded-lg"
+                            className="p-2.5 min-h-[44px] min-w-[44px] flex items-center justify-center text-slate-400 hover:text-rose-400 bg-white/5 rounded-xl"
                             title="Delete record"
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
+                            <Trash2 className="w-4 h-4" />
                           </button>
                         </div>
                       </div>
@@ -2007,7 +2089,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 </span>
                 <div className="space-y-1.5 max-h-40 overflow-y-auto">
                   {Object.entries(viewDetailsTarget.answers)
-                    .filter(([k]) => k !== 'photo' && k !== 'name' && k !== 'mobile')
+                    .filter(([k]) => k !== 'photo' && k !== 'name' && k !== 'mobile' && !k.startsWith('_'))
                     .map(([k, val]) => {
                       const matchedField = formConfig.fields?.find((f) => f.id === k);
                       const label = matchedField?.label || k;
@@ -2260,16 +2342,17 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                       type="button"
                       onClick={() => {
                         navigator.clipboard.writeText(verifyTarget.txnId || '');
-                        alert('Transaction reference copied to clipboard!');
+                        setCopiedTxn(true);
+                        setTimeout(() => setCopiedTxn(false), 1800);
                       }}
-                      className="p-1 hover:text-white text-slate-400"
+                      className="p-1 hover:text-white text-slate-400 flex items-center gap-1 text-[10px]"
                       title="Copy UTR Reference"
                     >
-                      <Copy className="w-3.5 h-3.5" />
+                      {copiedTxn ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                     </button>
                   )}
                 </div>
-                <span className="text-[10px] text-slate-500">Method: {verifyTarget.method || 'UPI'}</span>
+                <span className="text-[10px] text-slate-400">Method: {verifyTarget.method || 'UPI'}</span>
               </div>
             </div>
 
@@ -2305,15 +2388,24 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 {[
                   { id: 'paid', label: 'Verified Paid', color: 'border-emerald-500 bg-emerald-500/20 text-emerald-300' },
                   { id: 'pending_verification', label: 'Pending Audit', color: 'border-amber-500 bg-amber-500/20 text-amber-300' },
-                  { id: 'pending', label: 'Unpaid / Pending', color: 'border-slate-500 bg-slate-500/20 text-slate-300' },
+                  { id: 'unpaid', label: 'Unpaid', color: 'border-slate-500 bg-slate-500/20 text-slate-200' },
+                  { id: 'pending', label: 'Pending', color: 'border-amber-400/50 bg-amber-400/15 text-amber-200' },
                   { id: 'failed', label: 'Payment Failed', color: 'border-rose-500 bg-rose-500/20 text-rose-300' },
                   { id: 'refunded', label: 'Refunded', color: 'border-purple-500 bg-purple-500/20 text-purple-300' },
-                  { id: 'cancelled', label: 'Cancelled', color: 'border-slate-700 bg-slate-700/50 text-slate-400' },
                 ].map((item) => (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => setVerifyStatus(item.id as PaymentStatus)}
+                    onClick={() => {
+                      const next = item.id as PaymentStatus;
+                      setVerifyStatus(next);
+                      setVerifyError(null);
+                      if (next === 'paid') {
+                        setVerifyPaidAmount(String(verifyTarget.fee || 0));
+                      } else if (next === 'unpaid' || next === 'failed' || next === 'refunded' || next === 'cancelled') {
+                        setVerifyPaidAmount('0');
+                      }
+                    }}
                     className={`px-2.5 py-2 rounded-xl text-xs font-bold border transition-all text-center ${
                       verifyStatus === item.id
                         ? `${item.color} shadow-md`
@@ -2325,6 +2417,39 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 ))}
               </div>
             </div>
+
+            {/* Partial / Received Amount Input */}
+            {verifyStatus !== 'failed' && verifyStatus !== 'refunded' && verifyStatus !== 'cancelled' && (
+              <div className="p-3 rounded-xl bg-white/[0.04] border border-white/10 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-300">
+                    Verified Amount Received (INR)
+                  </label>
+                  <span className="text-[11px] font-mono text-amber-300 tabular-nums">
+                    Due Balance:{' '}
+                    {formatINR(
+                      Math.max(
+                        0,
+                        (verifyTarget.fee || 0) -
+                          (verifyStatus === 'paid'
+                            ? verifyTarget.fee || 0
+                            : Math.min(verifyTarget.fee || 0, Math.max(0, Number(verifyPaidAmount) || 0)))
+                      )
+                    )}
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  max={verifyTarget.fee || 100000}
+                  disabled={verifyStatus === 'paid'}
+                  value={verifyStatus === 'paid' ? String(verifyTarget.fee || 0) : verifyPaidAmount}
+                  onChange={(e) => setVerifyPaidAmount(e.target.value)}
+                  placeholder="0 for unpaid, or partial amount received"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-xs font-mono text-white focus:outline-none focus:border-amber-400 disabled:opacity-60"
+                />
+              </div>
+            )}
 
             {/* Verifier Admin Name & Notes */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2355,6 +2480,16 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
               </div>
             </div>
 
+            {verifyError && (
+              <div
+                role="alert"
+                className="flex items-center gap-2 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-xs text-rose-200 font-semibold"
+              >
+                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                <span>{verifyError}</span>
+              </div>
+            )}
+
             {/* Action Buttons */}
             <div className="flex items-center justify-end gap-2 pt-4 border-t border-white/10">
               <button
@@ -2370,11 +2505,29 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 onClick={async () => {
                   try {
                     setIsVerifying(true);
-                    await verifyPayment(verifyTarget.id, verifyStatus, verifyNote, verifyAdminName);
-                    sportsAudio.playFanfare();
-                    setVerifyTarget(null);
-                  } catch (err) {
+                    setVerifyError(null);
+                    const parsedPartial =
+                      verifyStatus === 'paid'
+                        ? verifyTarget.fee
+                        : verifyPaidAmount.trim() !== ''
+                        ? Math.max(0, Math.round(Number(verifyPaidAmount) || 0))
+                        : undefined;
+                    const res = await verifyPayment(
+                      verifyTarget.id,
+                      verifyStatus,
+                      verifyNote,
+                      verifyAdminName,
+                      parsedPartial
+                    );
+                    if (res.success) {
+                      sportsAudio.playFanfare();
+                      setVerifyTarget(null);
+                    } else {
+                      setVerifyError(res.error || 'Could not update payment status in database.');
+                    }
+                  } catch (err: any) {
                     console.error('Failed to verify payment:', err);
+                    setVerifyError(err?.message || 'Unexpected error saving payment status.');
                   } finally {
                     setIsVerifying(false);
                   }

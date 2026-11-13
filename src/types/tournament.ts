@@ -261,6 +261,7 @@ export interface Registration {
   city?: string;
   notes?: string;
   fee: number;
+  paidAmount?: number;
   status: 'pending' | 'approved' | 'rejected' | 'paid' | 'complimentary';
   paymentStatus?: PaymentStatus;
   method?: 'cash' | 'upi' | 'bank' | 'complimentary';
