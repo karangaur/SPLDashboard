@@ -167,6 +167,8 @@ const DEFAULT_HERO_BUTTONS: HeroButtonConfig[] = [
   },
 ];
 
+export const DEFAULT_HERO_VERSION_COLOR = '#fbbf24';
+
 export const DEFAULT_HERO_CONFIG: HeroConfig = {
   version: 1,
   status: 'published',
@@ -220,6 +222,7 @@ export const DEFAULT_HERO_CONFIG: HeroConfig = {
     kickerText: 'CHAMPION EDITION',
     kickerVisible: true,
     kickerColor: '#fcd34d',
+    versionColor: DEFAULT_HERO_VERSION_COLOR,
     mainHeading: {
       text: 'SMASH PREMIER LEAGUE 3.0',
       visible: true,
@@ -647,6 +650,7 @@ export function normalizeHeroConfig(input?: Partial<HeroConfig> | null): HeroCon
       kickerVisible:
         typeof raw.text?.kickerVisible === 'boolean' ? raw.text.kickerVisible : base.text.kickerVisible,
       kickerColor: sanitizeHexColor(raw.text?.kickerColor, base.text.kickerColor),
+      versionColor: sanitizeHexColor(raw.text?.versionColor, DEFAULT_HERO_VERSION_COLOR),
       mainHeading: normalizeField(raw.text?.mainHeading, base.text.mainHeading, 120),
       subtitle: normalizeField(raw.text?.subtitle, base.text.subtitle, 160),
       tagline: normalizeField(raw.text?.tagline, base.text.tagline, 120),

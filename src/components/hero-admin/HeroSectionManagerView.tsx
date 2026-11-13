@@ -46,10 +46,12 @@ import {
   APPROVED_HERO_ACTION_TARGETS,
   cloneHeroConfig,
   DEFAULT_HERO_CONFIG,
+  DEFAULT_HERO_VERSION_COLOR,
   HERO_ANIMATION_PRESETS,
   HERO_FONT_OPTIONS,
   HERO_THEME_PRESETS,
   normalizeHeroConfig,
+  sanitizeHexColor,
   validateHeroActionDestination,
 } from '../../utils/heroDefaults';
 import { HeroSectionCanvas } from '../home/HeroSectionCanvas';
@@ -71,6 +73,7 @@ export const HeroSectionManagerView: React.FC = () => {
     fetchAdminHeroState,
     saveHeroDraft,
     publishHeroConfig,
+    saveHeroVersionColor,
     restoreHeroVersion,
   } = useTournament();
 
@@ -100,6 +103,11 @@ export const HeroSectionManagerView: React.FC = () => {
   const [previewRegOpen, setPreviewRegOpen] = useState<boolean>(isRegistrationOpen);
   const [expandedPreview, setExpandedPreview] = useState<boolean>(false);
   const [confirmResetModal, setConfirmResetModal] = useState<boolean>(false);
+  const [versionColorHex, setVersionColorHex] = useState<string>(
+    () => publishedHeroConfig.text.versionColor || DEFAULT_HERO_VERSION_COLOR
+  );
+  const [isSavingVersionColor, setIsSavingVersionColor] = useState<boolean>(false);
+  const [isResettingVersionColor, setIsResettingVersionColor] = useState<boolean>(false);
 
   const deskBgInputRef = useRef<HTMLInputElement | null>(null);
   const mobBgInputRef = useRef<HTMLInputElement | null>(null);
@@ -129,6 +137,18 @@ export const HeroSectionManagerView: React.FC = () => {
   useEffect(() => {
     void loadHeroAdminState();
   }, [loadHeroAdminState]);
+
+  useEffect(() => {
+    setLivePublished(cloneHeroConfig(publishedHeroConfig));
+  }, [publishedHeroConfig]);
+
+  useEffect(() => {
+    const nextColor = draftConfig.text.versionColor || DEFAULT_HERO_VERSION_COLOR;
+    setVersionColorHex((curr) => {
+      const normalizedCurr = curr.trim().startsWith('#') ? curr.trim() : `#${curr.trim()}`;
+      return sanitizeHexColor(normalizedCurr, '') === nextColor ? curr : nextColor;
+    });
+  }, [draftConfig.text.versionColor]);
 
   const showToast = (type: 'success' | 'error' | 'info', text: string) => {
     setFeedback({ type, text });
@@ -245,6 +265,78 @@ export const HeroSectionManagerView: React.FC = () => {
       showToast('success', `Published Version v${res.published.version} live to the Smash Premier League homepage!`);
     } else {
       showToast('error', res.error || 'Publish failed.');
+    }
+  };
+
+  const normalizedHexInput = useMemo(() => {
+    const trimmed = versionColorHex.trim();
+    const withHash = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+    return sanitizeHexColor(withHash, '');
+  }, [versionColorHex]);
+
+  const handleVersionColorChange = (rawValue: string) => {
+    setVersionColorHex(rawValue);
+    const trimmed = rawValue.trim();
+    const withHash = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
+    const valid = sanitizeHexColor(withHash, '');
+    if (valid) {
+      setDraftConfig((prev) => ({
+        ...prev,
+        text: { ...prev.text, versionColor: valid },
+      }));
+      setPreviewSource('draft');
+    }
+  };
+
+  const handleSaveVersionColor = async () => {
+    if (!normalizedHexInput) {
+      showToast('error', 'Please enter a valid HEX color (e.g. #fbbf24 or #ef4444) before saving.');
+      return;
+    }
+    setIsSavingVersionColor(true);
+    const res = await saveHeroVersionColor(normalizedHexInput);
+    setIsSavingVersionColor(false);
+
+    if (res.success && res.published) {
+      const savedColor = res.published.text.versionColor || normalizedHexInput;
+      setLivePublished(cloneHeroConfig(res.published));
+      setDraftConfig((prev) => ({
+        ...prev,
+        text: { ...prev.text, versionColor: savedColor },
+      }));
+      setVersionColorHex(savedColor);
+      if (res.version) {
+        setVersions((prev) => [res.version!, ...prev.filter((v) => v.id !== res.version!.id)]);
+      }
+      showToast('success', `"3.0" text color (${savedColor.toUpperCase()}) saved and synced live across all devices!`);
+    } else {
+      showToast('error', res.error || 'Failed to save "3.0" text color.');
+    }
+  };
+
+  const handleResetVersionColor = async () => {
+    setVersionColorHex(DEFAULT_HERO_VERSION_COLOR);
+    setDraftConfig((prev) => ({
+      ...prev,
+      text: { ...prev.text, versionColor: DEFAULT_HERO_VERSION_COLOR },
+    }));
+    setPreviewSource('draft');
+    setIsResettingVersionColor(true);
+    const res = await saveHeroVersionColor(DEFAULT_HERO_VERSION_COLOR);
+    setIsResettingVersionColor(false);
+
+    if (res.success && res.published) {
+      setLivePublished(cloneHeroConfig(res.published));
+      setDraftConfig((prev) => ({
+        ...prev,
+        text: { ...prev.text, versionColor: DEFAULT_HERO_VERSION_COLOR },
+      }));
+      if (res.version) {
+        setVersions((prev) => [res.version!, ...prev.filter((v) => v.id !== res.version!.id)]);
+      }
+      showToast('success', 'Restored default "3.0" color matching "Meet the Contenders" and published live!');
+    } else {
+      showToast('error', res.error || 'Failed to reset "3.0" text color.');
     }
   };
 
@@ -1282,155 +1374,291 @@ export const HeroSectionManagerView: React.FC = () => {
                     { key: 'description', label: 'Description Copy', multiline: true, minDesk: 13, maxDesk: 26 },
                   ] as const).map((item) => {
                     const field = draftConfig.text[item.key];
+                    const activeVersionColor = (
+                      draftConfig.text.versionColor || DEFAULT_HERO_VERSION_COLOR
+                    ).toLowerCase();
+                    const isDefaultVersionColor = activeVersionColor === DEFAULT_HERO_VERSION_COLOR;
+
                     return (
-                      <div key={item.key} className="rounded-xl border border-white/10 bg-white/[0.02] p-3.5 space-y-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-bold text-white">{item.label}</span>
-                          <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
-                            <input
-                              type="checkbox"
-                              checked={field.visible}
+                      <React.Fragment key={item.key}>
+                        <div className="rounded-xl border border-white/10 bg-white/[0.02] p-3.5 space-y-3">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-bold text-white">{item.label}</span>
+                            <label className="inline-flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={field.visible}
+                                onChange={(e) =>
+                                  setDraftConfig((prev) => ({
+                                    ...prev,
+                                    text: {
+                                      ...prev.text,
+                                      [item.key]: { ...prev.text[item.key], visible: e.target.checked },
+                                    },
+                                  }))
+                                }
+                                className="accent-amber-400"
+                              />
+                              <span>Visible</span>
+                            </label>
+                          </div>
+
+                          {item.multiline ? (
+                            <textarea
+                              rows={2}
+                              maxLength={420}
+                              value={field.text}
                               onChange={(e) =>
                                 setDraftConfig((prev) => ({
                                   ...prev,
                                   text: {
                                     ...prev.text,
-                                    [item.key]: { ...prev.text[item.key], visible: e.target.checked },
+                                    [item.key]: { ...prev.text[item.key], text: e.target.value },
                                   },
                                 }))
                               }
-                              className="accent-amber-400"
+                              className="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-xs text-white"
                             />
-                            <span>Visible</span>
-                          </label>
+                          ) : (
+                            <input
+                              type="text"
+                              maxLength={160}
+                              value={field.text}
+                              onChange={(e) =>
+                                setDraftConfig((prev) => ({
+                                  ...prev,
+                                  text: {
+                                    ...prev.text,
+                                    [item.key]: { ...prev.text[item.key], text: e.target.value },
+                                  },
+                                }))
+                              }
+                              className="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-xs text-white"
+                            />
+                          )}
+
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 items-center">
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">Color</label>
+                              <input
+                                type="color"
+                                value={field.color}
+                                onChange={(e) =>
+                                  setDraftConfig((prev) => ({
+                                    ...prev,
+                                    text: {
+                                      ...prev.text,
+                                      [item.key]: { ...prev.text[item.key], color: e.target.value },
+                                    },
+                                  }))
+                                }
+                                className="w-full h-8 rounded-lg bg-slate-900 border border-white/15 cursor-pointer"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] text-slate-400 mb-1">Weight</label>
+                              <select
+                                value={field.fontWeight}
+                                onChange={(e) =>
+                                  setDraftConfig((prev) => ({
+                                    ...prev,
+                                    text: {
+                                      ...prev.text,
+                                      [item.key]: { ...prev.text[item.key], fontWeight: e.target.value as any },
+                                    },
+                                  }))
+                                }
+                                className="w-full rounded-lg bg-slate-900 border border-white/15 px-2 py-1.5 text-xs text-white"
+                              >
+                                <option value="500">Medium</option>
+                                <option value="600">Semibold</option>
+                                <option value="700">Bold</option>
+                                <option value="800">Extrabold</option>
+                                <option value="900">Black</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="flex justify-between text-[11px] text-slate-400 mb-1">
+                                <span>Desk</span>
+                                <span className="font-mono tabular-nums">{field.fontSizeDesktop}px</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={item.minDesk}
+                                max={item.maxDesk}
+                                value={field.fontSizeDesktop}
+                                onChange={(e) =>
+                                  setDraftConfig((prev) => ({
+                                    ...prev,
+                                    text: {
+                                      ...prev.text,
+                                      [item.key]: {
+                                        ...prev.text[item.key],
+                                        fontSizeDesktop: Number(e.target.value),
+                                      },
+                                    },
+                                  }))
+                                }
+                                className="w-full accent-amber-400"
+                              />
+                            </div>
+                            <div>
+                              <label className="flex justify-between text-[11px] text-slate-400 mb-1">
+                                <span>Mob</span>
+                                <span className="font-mono tabular-nums">{field.fontSizeMobile}px</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={12}
+                                max={52}
+                                value={field.fontSizeMobile}
+                                onChange={(e) =>
+                                  setDraftConfig((prev) => ({
+                                    ...prev,
+                                    text: {
+                                      ...prev.text,
+                                      [item.key]: {
+                                        ...prev.text[item.key],
+                                        fontSizeMobile: Number(e.target.value),
+                                      },
+                                    },
+                                  }))
+                                }
+                                className="w-full accent-amber-400"
+                              />
+                            </div>
+                          </div>
                         </div>
 
-                        {item.multiline ? (
-                          <textarea
-                            rows={2}
-                            maxLength={420}
-                            value={field.text}
-                            onChange={(e) =>
-                              setDraftConfig((prev) => ({
-                                ...prev,
-                                text: {
-                                  ...prev.text,
-                                  [item.key]: { ...prev.text[item.key], text: e.target.value },
-                                },
-                              }))
-                            }
-                            className="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-xs text-white"
-                          />
-                        ) : (
-                          <input
-                            type="text"
-                            maxLength={160}
-                            value={field.text}
-                            onChange={(e) =>
-                              setDraftConfig((prev) => ({
-                                ...prev,
-                                text: {
-                                  ...prev.text,
-                                  [item.key]: { ...prev.text[item.key], text: e.target.value },
-                                },
-                              }))
-                            }
-                            className="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-xs text-white"
-                          />
+                        {item.key === 'mainHeading' && (
+                          <div
+                            id="hero-version-color-setting"
+                            className="rounded-xl border border-amber-400/25 bg-gradient-to-br from-slate-900/90 via-[#0d1424] to-slate-950/90 p-3.5 sm:p-4 space-y-3"
+                          >
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <div>
+                                <h3 className="text-xs sm:text-sm font-display font-bold text-white">
+                                  3.0 Text Color
+                                </h3>
+                                <p className="text-[11px] text-slate-400 mt-0.5">
+                                  Customize the highlighted “3.0” color in the Hero heading or restore the default “Meet the Contenders” color.
+                                </p>
+                              </div>
+                              <span className="text-[11px] font-mono px-2 py-0.5 rounded-md border border-white/10 bg-slate-950/80 text-amber-300 uppercase">
+                                {isDefaultVersionColor ? 'Default Branding' : activeVersionColor}
+                              </span>
+                            </div>
+
+                            {/* Live Preview of Selected "3.0" Color */}
+                            <div className="rounded-xl border border-white/10 bg-[#05060b] px-4 py-3 flex items-center justify-between gap-3">
+                              <span className="text-[10px] font-display font-bold uppercase tracking-[0.18em] text-slate-400 shrink-0">
+                                Preview
+                              </span>
+                              <div
+                                className="font-display font-black uppercase tracking-tight text-base sm:text-lg truncate text-right"
+                                style={{ color: draftConfig.text.mainHeading.color || '#ffffff' }}
+                              >
+                                SMASH PREMIER LEAGUE{' '}
+                                {isDefaultVersionColor ? (
+                                  <span className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
+                                    3.0
+                                  </span>
+                                ) : (
+                                  <span style={{ color: activeVersionColor }}>3.0</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Responsive Color Picker & Custom HEX Input */}
+                            <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5 items-end">
+                              <div className="sm:col-span-4">
+                                <label
+                                  htmlFor="hero-30-color-picker"
+                                  className="block text-[11px] font-semibold text-slate-300 mb-1"
+                                >
+                                  Color Picker
+                                </label>
+                                <div className="flex items-center gap-2 rounded-xl bg-slate-900 border border-white/15 px-2.5 py-1.5 min-h-[42px]">
+                                  <input
+                                    id="hero-30-color-picker"
+                                    type="color"
+                                    aria-label="3.0 Text Color Picker"
+                                    value={activeVersionColor}
+                                    onChange={(e) => handleVersionColorChange(e.target.value)}
+                                    className="w-8 h-7 rounded-md bg-transparent border-0 cursor-pointer shrink-0 p-0"
+                                  />
+                                  <span className="text-xs font-mono text-slate-300 uppercase truncate">
+                                    {activeVersionColor}
+                                  </span>
+                                </div>
+                              </div>
+
+                              <div className="sm:col-span-8">
+                                <label
+                                  htmlFor="hero-30-hex-input"
+                                  className="block text-[11px] font-semibold text-slate-300 mb-1"
+                                >
+                                  Custom HEX Color
+                                </label>
+                                <input
+                                  id="hero-30-hex-input"
+                                  type="text"
+                                  aria-label="3.0 Custom HEX Color"
+                                  maxLength={7}
+                                  value={versionColorHex}
+                                  onChange={(e) => handleVersionColorChange(e.target.value)}
+                                  onBlur={() => {
+                                    if (!normalizedHexInput) {
+                                      setVersionColorHex(activeVersionColor);
+                                    } else {
+                                      setVersionColorHex(normalizedHexInput);
+                                    }
+                                  }}
+                                  placeholder="#fbbf24"
+                                  className="w-full min-h-[42px] rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-xs sm:text-sm font-mono uppercase text-white placeholder:text-slate-500 focus:outline-none focus:border-amber-400"
+                                />
+                              </div>
+                            </div>
+
+                            {!normalizedHexInput && (
+                              <p className="text-[11px] text-rose-400">
+                                Enter a valid 3- or 6-digit HEX color (e.g. #fbbf24 or #ef4444).
+                              </p>
+                            )}
+
+                            {/* Dedicated Save Color & Reset to Default Actions */}
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 pt-1">
+                              <button
+                                type="button"
+                                onClick={() => void handleSaveVersionColor()}
+                                disabled={isSavingVersionColor || isResettingVersionColor || !normalizedHexInput}
+                                className="flex-1 inline-flex items-center justify-center gap-1.5 px-4 py-2.5 min-h-[42px] rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:to-orange-400 shadow-md shadow-amber-500/20 transition-all disabled:opacity-50 cursor-pointer"
+                              >
+                                {isSavingVersionColor ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <Save className="w-3.5 h-3.5" />
+                                )}
+                                <span>{isSavingVersionColor ? 'Saving Color...' : 'Save Color'}</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => void handleResetVersionColor()}
+                                disabled={isSavingVersionColor || isResettingVersionColor}
+                                className="inline-flex items-center justify-center gap-1.5 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold text-slate-200 hover:text-white bg-white/5 hover:bg-white/10 border border-white/15 transition-colors disabled:opacity-50 cursor-pointer"
+                              >
+                                {isResettingVersionColor ? (
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="w-3.5 h-3.5 text-amber-300" />
+                                )}
+                                <span>Reset to Default</span>
+                              </button>
+                            </div>
+                          </div>
                         )}
-
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 items-center">
-                          <div>
-                            <label className="block text-[11px] text-slate-400 mb-1">Color</label>
-                            <input
-                              type="color"
-                              value={field.color}
-                              onChange={(e) =>
-                                setDraftConfig((prev) => ({
-                                  ...prev,
-                                  text: {
-                                    ...prev.text,
-                                    [item.key]: { ...prev.text[item.key], color: e.target.value },
-                                  },
-                                }))
-                              }
-                              className="w-full h-8 rounded-lg bg-slate-900 border border-white/15 cursor-pointer"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] text-slate-400 mb-1">Weight</label>
-                            <select
-                              value={field.fontWeight}
-                              onChange={(e) =>
-                                setDraftConfig((prev) => ({
-                                  ...prev,
-                                  text: {
-                                    ...prev.text,
-                                    [item.key]: { ...prev.text[item.key], fontWeight: e.target.value as any },
-                                  },
-                                }))
-                              }
-                              className="w-full rounded-lg bg-slate-900 border border-white/15 px-2 py-1.5 text-xs text-white"
-                            >
-                              <option value="500">Medium</option>
-                              <option value="600">Semibold</option>
-                              <option value="700">Bold</option>
-                              <option value="800">Extrabold</option>
-                              <option value="900">Black</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="flex justify-between text-[11px] text-slate-400 mb-1">
-                              <span>Desk</span>
-                              <span className="font-mono tabular-nums">{field.fontSizeDesktop}px</span>
-                            </label>
-                            <input
-                              type="range"
-                              min={item.minDesk}
-                              max={item.maxDesk}
-                              value={field.fontSizeDesktop}
-                              onChange={(e) =>
-                                setDraftConfig((prev) => ({
-                                  ...prev,
-                                  text: {
-                                    ...prev.text,
-                                    [item.key]: {
-                                      ...prev.text[item.key],
-                                      fontSizeDesktop: Number(e.target.value),
-                                    },
-                                  },
-                                }))
-                              }
-                              className="w-full accent-amber-400"
-                            />
-                          </div>
-                          <div>
-                            <label className="flex justify-between text-[11px] text-slate-400 mb-1">
-                              <span>Mob</span>
-                              <span className="font-mono tabular-nums">{field.fontSizeMobile}px</span>
-                            </label>
-                            <input
-                              type="range"
-                              min={12}
-                              max={52}
-                              value={field.fontSizeMobile}
-                              onChange={(e) =>
-                                setDraftConfig((prev) => ({
-                                  ...prev,
-                                  text: {
-                                    ...prev.text,
-                                    [item.key]: {
-                                      ...prev.text[item.key],
-                                      fontSizeMobile: Number(e.target.value),
-                                    },
-                                  },
-                                }))
-                              }
-                              className="w-full accent-amber-400"
-                            />
-                          </div>
-                        </div>
-                      </div>
+                      </React.Fragment>
                     );
                   })}
                 </div>

@@ -30,8 +30,10 @@ import {
 } from '../utils/tournamentEngine';
 import {
   DEFAULT_HERO_CONFIG,
+  DEFAULT_HERO_VERSION_COLOR,
   normalizeHeroConfig,
   cloneHeroConfig,
+  sanitizeHexColor,
 } from '../utils/heroDefaults';
 import {
   DEFAULT_YOUTUBE_LIVE_CONFIG,
@@ -174,6 +176,9 @@ interface TournamentContextType {
     config: HeroConfig,
     summary?: string,
     action?: 'publish' | 'restore'
+  ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
+  saveHeroVersionColor: (
+    versionColor: string
   ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
   restoreHeroVersion: (
     versionRecord: HeroVersionRecord
@@ -4675,6 +4680,61 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [applyPublishedHeroConfig]
   );
 
+  const saveHeroVersionColor = useCallback(
+    async (versionColor: string) => {
+      if (!AuthService.canManageTournament()) {
+        return { success: false, error: 'Unauthorized: Tournament Director or Super Admin required.' };
+      }
+      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const cleanColor = sanitizeHexColor(versionColor, DEFAULT_HERO_VERSION_COLOR);
+
+      // Fetch latest published & draft state so we never overwrite or reset other Hero settings
+      const adminState = await SupabaseService.fetchAdminHeroState(seasonSlug).catch(() => ({
+        published: publishedHeroConfig,
+        draft: { ...publishedHeroConfig, status: 'draft' as const },
+        versions: [],
+      }));
+
+      const nextPublished = normalizeHeroConfig({
+        ...adminState.published,
+        text: {
+          ...adminState.published.text,
+          versionColor: cleanColor,
+        },
+      });
+
+      const summary =
+        cleanColor === DEFAULT_HERO_VERSION_COLOR
+          ? 'Restored default Hero "3.0" text color'
+          : `Updated Hero "3.0" text color to ${cleanColor.toUpperCase()}`;
+
+      const res = await publishHeroConfig(nextPublished, summary, 'publish');
+
+      // Preserve any unrelated draft customizations while syncing versionColor on draft
+      if (res.success && adminState.draft) {
+        const currentAuthor = AuthService.getCurrentUser();
+        const author = currentAuthor?.name || currentAuthor?.username || 'Tournament Director';
+        const hasOtherDraftChanges =
+          JSON.stringify({ ...adminState.draft, text: { ...adminState.draft.text, versionColor: cleanColor }, status: 'published', version: adminState.published.version, updatedAt: 0, updatedBy: '', publishedAt: 0, publishedBy: '' }) !==
+          JSON.stringify({ ...adminState.published, text: { ...adminState.published.text, versionColor: cleanColor }, status: 'published', version: adminState.published.version, updatedAt: 0, updatedBy: '', publishedAt: 0, publishedBy: '' });
+
+        if (hasOtherDraftChanges) {
+          void SupabaseService.saveHeroDraft(
+            {
+              ...adminState.draft,
+              text: { ...adminState.draft.text, versionColor: cleanColor },
+            },
+            author,
+            seasonSlug
+          );
+        }
+      }
+
+      return res;
+    },
+    [publishHeroConfig, publishedHeroConfig]
+  );
+
   const restoreHeroVersion = useCallback(
     async (versionRecord: HeroVersionRecord) => {
       return publishHeroConfig(
@@ -4801,6 +4861,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         fetchAdminHeroState,
         saveHeroDraft,
         publishHeroConfig,
+        saveHeroVersionColor,
         restoreHeroVersion,
         youtubeLiveConfig,
         saveYouTubeLiveConfig,

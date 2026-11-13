@@ -10,7 +10,11 @@ import {
 import { HeroButtonConfig, HeroConfig, Match, Team } from '../../types/tournament';
 import { BadmintonHeroVisual } from './BadmintonHeroVisual';
 import { SPLLogo } from '../common/SPLLogo';
-import { DEFAULT_HERO_CONFIG, validateHeroActionDestination } from '../../utils/heroDefaults';
+import {
+  DEFAULT_HERO_CONFIG,
+  DEFAULT_HERO_VERSION_COLOR,
+  validateHeroActionDestination,
+} from '../../utils/heroDefaults';
 
 export interface HeroSectionCanvasProps {
   heroConfig?: HeroConfig;
@@ -604,7 +608,37 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                     fontFamily: `'${text.fontFamily}', 'Outfit', sans-serif`,
                   }}
                 >
-                  {text.mainHeading.text}
+                  {(() => {
+                    const headingText = text.mainHeading.text;
+                    const resolvedVersionColor = (text.versionColor || DEFAULT_HERO_VERSION_COLOR).toLowerCase();
+                    const isDefaultVersionColor = resolvedVersionColor === DEFAULT_HERO_VERSION_COLOR;
+                    if (!headingText.includes('3.0')) return headingText;
+                    return headingText.split(/(3\.0)/g).map((part, idx) => {
+                      if (part !== '3.0') {
+                        return <React.Fragment key={idx}>{part}</React.Fragment>;
+                      }
+                      if (isDefaultVersionColor) {
+                        return (
+                          <span
+                            key={idx}
+                            data-spl-hero-version="3.0"
+                            className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent"
+                          >
+                            {part}
+                          </span>
+                        );
+                      }
+                      return (
+                        <span
+                          key={idx}
+                          data-spl-hero-version="3.0"
+                          style={{ color: resolvedVersionColor }}
+                        >
+                          {part}
+                        </span>
+                      );
+                    });
+                  })()}
                 </h1>
               )}
 

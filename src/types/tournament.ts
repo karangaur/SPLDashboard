@@ -424,6 +424,7 @@ export interface HeroTextConfig {
   kickerText: string;
   kickerVisible: boolean;
   kickerColor: string;
+  versionColor?: string;
   mainHeading: HeroTextFieldStyle;
   subtitle: HeroTextFieldStyle;
   tagline: HeroTextFieldStyle;
