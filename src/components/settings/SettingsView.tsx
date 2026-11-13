@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Sliders,
   CreditCard,
@@ -29,8 +29,7 @@ export const SettingsView: React.FC = () => {
     isSupabaseConnected,
     dbBackendType,
     testDbConnection,
-    updateSettings,
-    updatePaymentSettings,
+    saveAllSettings,
     resetToDefault,
     clearResults,
     exportStateJSON,
@@ -43,23 +42,139 @@ export const SettingsView: React.FC = () => {
 
   const [settingsForm, setSettingsForm] = useState(state.settings);
   const [paymentForm, setPaymentForm] = useState(state.payment);
+  const isDirtyRef = useRef(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [importJsonText, setImportJsonText] = useState('');
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showClearResultsConfirm, setShowClearResultsConfirm] = useState(false);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
 
-  const showNotice = (text: string, type: 'success' | 'error' = 'success') => {
-    setToastMsg({ text, type });
-    setTimeout(() => setToastMsg(null), 4000);
+  // Sync form inputs whenever authoritative settings/payment arrive from Supabase or Realtime (when user has no unsaved edits)
+  useEffect(() => {
+    if (!isDirtyRef.current) {
+      setSettingsForm(state.settings);
+    }
+  }, [state.settings]);
+
+  useEffect(() => {
+    if (!isDirtyRef.current) {
+      setPaymentForm(state.payment);
+    }
+  }, [state.payment]);
+
+  const markDirty = () => {
+    isDirtyRef.current = true;
+    setIsDirty(true);
+    setSaveSuccess(false);
+    setSaveError(null);
   };
 
-  const handleSaveSettings = (e: React.FormEvent) => {
+  const showNotice = (text: string, type: 'success' | 'error' = 'success') => {
+    setToastMsg({ text, type });
+    setTimeout(() => setToastMsg(null), 5000);
+  };
+
+  const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
-    updateSettings(settingsForm);
-    updatePaymentSettings(paymentForm);
-    setSaveSuccess(true);
-    setTimeout(() => setSaveSuccess(false), 2500);
+    if (isSaving) return;
+
+    const trimmedName = (settingsForm.name || '').trim();
+    if (!trimmedName) {
+      const msg = 'Tournament Name is required.';
+      setSaveError(msg);
+      showNotice(msg, 'error');
+      return;
+    }
+
+    if (!settingsForm.date || !settingsForm.date.trim()) {
+      const msg = 'Tournament Date is required.';
+      setSaveError(msg);
+      showNotice(msg, 'error');
+      return;
+    }
+
+    const courtsCount = Number(settingsForm.courts);
+    if (!Number.isFinite(courtsCount) || courtsCount < 1 || courtsCount > 10) {
+      const msg = 'Active Courts must be between 1 and 10.';
+      setSaveError(msg);
+      showNotice(msg, 'error');
+      return;
+    }
+
+    const feeAmount = Number(settingsForm.entryFee);
+    if (!Number.isFinite(feeAmount) || feeAmount < 0) {
+      const msg = 'Entry Fee must be 0 or greater.';
+      setSaveError(msg);
+      showNotice(msg, 'error');
+      return;
+    }
+
+    const slotsLimit = Number(settingsForm.slotLimit ?? 32);
+    if (!Number.isFinite(slotsLimit) || slotsLimit < 2) {
+      const msg = 'Max Athlete Slots must be at least 2.';
+      setSaveError(msg);
+      showNotice(msg, 'error');
+      return;
+    }
+
+    const pointTargetNum = parseInt(String(settingsForm.format || '21'), 10) || 21;
+    const sanitizedSettings = {
+      ...settingsForm,
+      name: trimmedName,
+      season: (settingsForm.season || '').trim(),
+      venue: (settingsForm.venue || '').trim(),
+      organizer: (settingsForm.organizer || 'SPL Tournament Committee').trim(),
+      announcement: (settingsForm.announcement || '').trim(),
+      courts: Math.round(courtsCount),
+      entryFee: Math.round(feeAmount),
+      slotLimit: Math.round(slotsLimit),
+      scoringRules: settingsForm.scoringRules
+        ? { ...settingsForm.scoringRules, pointTarget: pointTargetNum }
+        : {
+            pointTarget: pointTargetNum,
+            setsToWin: 1,
+            deuceEnabled: true,
+            maxPointCap: 30,
+            changeEndsAtInterval: true,
+          },
+    };
+
+    const sanitizedPayment = {
+      ...paymentForm,
+      upiId: (paymentForm.upiId || '').trim(),
+      accountName: (paymentForm.accountName || '').trim(),
+    };
+
+    setIsSaving(true);
+    setSaveError(null);
+    setSaveSuccess(false);
+
+    try {
+      const res = await saveAllSettings(sanitizedSettings, sanitizedPayment);
+      if (res.success) {
+        isDirtyRef.current = false;
+        setIsDirty(false);
+        setSettingsForm(sanitizedSettings);
+        setPaymentForm(sanitizedPayment);
+        setSaveSuccess(true);
+        showNotice('Tournament settings saved permanently to Supabase & synchronized across all devices!', 'success');
+        setTimeout(() => setSaveSuccess(false), 3500);
+      } else {
+        // Preserve unsaved user edits so admin can retry saving
+        const errMsg = res.error || 'Failed to save tournament settings to Supabase. Your edits are preserved.';
+        setSaveError(errMsg);
+        showNotice(errMsg, 'error');
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Unexpected error saving settings. Your edits are preserved.';
+      setSaveError(errMsg);
+      showNotice(errMsg, 'error');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleImportJSON = () => {
@@ -144,7 +259,10 @@ export const SettingsView: React.FC = () => {
               <input
                 type="text"
                 value={settingsForm.name}
-                onChange={(e) => setSettingsForm({ ...settingsForm, name: e.target.value })}
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, name: e.target.value });
+                }}
                 className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
                 required
               />
@@ -157,8 +275,11 @@ export const SettingsView: React.FC = () => {
               <input
                 type="text"
                 value={settingsForm.season || ''}
-                onChange={(e) => setSettingsForm({ ...settingsForm, season: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, season: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
               />
             </div>
           </div>
@@ -171,8 +292,11 @@ export const SettingsView: React.FC = () => {
               <input
                 type="date"
                 value={settingsForm.date}
-                onChange={(e) => setSettingsForm({ ...settingsForm, date: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, date: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
                 required
               />
             </div>
@@ -184,25 +308,49 @@ export const SettingsView: React.FC = () => {
               <input
                 type="text"
                 value={settingsForm.venue}
-                onChange={(e) => setSettingsForm({ ...settingsForm, venue: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, venue: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
               />
             </div>
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-300 mb-1">
-              Broadcast Announcement Banner
-            </label>
-            <input
-              type="text"
-              value={settingsForm.announcement || ''}
-              onChange={(e) => setSettingsForm({ ...settingsForm, announcement: e.target.value })}
-              className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Broadcast Announcement Banner
+              </label>
+              <input
+                type="text"
+                value={settingsForm.announcement || ''}
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, announcement: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Organizer / Association Name
+              </label>
+              <input
+                type="text"
+                value={settingsForm.organizer || ''}
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, organizer: e.target.value });
+                }}
+                placeholder="SPL Tournament Committee"
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+              />
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-semibold text-slate-300 mb-1">
                 Active Courts
@@ -212,10 +360,11 @@ export const SettingsView: React.FC = () => {
                 min={1}
                 max={10}
                 value={settingsForm.courts}
-                onChange={(e) =>
-                  setSettingsForm({ ...settingsForm, courts: parseInt(e.target.value, 10) || 1 })
-                }
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, courts: parseInt(e.target.value, 10) || 1 });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
               />
             </div>
 
@@ -225,8 +374,11 @@ export const SettingsView: React.FC = () => {
               </label>
               <select
                 value={settingsForm.format}
-                onChange={(e) => setSettingsForm({ ...settingsForm, format: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, format: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
               >
                 <option value="21">21 Points (Standard)</option>
                 <option value="15">15 Points (Short)</option>
@@ -243,10 +395,29 @@ export const SettingsView: React.FC = () => {
                 min={0}
                 step={50}
                 value={settingsForm.entryFee}
-                onChange={(e) =>
-                  setSettingsForm({ ...settingsForm, entryFee: parseInt(e.target.value, 10) || 0 })
-                }
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white font-mono"
+                onChange={(e) => {
+                  markDirty();
+                  const val = parseInt(e.target.value, 10);
+                  setSettingsForm({ ...settingsForm, entryFee: Number.isNaN(val) ? 0 : val });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1">
+                Max Athlete Slots
+              </label>
+              <input
+                type="number"
+                min={2}
+                max={512}
+                value={settingsForm.slotLimit ?? 32}
+                onChange={(e) => {
+                  markDirty();
+                  setSettingsForm({ ...settingsForm, slotLimit: parseInt(e.target.value, 10) || 32 });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
               />
             </div>
           </div>
@@ -268,8 +439,11 @@ export const SettingsView: React.FC = () => {
                 type="text"
                 placeholder="e.g. tournament@upi"
                 value={paymentForm.upiId}
-                onChange={(e) => setPaymentForm({ ...paymentForm, upiId: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white font-mono"
+                onChange={(e) => {
+                  markDirty();
+                  setPaymentForm({ ...paymentForm, upiId: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400"
               />
             </div>
 
@@ -280,29 +454,43 @@ export const SettingsView: React.FC = () => {
               <input
                 type="text"
                 value={paymentForm.accountName}
-                onChange={(e) => setPaymentForm({ ...paymentForm, accountName: e.target.value })}
-                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white"
+                onChange={(e) => {
+                  markDirty();
+                  setPaymentForm({ ...paymentForm, accountName: e.target.value });
+                }}
+                className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
               />
             </div>
           </div>
         </div>
 
-        {/* Submit button */}
-        <div className="flex items-center justify-between">
-          <div>
-            {saveSuccess && (
-              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 animate-fade-in">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>Settings saved successfully!</span>
+        {/* Submit button & Persistence Feedback */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="min-h-[24px]">
+            {saveError ? (
+              <span className="text-xs font-bold text-rose-400 flex items-center gap-1.5 animate-fade-in">
+                <AlertTriangle className="w-4 h-4 shrink-0" />
+                <span>{saveError}</span>
               </span>
-            )}
+            ) : saveSuccess ? (
+              <span className="text-xs font-bold text-emerald-400 flex items-center gap-1.5 animate-fade-in">
+                <CheckCircle2 className="w-4 h-4 shrink-0" />
+                <span>Settings saved to Supabase & synced live!</span>
+              </span>
+            ) : isDirty ? (
+              <span className="text-xs font-semibold text-amber-300 flex items-center gap-1.5">
+                <span>Unsaved changes ready to save</span>
+              </span>
+            ) : null}
           </div>
 
           <button
             type="submit"
-            className="px-6 py-2.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl transition-all shadow-md active:scale-95"
+            disabled={isSaving}
+            className="px-6 py-2.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
           >
-            Save All Settings
+            {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+            <span>{isSaving ? 'Saving Settings...' : 'Save All Settings'}</span>
           </button>
         </div>
       </form>

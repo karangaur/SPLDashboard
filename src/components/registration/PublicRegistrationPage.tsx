@@ -70,9 +70,6 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   const [answers, setAnswers] = useState<Record<string, any>>({});
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
 
-  // Payment states
-  const [txnId, setTxnId] = useState('');
-
   // UI status
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -209,7 +206,13 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
   const recipientUpiId = formConfig.payment?.upiId || state.payment.upiId || 'karan-hdfc@ybl';
   const recipientName = formConfig.payment?.accountName || state.payment.accountName || 'Smash Premier League (Karan Gaur)';
-  const paymentInstructions = formConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay using Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below.';
+  const rawPaymentInstructions =
+    formConfig.payment?.instructions ||
+    'Scan the QR code or tap the UPI button to pay using Google Pay, PhonePe, or Paytm.';
+  const paymentInstructions =
+    rawPaymentInstructions
+      .replace(/\s*Submit the 12-digit transaction UTR reference below(?: for verification)?\.?/gi, '')
+      .trim() || 'Scan the QR code or tap the UPI button to pay using Google Pay, PhonePe, or Paytm.';
   const paymentBtnLabel = formConfig.payment?.buttonText || 'Pay Registration Fee';
 
   const [upiQrCodeUrl, setUpiQrCodeUrl] = useState<string>('');
@@ -327,14 +330,6 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       return;
     }
 
-    // Mandatory payment check
-    if (formConfig.payment?.enabled && formConfig.payment?.isMandatory && effectiveFee > 0) {
-      if (!txnId.trim()) {
-        setErrorMsg('Payment reference (UTR number) is required for registration. Please initiate payment via Google Pay, PhonePe, or Paytm and enter your 12-digit UPI reference number below.');
-        return;
-      }
-    }
-
     setSubmitting(true);
 
     try {
@@ -355,7 +350,6 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
         notes: answers.notes ? String(answers.notes).trim() : undefined,
         fee: effectiveFee,
         season: activeSeasonSlug,
-        txnId: txnId.trim() || undefined,
         method: 'upi',
         tokenUsed: tokenParam || undefined,
         answers: { ...answers },
@@ -402,7 +396,6 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     setSuccessReg(null);
     setAnswers({});
     setPhotoPreview(null);
-    setTxnId('');
     setErrorMsg(null);
   };
 
@@ -1156,27 +1149,6 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                         <span className="text-xs text-slate-400 block mt-0.5 truncate">
                           Name: <span className="text-slate-200 font-semibold">{recipientName}</span>
                         </span>
-                      </div>
-
-                      {/* UTR / Transaction Reference Input */}
-                      <div className="space-y-1.5 text-left">
-                        <label className="block text-xs font-bold text-slate-200">
-                          UPI Reference / UTR Number (12 Digits)
-                          {formConfig.payment?.isMandatory && (
-                            <span className="text-rose-400 ml-1 font-bold">*</span>
-                          )}
-                        </label>
-                        <input
-                          type="text"
-                          required={formConfig.payment?.isMandatory}
-                          value={txnId}
-                          onChange={(e) => setTxnId(e.target.value)}
-                          placeholder="e.g. 423589102456"
-                          className="w-full bg-slate-950 border border-white/15 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 tracking-wider"
-                        />
-                        <p className="text-[10px] text-slate-400 leading-tight">
-                          Enter the 12-digit UPI transaction reference shown in Google Pay / PhonePe / Paytm after completing payment.
-                        </p>
                       </div>
                     </div>
                   </div>

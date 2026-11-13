@@ -12,7 +12,7 @@
     "closedNotice": "Registrations for this tournament are currently closed. Please contact the tournament organizer for spot entry inquiries.",
     "isPublished": true,
     "publishedAt": 1792927202685,
-    "lastUpdatedAt": 1794034348111,
+    "lastUpdatedAt": 1794543158413,
     "appearance": {
       "formTitle": "Player Entry & Registration Form",
       "formDescription": "Register as an official athlete for the upcoming Smash Premier League championship.",
@@ -22,7 +22,30 @@
       "submitButtonText": "Submit Registration & Confirm Entry",
       "successTitle": "Registration Submitted Successfully!",
       "successMessage": "Thank you for registering for Smash Premier League. Your details have been received by the tournament committee. Please save your Registration ID.",
-      "customUrlSlug": "register"
+      "customUrlSlug": "register",
+      "tournamentSettings": {
+        "name": "Smash Premier League",
+        "date": "2026-10-25",
+        "venue": "Maharajganj Indoor Badminton Stadium, Court 1 & 2",
+        "organizer": "SPL Tournament Committee",
+        "courts": 2,
+        "format": "21",
+        "entryFee": 500,
+        "slotLimit": 32,
+        "season": "Season IV (Championship Edition)",
+        "announcement": "Grand Championship on Court 1! Live scoring active.",
+        "scoringRules": {
+          "pointTarget": 21,
+          "setsToWin": 1,
+          "deuceEnabled": true,
+          "maxPointCap": 30,
+          "changeEndsAtInterval": true
+        },
+        "courtNames": [
+          "Main Court",
+          "Side Court"
+        ]
+      }
     },
     "fields": [
       {
@@ -179,6 +202,9 @@
         "order": 13
       }
     ],
-    "customUrlSlug": "register"
+    "customUrlSlug": "register",
+    "payment": {
+      "baseFee": 500
+    }
   }
 }

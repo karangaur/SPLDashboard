@@ -77,6 +77,27 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const completedCount = state.matches.filter((m) => m.status === 'completed').length;
   const upcomingCount = state.matches.filter((m) => m.status === 'upcoming').length;
 
+  // Dynamic Tournament Settings derived from Supabase-synced state
+  const tournamentName = (state.settings.name || 'Smash Premier League').trim();
+  const nameWords = tournamentName.split(/\s+/).filter(Boolean);
+  const heroTitleLead = nameWords.length > 1 ? nameWords.slice(0, -1).join(' ') : tournamentName;
+  const heroTitleHighlight = nameWords.length > 1 ? nameWords[nameWords.length - 1] : '';
+  const seasonLabel = state.settings.season || 'Official Badminton Championship';
+  const venueLabel = state.settings.venue || 'Maharajganj Indoor Badminton Stadium';
+  const organizerLabel = state.settings.organizer || 'Maharajganj Badminton Association Presents';
+  const courtsCount = Math.max(1, Number(state.settings.courts) || 2);
+  const activeCourtNames =
+    state.settings.courtNames && state.settings.courtNames.length > 0
+      ? state.settings.courtNames.slice(0, courtsCount)
+      : Array.from({ length: courtsCount }, (_, i) => `Court ${i + 1}`);
+  const courtsListLabel =
+    activeCourtNames.length <= 2
+      ? activeCourtNames.join(' & ')
+      : `${activeCourtNames.slice(0, -1).join(', ')} & ${activeCourtNames[activeCourtNames.length - 1]}`;
+  const pointsFormat = state.settings.format || String(state.settings.scoringRules?.pointTarget || 21);
+  const entryFeeDisplay = state.settings.entryFee ?? 500;
+  const announcementText = (state.settings.announcement || '').trim();
+
   const scrollToSection = (id: string) => {
     setMobileNavOpen(false);
     const el = document.getElementById(id);
@@ -127,20 +148,20 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             >
               <img
                 src={SPL_LOGO_SRC}
-                alt="Smash Premier League Logo"
+                alt={`${tournamentName} Logo`}
                 className="h-8 sm:h-12 w-auto object-contain shrink-0 drop-shadow-[0_2px_10px_rgba(59,130,246,0.5)] group-hover:scale-105 transition-transform"
               />
               <div className="min-w-0">
                 <div className="flex items-center gap-1.5 sm:gap-2">
                   <span className="font-display text-sm sm:text-base lg:text-lg font-black tracking-tight text-white uppercase truncate">
-                    Smash Premier League
+                    {tournamentName}
                   </span>
                   <span className="hidden sm:inline px-1.5 sm:px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono shrink-0">
-                    Maharajganj
+                    Official
                   </span>
                 </div>
                 <span className="block text-[10px] sm:text-xs font-semibold text-slate-400 -mt-0.5 truncate">
-                  Official Badminton Championship
+                  {seasonLabel}
                 </span>
               </div>
             </button>
@@ -288,19 +309,25 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 
                 <div className="inline-flex items-center gap-2 px-3 sm:px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/30 text-sky-300 text-[10px] sm:text-xs font-black uppercase tracking-wider max-w-full">
                   <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping shrink-0" />
-                  <span className="truncate">Maharajganj Badminton Association Presents</span>
+                  <span className="truncate">{organizerLabel}</span>
                 </div>
 
                 <div className="space-y-2.5 sm:space-y-3">
                   <h1 className="text-[clamp(2.15rem,7.5vw,4.5rem)] font-black font-display tracking-tight text-white uppercase leading-[1.06]">
-                    Smash Premier <br />
-                    <span className="bg-gradient-to-r from-sky-400 via-blue-400 to-amber-300 bg-clip-text text-transparent">
-                      League
-                    </span>
+                    {heroTitleLead}
+                    {heroTitleHighlight && (
+                      <>
+                        {' '}
+                        <br className="hidden sm:inline" />
+                        <span className="bg-gradient-to-r from-sky-400 via-blue-400 to-amber-300 bg-clip-text text-transparent">
+                          {heroTitleHighlight}
+                        </span>
+                      </>
+                    )}
                   </h1>
 
                   <p className="text-lg sm:text-2xl lg:text-3xl font-extrabold uppercase tracking-wide text-slate-200 font-display">
-                    Maharajganj Badminton Championship
+                    {seasonLabel}
                   </p>
 
                   <p className="text-xl sm:text-3xl lg:text-4xl font-black text-amber-400 italic tracking-tight drop-shadow-sm">
@@ -308,7 +335,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   </p>
 
                   <p className="text-sm sm:text-lg text-slate-300 max-w-xl mx-auto lg:mx-0 font-normal leading-relaxed pt-1">
-                    The premier tournament uniting Maharajganj’s top shuttlers. Follow the teams, track live court scores, and watch the championship unfold in real time.
+                    {announcementText ||
+                      `The premier tournament uniting ${tournamentName}’s top shuttlers. Follow the teams, track live court scores, and watch the championship unfold in real time.`}
                   </p>
                 </div>
 
@@ -351,11 +379,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
                     <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Championship Venue</span>
-                    <span className="text-xs sm:text-sm font-bold text-slate-200 truncate block mt-1">Indoor Stadium</span>
+                    <span title={venueLabel} className="text-xs sm:text-sm font-bold text-slate-200 truncate block mt-1">
+                      {venueLabel}
+                    </span>
                   </div>
                   <div className="p-3 rounded-xl bg-white/[0.03] border border-white/5">
                     <span className="text-[10px] sm:text-[11px] text-slate-400 font-semibold uppercase block">Match Rules</span>
-                    <span className="text-xs sm:text-sm font-bold text-amber-400 truncate block mt-1">BWF 21 Rally</span>
+                    <span className="text-xs sm:text-sm font-bold text-amber-400 truncate block mt-1">
+                      BWF {pointsFormat} Rally
+                    </span>
                   </div>
                 </div>
 
@@ -410,7 +442,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 Fixtures & Results
               </h2>
               <p className="text-sm text-slate-400 mt-1 max-w-xl">
-                Real-time match schedule across Court 1 and Court 2. All points and game winners are updated live from the scorer’s desk.
+                Real-time match schedule across {courtsListLabel}. All points and game winners are updated live from the scorer’s desk.
               </p>
             </div>
 
@@ -611,7 +643,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               The Teams
             </h2>
             <p className="text-sm sm:text-base text-slate-300">
-              Meet the teams competing for the Smash Premier League title. Every player, every captain, and their league record.
+              Meet the teams competing for the {tournamentName} title. Every player, every captain, and their league record.
             </p>
           </div>
 
@@ -921,11 +953,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 </div>
 
                 <h2 className="text-2xl sm:text-4xl font-black text-white font-display uppercase tracking-tight">
-                  Maharajganj Indoor Badminton Stadium
+                  {venueLabel}
                 </h2>
 
                 <p className="text-sm sm:text-base text-slate-300 leading-relaxed max-w-2xl">
-                  Featuring two tournament-grade synthetic badminton courts, calibrated arena lighting, referee observation towers, and live audience seating.
+                  Featuring {courtsCount} tournament-grade synthetic badminton {courtsCount === 1 ? 'court' : 'courts'}, calibrated arena lighting, referee observation towers, and live audience seating.
                 </p>
 
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 pt-2 sm:pt-4">
@@ -938,13 +970,13 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5">
                     <span className="text-[11px] text-slate-400 font-bold uppercase block">Courts In Action</span>
                     <span className="text-sm font-bold text-lime-400 mt-1 block">
-                      Court 1 & Court 2 (Synthetic)
+                      {courtsListLabel} ({courtsCount} {courtsCount === 1 ? 'Court' : 'Courts'})
                     </span>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5">
                     <span className="text-[11px] text-slate-400 font-bold uppercase block">Entry & Spot Inquiry</span>
                     <span className="text-sm font-bold text-emerald-400 mt-1 block">
-                      ₹{state.settings.entryFee || 500} per Athlete
+                      ₹{entryFeeDisplay} per Athlete
                     </span>
                   </div>
                 </div>
@@ -957,7 +989,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   Ready to Compete?
                 </h3>
                 <p className="text-xs text-slate-400 leading-relaxed">
-                  Join the official athlete draft of Smash Premier League Maharajganj. Open to singles and doubles competitors.
+                  Join the official athlete draft of {tournamentName}. Open to singles and doubles competitors.
                 </p>
                 <button
                   onClick={onOpenPublicRegister}
@@ -980,16 +1012,16 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="flex flex-col sm:flex-row items-center gap-3">
               <img
                 src={SPL_LOGO_SRC}
-                alt="Smash Premier League Logo"
+                alt={`${tournamentName} Logo`}
                 loading="lazy"
                 className="h-10 w-auto object-contain shrink-0 drop-shadow-md"
               />
               <div>
                 <span className="font-display font-black text-white text-base uppercase block">
-                  Smash Premier League Maharajganj
+                  {tournamentName}
                 </span>
                 <span className="text-slate-400 text-xs">
-                  Official Badminton Tournament Portal · Season IV
+                  Official Badminton Tournament Portal · {seasonLabel}
                 </span>
               </div>
             </div>
@@ -1009,8 +1041,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           </div>
 
           <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400 text-center sm:text-left">
-            <span>© 2026 Smash Premier League Maharajganj. All rights reserved.</span>
-            <span>BWF Badminton Rally Scoring System • Maharajganj Sports Arena</span>
+            <span>© {new Date().getFullYear()} {tournamentName}. All rights reserved.</span>
+            <span>BWF {pointsFormat}-Point Rally System • {venueLabel}</span>
           </div>
         </div>
       </footer>

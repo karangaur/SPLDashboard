@@ -80,7 +80,7 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
       upiId: initialConfig.payment?.upiId || 'karan-hdfc@ybl',
       accountName: initialConfig.payment?.accountName || 'Smash Premier League (Karan Gaur)',
       note: initialConfig.payment?.note || 'SPL Maharajganj Player Entry Fee',
-      instructions: initialConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+      instructions: initialConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm.',
       buttonText: initialConfig.payment?.buttonText || 'Pay Registration Fee',
       baseFee: initialConfig.payment?.baseFee ?? (initialConfig.entryFee ?? 500),
       categoryFees: initialConfig.payment?.categoryFees || {
@@ -115,7 +115,7 @@ export const FormCustomizerModal: React.FC<FormCustomizerModalProps> = ({
           upiId: initialConfig.payment?.upiId || 'karan-hdfc@ybl',
           accountName: initialConfig.payment?.accountName || 'Smash Premier League (Karan Gaur)',
           note: initialConfig.payment?.note || 'SPL Maharajganj Player Entry Fee',
-          instructions: initialConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+          instructions: initialConfig.payment?.instructions || 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm.',
           buttonText: initialConfig.payment?.buttonText || 'Pay Registration Fee',
           baseFee: initialConfig.payment?.baseFee ?? (initialConfig.entryFee ?? 500),
           categoryFees: initialConfig.payment?.categoryFees || {

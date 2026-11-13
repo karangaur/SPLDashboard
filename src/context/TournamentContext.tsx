@@ -62,8 +62,12 @@ interface TournamentContextType {
 
   
   // Settings
-  updateSettings: (settings: Partial<TournamentSettings>) => void;
-  updatePaymentSettings: (payment: Partial<PaymentSettings>) => void;
+  updateSettings: (settings: Partial<TournamentSettings>) => Promise<{ success: boolean; error?: string }>;
+  updatePaymentSettings: (payment: Partial<PaymentSettings>) => Promise<{ success: boolean; error?: string }>;
+  saveAllSettings: (
+    settings: Partial<TournamentSettings>,
+    payment?: Partial<PaymentSettings>
+  ) => Promise<{ success: boolean; error?: string }>;
   updateRegistrationSettings: (settings: Partial<RegistrationSettings>) => void;
   
   // Players
@@ -224,6 +228,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const [isSupabaseConnected, setIsSupabaseConnected] = useState<boolean>(() => isSupabaseConfigured());
   const dbBackendType: 'supabase' | 'local_server' = isSupabaseConfigured() ? 'supabase' : 'local_server';
   const lastServerScoreTime = useRef<number>(0);
+  const stateRef = useRef<TournamentState>(state);
+  stateRef.current = state;
+
+  useEffect(() => {
+    if (typeof document !== 'undefined' && state.settings?.name) {
+      document.title = state.settings.season
+        ? `${state.settings.name} — ${state.settings.season}`
+        : state.settings.name;
+    }
+  }, [state.settings?.name, state.settings?.season]);
 
   const testDbConnection = async (): Promise<DatabaseDiagnosticResult> => {
     let serverData: any = null;
@@ -309,10 +323,28 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setState((prev) => ({ ...prev, registrations: regs }));
         }
 
-        // 5. Fetch Form Config from Supabase
+        // 5. Fetch Form Config & Authoritative Tournament Settings from Supabase
         const cfg = await SupabaseService.fetchFormConfig(seasonSlug);
-        if (cfg !== null && Array.isArray(cfg.fields) && cfg.fields.length > 0) {
-          setFormConfig(cfg);
+        const extractedFromSupabase = SupabaseService.extractTournamentSettingsFromConfig(cfg);
+        if (cfg !== null) {
+          if (Array.isArray(cfg.fields) && cfg.fields.length > 0) {
+            setFormConfig(cfg);
+          }
+          const dbSettings = extractedFromSupabase.settings;
+          const dbPayment = extractedFromSupabase.payment;
+          setState((prev) => ({
+            ...prev,
+            settings: dbSettings
+              ? {
+                  ...prev.settings,
+                  ...dbSettings,
+                  scoringRules: dbSettings.scoringRules
+                    ? { ...prev.settings.scoringRules, ...dbSettings.scoringRules }
+                    : prev.settings.scoringRules,
+                }
+              : prev.settings,
+            payment: dbPayment ? { ...prev.payment, ...dbPayment } : prev.payment,
+          }));
         }
 
         // 6. Fetch Tokens from Supabase
@@ -322,8 +354,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setActiveToken(tokData.activeToken);
         }
 
-        // 7. Reconcile predefinedTeams & teamFormationMode from backend state
-        fetch('/api/tournament/state')
+        // 7. Reconcile predefinedTeams & teamFormationMode from backend state (and hydrate missing legacy fields if not yet in Supabase)
+        fetch(`/api/tournament/state?t=${Date.now()}`, { cache: 'no-store' })
           .then(async (res) => {
             if (!res.ok) return null;
             const text = await res.text().catch(() => '');
@@ -331,17 +363,56 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           })
           .then((serverState) => {
             if (serverState) {
+              const hasEmbeddedSettings = Boolean((cfg?.appearance as any)?.tournamentSettings);
+              const dbSettings = extractedFromSupabase.settings;
+              const dbPayment = extractedFromSupabase.payment;
               setState((prev) => ({
                 ...prev,
+                settings: hasEmbeddedSettings
+                  ? prev.settings
+                  : serverState.settings
+                  ? {
+                      ...prev.settings,
+                      ...serverState.settings,
+                      ...(dbSettings?.name ? { name: dbSettings.name } : {}),
+                      ...(dbSettings?.season ? { season: dbSettings.season } : {}),
+                      ...(dbSettings?.venue !== undefined ? { venue: dbSettings.venue } : {}),
+                      ...(dbSettings?.date !== undefined ? { date: dbSettings.date } : {}),
+                      ...(dbSettings?.entryFee != null ? { entryFee: dbSettings.entryFee } : {}),
+                      ...(dbSettings?.slotLimit != null ? { slotLimit: dbSettings.slotLimit } : {}),
+                    }
+                  : prev.settings,
+                payment:
+                  hasEmbeddedSettings || dbPayment
+                    ? prev.payment
+                    : serverState.payment
+                    ? { ...prev.payment, ...serverState.payment }
+                    : prev.payment,
                 predefinedTeams: Array.isArray(serverState.predefinedTeams) ? serverState.predefinedTeams : prev.predefinedTeams,
                 teamFormationMode: serverState.teamFormationMode || prev.teamFormationMode,
               }));
             }
           })
           .catch(() => {});
+
+        // Reconcile server form config ONLY if Supabase had no form config row yet
+        if (!cfg) {
+          fetch(`/api/forms/${seasonSlug}?t=${Date.now()}`, { cache: 'no-store' })
+            .then(async (res) => {
+              if (!res.ok) return null;
+              const text = await res.text().catch(() => '');
+              try { return text ? JSON.parse(text) : null; } catch { return null; }
+            })
+            .then((serverForm) => {
+              if (serverForm && serverForm.fields) {
+                setFormConfig(serverForm);
+              }
+            })
+            .catch(() => {});
+        }
       } else {
         // Fallback to local server state only if Supabase is not configured
-        fetch('/api/tournament/state')
+        fetch(`/api/tournament/state?t=${Date.now()}`, { cache: 'no-store' })
           .then(async (res) => {
             if (!res.ok) return null;
             const text = await res.text().catch(() => '');
@@ -355,6 +426,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               setState((prev) => ({
                 ...prev,
                 settings: serverState.settings ? { ...prev.settings, ...serverState.settings } : prev.settings,
+                payment: serverState.payment ? { ...prev.payment, ...serverState.payment } : prev.payment,
                 players: Array.isArray(serverState.players) ? serverState.players : prev.players,
                 teams: Array.isArray(serverState.teams) ? serverState.teams : prev.teams,
                 matches: Array.isArray(serverState.matches) ? serverState.matches : prev.matches,
@@ -365,21 +437,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }
           })
           .catch(() => {});
-      }
 
-      // Reconcile server form config
-      fetch(`/api/forms/${seasonSlug}`)
-        .then(async (res) => {
-          if (!res.ok) return null;
-          const text = await res.text().catch(() => '');
-          try { return text ? JSON.parse(text) : null; } catch { return null; }
-        })
-        .then((serverForm) => {
-          if (serverForm && serverForm.fields) {
-            setFormConfig(serverForm);
-          }
-        })
-        .catch(() => {});
+        // Reconcile server form config
+        fetch(`/api/forms/${seasonSlug}?t=${Date.now()}`, { cache: 'no-store' })
+          .then(async (res) => {
+            if (!res.ok) return null;
+            const text = await res.text().catch(() => '');
+            try { return text ? JSON.parse(text) : null; } catch { return null; }
+          })
+          .then((serverForm) => {
+            if (serverForm && serverForm.fields) {
+              setFormConfig(serverForm);
+            }
+          })
+          .catch(() => {});
+      }
 
       // Reconcile server tokens
       fetch(`/api/tokens/${seasonSlug}`)
@@ -743,9 +815,30 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onFormConfigChange: (payload) => {
-          if (payload.new && payload.new.fields_json) {
+          if (payload.new) {
             SupabaseService.fetchFormConfig(seasonSlug).then((cfg) => {
-              if (cfg) setFormConfig(cfg);
+              if (!cfg) return;
+              if (Array.isArray(cfg.fields) && cfg.fields.length > 0) {
+                setFormConfig(cfg);
+              }
+              const extracted = SupabaseService.extractTournamentSettingsFromConfig(cfg);
+              if (extracted.settings || extracted.payment) {
+                setState((prev) => ({
+                  ...prev,
+                  settings: extracted.settings
+                    ? {
+                        ...prev.settings,
+                        ...extracted.settings,
+                        scoringRules: extracted.settings.scoringRules
+                          ? { ...prev.settings.scoringRules, ...extracted.settings.scoringRules }
+                          : prev.settings.scoringRules,
+                      }
+                    : prev.settings,
+                  payment: extracted.payment
+                    ? { ...prev.payment, ...extracted.payment }
+                    : prev.payment,
+                }));
+              }
             });
           }
         },
@@ -843,6 +936,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               teams: Array.isArray(data.teams) && data.teams.length > 0 ? data.teams : prev.teams,
               knockout: data.knockout || prev.knockout,
               settings: data.settings ? { ...prev.settings, ...data.settings } : prev.settings,
+              payment: data.payment ? { ...prev.payment, ...data.payment } : prev.payment,
+            }));
+          }
+        } catch {}
+      });
+
+      eventSource.addEventListener('settings_updated', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data) {
+            if (data.lastUpdated) lastServerScoreTime.current = data.lastUpdated;
+            setState((prev) => ({
+              ...prev,
+              settings: data.settings ? { ...prev.settings, ...data.settings } : prev.settings,
+              payment: data.payment ? { ...prev.payment, ...data.payment } : prev.payment,
             }));
           }
         } catch {}
@@ -978,6 +1086,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               ? prev.teams.map((t) => (t.id === team.id ? { ...t, ...team } : t))
               : [...prev.teams, team],
           }));
+        } else if (event.data?.type === 'SETTINGS_UPDATED') {
+          const { settings, payment, lastUpdated } = event.data;
+          if (lastUpdated) lastServerScoreTime.current = lastUpdated;
+          setState((prev) => ({
+            ...prev,
+            settings: settings ? { ...prev.settings, ...settings } : prev.settings,
+            payment: payment ? { ...prev.payment, ...payment } : prev.payment,
+          }));
         }
       };
 
@@ -1079,68 +1195,130 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }, 400);
   };
 
-  // Settings
-  const updateSettings = (settingsUpdate: Partial<TournamentSettings>) => {
-    setState((prev) => {
-      const nextSettings = { ...prev.settings, ...settingsUpdate };
-      if (SupabaseService.isAvailable()) {
-        SupabaseService.updateTournamentSettings(
-          prev.registrationSettings.seasonSlug || 'season-4',
-          {
-            tournamentName: nextSettings.name,
-            venue: nextSettings.venue,
-            date: nextSettings.date,
-            entryFee: nextSettings.entryFee,
-            maxSlots: nextSettings.slotLimit,
-          }
-        ).catch(() => {});
-        SupabaseService.logAudit('settings_updated', 'settings', undefined, settingsUpdate).catch(() => {});
+  // Settings (Atomic Supabase + Server Persistence & Multi-Device Broadcast)
+  const saveAllSettings = async (
+    settingsUpdate: Partial<TournamentSettings>,
+    paymentUpdate?: Partial<PaymentSettings>
+  ): Promise<{ success: boolean; error?: string }> => {
+    const current = stateRef.current;
+    const seasonSlug = current.registrationSettings.seasonSlug || 'season-4';
+
+    const nextSettings: TournamentSettings = {
+      ...current.settings,
+      ...settingsUpdate,
+      scoringRules: settingsUpdate.scoringRules
+        ? { ...(current.settings.scoringRules || { pointTarget: 21, setsToWin: 1, deuceEnabled: true, maxPointCap: 30, changeEndsAtInterval: true }), ...settingsUpdate.scoringRules }
+        : current.settings.scoringRules,
+    };
+
+    const nextPayment: PaymentSettings = paymentUpdate
+      ? { ...current.payment, ...paymentUpdate }
+      : current.payment;
+
+    // 1. Persist atomically to Supabase PostgreSQL first when configured
+    let savedConfigFromDb: RegistrationFormConfig | undefined;
+    if (SupabaseService.isAvailable()) {
+      const sbRes = await SupabaseService.saveTournamentConfig(
+        seasonSlug,
+        nextSettings,
+        paymentUpdate ? nextPayment : undefined
+      );
+      if (!sbRes.success) {
+        return {
+          success: false,
+          error: sbRes.error || 'Failed to save tournament settings to Supabase database.',
+        };
       }
-      fetch('/api/tournament/state', {
+      savedConfigFromDb = sbRes.config;
+      SupabaseService.logAudit('settings_updated', 'settings', seasonSlug, {
+        settings: settingsUpdate,
+        hasPaymentUpdate: Boolean(paymentUpdate),
+      }).catch(() => {});
+    }
+
+    // 2. Sync to centralized Express backend & SSE broadcast
+    let serverError: string | undefined;
+    try {
+      const res = await fetch('/api/tournament/state', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ settings: nextSettings }),
-      }).catch(() => {});
+        body: JSON.stringify({
+          settings: nextSettings,
+          ...(paymentUpdate ? { payment: nextPayment } : {}),
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null);
+        serverError = errData?.error || `Server returned status ${res.status}`;
+      }
+    } catch (err: any) {
+      serverError = err?.message || 'Network error saving to backend server';
+    }
+
+    // If Supabase isn't configured, backend persistence is mandatory
+    if (!SupabaseService.isAvailable() && serverError) {
+      return { success: false, error: serverError };
+    }
+
+    const now = Date.now();
+    lastServerScoreTime.current = now;
+
+    // 3. Update local React state only after confirmed DB persistence
+    setState((prev) => ({
+      ...prev,
+      settings: nextSettings,
+      payment: nextPayment,
+    }));
+
+    setFormConfig((prev) => {
+      if (savedConfigFromDb) return savedConfigFromDb;
       return {
         ...prev,
-        settings: nextSettings,
+        tournamentName: nextSettings.name || prev.tournamentName,
+        seasonTitle: nextSettings.season ?? prev.seasonTitle,
+        venue: nextSettings.venue ?? prev.venue,
+        date: nextSettings.date ?? prev.date,
+        entryFee: nextSettings.entryFee ?? prev.entryFee,
+        maxSlots: nextSettings.slotLimit ?? prev.maxSlots,
+        appearance: {
+          ...prev.appearance,
+          tournamentSettings: nextSettings,
+        } as any,
+        payment: {
+          ...(prev.payment || {}),
+          enabled: nextPayment.enabled ?? prev.payment?.enabled ?? true,
+          isMandatory: nextPayment.isMandatory ?? prev.payment?.isMandatory ?? true,
+          baseFee: nextSettings.entryFee ?? prev.payment?.baseFee ?? 500,
+          upiId: nextPayment.upiId ?? prev.payment?.upiId ?? 'karan-hdfc@ybl',
+          accountName: nextPayment.accountName ?? prev.payment?.accountName ?? 'Smash Premier League (Karan Gaur)',
+          note: nextPayment.note ?? prev.payment?.note ?? 'SPL Tournament Entry Fee',
+        },
       };
     });
+
+    // 4. Broadcast instantaneously to other tabs on this browser
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const ch = new BroadcastChannel('spl_live_scores_channel');
+        ch.postMessage({
+          type: 'SETTINGS_UPDATED',
+          settings: nextSettings,
+          payment: nextPayment,
+          lastUpdated: now,
+        });
+        ch.close();
+      } catch {}
+    }
+
+    return { success: true };
+  };
+
+  const updateSettings = (settingsUpdate: Partial<TournamentSettings>) => {
+    return saveAllSettings(settingsUpdate, undefined);
   };
 
   const updatePaymentSettings = (paymentUpdate: Partial<PaymentSettings>) => {
-    setState((prev) => {
-      const nextPayment = { ...prev.payment, ...paymentUpdate };
-      if (SupabaseService.isAvailable()) {
-        SupabaseService.updateTournamentSettings(
-          prev.registrationSettings.seasonSlug || 'season-4',
-          undefined,
-          nextPayment
-        ).catch(() => {});
-        SupabaseService.logAudit('payment_settings_updated', 'settings', undefined, paymentUpdate).catch(() => {});
-      }
-      fetch('/api/tournament/state', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ payment: nextPayment }),
-      }).catch(() => {});
-      return {
-        ...prev,
-        payment: nextPayment,
-      };
-    });
-    setFormConfig((prev) => ({
-      ...prev,
-      payment: {
-        ...(prev.payment || {}),
-        enabled: paymentUpdate.enabled ?? prev.payment?.enabled ?? true,
-        isMandatory: prev.payment?.isMandatory ?? true,
-        baseFee: prev.payment?.baseFee ?? 500,
-        upiId: paymentUpdate.upiId ?? prev.payment?.upiId ?? 'karan-hdfc@ybl',
-        accountName: paymentUpdate.accountName ?? prev.payment?.accountName ?? 'Smash Premier League (Karan Gaur)',
-        note: paymentUpdate.note ?? prev.payment?.note ?? 'SPL Tournament Entry Fee',
-      },
-    }));
+    return saveAllSettings({}, paymentUpdate);
   };
 
   const updateRegistrationSettings = (settingsUpdate: Partial<RegistrationSettings>) => {
@@ -3124,6 +3302,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         testDbConnection,
         updateSettings,
         updatePaymentSettings,
+        saveAllSettings,
         updateRegistrationSettings,
         addPlayer,
         bulkAddPlayers,

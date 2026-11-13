@@ -9,7 +9,10 @@ import {
   RegistrationTokenRecord,
   PaymentStatus,
   StandingsRecord,
+  TournamentSettings,
+  PaymentSettings,
 } from '../types/tournament';
+import { createDefaultFormConfig } from '../utils/tournamentEngine';
 import {
   DbPlayer,
   DbTeam,
@@ -1041,13 +1044,75 @@ export class SupabaseService {
   }
 
   // ============================================================================
-  // 5. REGISTRATION FORM CONFIG & VERSIONS
+  // 5. REGISTRATION FORM CONFIG, TOURNAMENT SETTINGS & VERSIONS
   // ============================================================================
-  static async fetchFormConfig(seasonSlug = 'season-4'): Promise<RegistrationFormConfig | null> {
+  static mapDbFormRow(row: DbRegistrationFormConfig): RegistrationFormConfig {
+    const appJson = (row.appearance_json as any) || {};
+    const customUrlSlug = appJson.customUrlSlug || undefined;
+
+    return {
+      seasonSlug: row.season_slug,
+      customUrlSlug,
+      tournamentName: row.tournament_name,
+      seasonTitle: row.season_title,
+      deadline: row.deadline || undefined,
+      maxSlots: row.max_slots,
+      entryFee: row.entry_fee,
+      venue: row.venue || undefined,
+      date: row.date || undefined,
+      enabled: row.enabled,
+      closedNotice: row.closed_notice || undefined,
+      isPublished: row.is_published,
+      version: row.version || 1,
+      publishedAt: row.published_at ? new Date(row.published_at).getTime() : undefined,
+      lastUpdatedAt: new Date(row.updated_at).getTime(),
+      payment: row.payment_config_json as any,
+      appearance: appJson,
+      fields: row.fields_json || [],
+    };
+  }
+
+  static extractTournamentSettingsFromConfig(
+    config: RegistrationFormConfig | null
+  ): { settings?: Partial<TournamentSettings>; payment?: Partial<PaymentSettings> } {
+    if (!config) return {};
+    const appAny = (config.appearance as any) || {};
+    const embedded: Partial<TournamentSettings> = appAny.tournamentSettings || {};
+
+    const settings: Partial<TournamentSettings> = {
+      ...embedded,
+      ...(config.tournamentName ? { name: config.tournamentName } : {}),
+      ...(config.seasonTitle ? { season: config.seasonTitle } : {}),
+      ...(config.venue !== undefined ? { venue: config.venue } : {}),
+      ...(config.date !== undefined ? { date: config.date } : {}),
+      ...(config.entryFee != null && !Number.isNaN(Number(config.entryFee))
+        ? { entryFee: Number(config.entryFee) }
+        : {}),
+      ...(config.maxSlots != null && !Number.isNaN(Number(config.maxSlots))
+        ? { slotLimit: Number(config.maxSlots) }
+        : {}),
+    };
+
+    const rawPay = (config.payment as any) || null;
+    const payment: Partial<PaymentSettings> | undefined = rawPay
+      ? {
+          ...(rawPay.enabled !== undefined ? { enabled: Boolean(rawPay.enabled) } : {}),
+          ...(rawPay.isMandatory !== undefined ? { isMandatory: Boolean(rawPay.isMandatory) } : {}),
+          ...(rawPay.upiId !== undefined ? { upiId: String(rawPay.upiId) } : {}),
+          ...(rawPay.accountName !== undefined ? { accountName: String(rawPay.accountName) } : {}),
+          ...(rawPay.note !== undefined ? { note: String(rawPay.note) } : {}),
+          ...(rawPay.instructions !== undefined ? { instructions: String(rawPay.instructions) } : {}),
+          ...(rawPay.buttonText !== undefined ? { buttonText: String(rawPay.buttonText) } : {}),
+          ...(rawPay.categoryFees !== undefined ? { categoryFees: rawPay.categoryFees } : {}),
+        }
+      : undefined;
+
+    return { settings, payment };
+  }
+
+  static async fetchFormConfigRow(seasonSlug = 'season-4'): Promise<DbRegistrationFormConfig | null> {
     if (!this.isAvailable()) return null;
     try {
-      // 1. Try fetching exact slug match
-      let row: DbRegistrationFormConfig | null = null;
       const { data, error } = await supabase
         .from('registration_form_config')
         .select('*')
@@ -1055,58 +1120,46 @@ export class SupabaseService {
         .maybeSingle();
 
       if (!error && data) {
-        row = data as DbRegistrationFormConfig;
-      } else {
-        // Fallback to active published config
-        const { data: fallbackData } = await supabase
-          .from('registration_form_config')
-          .select('*')
-          .eq('is_published', true)
-          .order('updated_at', { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (fallbackData) {
-          row = fallbackData as DbRegistrationFormConfig;
-        } else {
-          // Fallback to default season-4
-          const { data: season4Data } = await supabase
-            .from('registration_form_config')
-            .select('*')
-            .eq('season_slug', 'season-4')
-            .maybeSingle();
-          if (season4Data) row = season4Data as DbRegistrationFormConfig;
-        }
+        return data as DbRegistrationFormConfig;
       }
 
-      if (!row) return null;
+      const { data: fallbackData } = await supabase
+        .from('registration_form_config')
+        .select('*')
+        .eq('is_published', true)
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-      const appJson = (row.appearance_json as any) || {};
-      const customUrlSlug = appJson.customUrlSlug || undefined;
+      if (fallbackData) {
+        return fallbackData as DbRegistrationFormConfig;
+      }
 
-      return {
-        seasonSlug: row.season_slug,
-        customUrlSlug,
-        tournamentName: row.tournament_name,
-        seasonTitle: row.season_title,
-        deadline: row.deadline || undefined,
-        maxSlots: row.max_slots,
-        entryFee: row.entry_fee,
-        venue: row.venue || undefined,
-        date: row.date || undefined,
-        enabled: row.enabled,
-        closedNotice: row.closed_notice || undefined,
-        isPublished: row.is_published,
-        version: row.version || 1,
-        publishedAt: row.published_at ? new Date(row.published_at).getTime() : undefined,
-        lastUpdatedAt: new Date(row.updated_at).getTime(),
-        payment: row.payment_config_json as any,
-        appearance: appJson,
-        fields: row.fields_json || [],
-      };
+      const { data: season4Data } = await supabase
+        .from('registration_form_config')
+        .select('*')
+        .eq('season_slug', 'season-4')
+        .maybeSingle();
+
+      if (season4Data) return season4Data as DbRegistrationFormConfig;
+
+      const { data: anyRow } = await supabase
+        .from('registration_form_config')
+        .select('*')
+        .order('updated_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      return (anyRow as unknown as DbRegistrationFormConfig) || null;
     } catch {
       return null;
     }
+  }
+
+  static async fetchFormConfig(seasonSlug = 'season-4'): Promise<RegistrationFormConfig | null> {
+    const row = await this.fetchFormConfigRow(seasonSlug);
+    if (!row) return null;
+    return this.mapDbFormRow(row);
   }
 
   static async saveFormConfig(config: RegistrationFormConfig, publish = false): Promise<boolean> {
@@ -1115,18 +1168,33 @@ export class SupabaseService {
       const slug = config.seasonSlug || 'season-4';
       const now = new Date().toISOString();
 
-      // Get current version number
       const { data } = await supabase
         .from('registration_form_config')
-        .select('version')
+        .select('id, version, appearance_json, published_at')
         .eq('season_slug', slug)
         .maybeSingle();
 
       const existing = data as any;
+      const existingId = existing?.id || slug;
       const nextVersion = existing ? (existing.version || 1) + 1 : 1;
 
-      const payload = {
-        id: slug,
+      // Preserve persisted tournamentSettings metadata inside appearance_json
+      const existingTournamentSettings = existing?.appearance_json?.tournamentSettings;
+      const incomingTournamentSettings = (config.appearance as any)?.tournamentSettings;
+      const mergedAppearance = {
+        ...(config.appearance || {}),
+        ...(existingTournamentSettings || incomingTournamentSettings
+          ? {
+              tournamentSettings: {
+                ...(existingTournamentSettings || {}),
+                ...(incomingTournamentSettings || {}),
+              },
+            }
+          : {}),
+      };
+
+      const payload: Record<string, any> = {
+        id: existingId,
         season_slug: slug,
         tournament_name: config.tournamentName,
         season_title: config.seasonTitle,
@@ -1139,19 +1207,26 @@ export class SupabaseService {
         closed_notice: config.closedNotice || null,
         is_published: publish ? true : config.isPublished,
         payment_config_json: config.payment || {},
-        appearance_json: config.appearance || {},
+        appearance_json: mergedAppearance,
         fields_json: config.fields || [],
         version: nextVersion,
-        published_at: publish ? now : undefined,
         updated_at: now,
       };
 
-      const { error } = await supabase.from('registration_form_config').upsert(payload as any);
+      if (publish) {
+        payload.published_at = now;
+      } else if (existing?.published_at) {
+        payload.published_at = existing.published_at;
+      }
+
+      const formTable = supabase.from('registration_form_config') as any;
+      const { error } = existing
+        ? await formTable.update(payload).eq('id', existingId)
+        : await formTable.upsert(payload, { onConflict: 'season_slug' });
 
       if (!error) {
-        // Record version snapshot in audit table
         await supabase.from('registration_form_versions').insert({
-          form_config_id: slug,
+          form_config_id: existingId,
           season_slug: slug,
           version_num: nextVersion,
           snapshot_json: config as any,
@@ -1166,41 +1241,191 @@ export class SupabaseService {
     }
   }
 
+  static async saveTournamentConfig(
+    seasonSlug = 'season-4',
+    settingsUpdate?: Partial<TournamentSettings>,
+    paymentUpdate?: Partial<PaymentSettings>
+  ): Promise<{
+    success: boolean;
+    error?: string;
+    config?: RegistrationFormConfig;
+    settings?: Partial<TournamentSettings>;
+    payment?: Partial<PaymentSettings>;
+  }> {
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Supabase credentials are not configured.' };
+    }
+
+    try {
+      const targetSlug = seasonSlug || 'season-4';
+      const existingRow = await this.fetchFormConfigRow(targetSlug);
+      const existingConfig = existingRow ? this.mapDbFormRow(existingRow) : null;
+      const existingExtracted = this.extractTournamentSettingsFromConfig(existingConfig);
+      const defaultForm = createDefaultFormConfig(targetSlug);
+      const now = new Date().toISOString();
+
+      const mergedSettings: Partial<TournamentSettings> = {
+        ...(existingExtracted.settings || {}),
+        ...(settingsUpdate || {}),
+      };
+
+      const existingPayment = (existingRow?.payment_config_json as any) || defaultForm.payment || {};
+      const mergedPaymentConfig = paymentUpdate
+        ? {
+            ...existingPayment,
+            ...paymentUpdate,
+            baseFee:
+              mergedSettings.entryFee != null
+                ? Number(mergedSettings.entryFee)
+                : existingPayment.baseFee ?? 500,
+          }
+        : {
+            ...existingPayment,
+            ...(mergedSettings.entryFee != null ? { baseFee: Number(mergedSettings.entryFee) } : {}),
+          };
+
+      const existingAppearance = (existingRow?.appearance_json as any) || defaultForm.appearance || {};
+      const mergedAppearance = {
+        ...existingAppearance,
+        tournamentSettings: mergedSettings,
+      };
+
+      const resolvedName =
+        (mergedSettings.name !== undefined ? String(mergedSettings.name).trim() : '') ||
+        existingRow?.tournament_name ||
+        defaultForm.tournamentName;
+      const resolvedSeason =
+        mergedSettings.season !== undefined
+          ? String(mergedSettings.season)
+          : existingRow?.season_title || defaultForm.seasonTitle;
+      const resolvedVenue =
+        mergedSettings.venue !== undefined
+          ? String(mergedSettings.venue)
+          : existingRow?.venue || defaultForm.venue || null;
+      const resolvedDate =
+        mergedSettings.date !== undefined
+          ? String(mergedSettings.date)
+          : existingRow?.date || defaultForm.date || null;
+      const resolvedEntryFee =
+        mergedSettings.entryFee != null && !Number.isNaN(Number(mergedSettings.entryFee))
+          ? Math.max(0, Math.round(Number(mergedSettings.entryFee)))
+          : existingRow?.entry_fee ?? 500;
+      const resolvedMaxSlots =
+        mergedSettings.slotLimit != null && !Number.isNaN(Number(mergedSettings.slotLimit))
+          ? Math.max(2, Math.round(Number(mergedSettings.slotLimit)))
+          : existingRow?.max_slots ?? 32;
+
+      mergedSettings.name = resolvedName;
+      mergedSettings.season = resolvedSeason;
+      mergedSettings.venue = resolvedVenue || '';
+      mergedSettings.date = resolvedDate || '';
+      mergedSettings.entryFee = resolvedEntryFee;
+      mergedSettings.slotLimit = resolvedMaxSlots;
+
+      if (existingRow) {
+        const updatePayload = {
+          tournament_name: resolvedName,
+          season_title: resolvedSeason,
+          venue: resolvedVenue,
+          date: resolvedDate,
+          entry_fee: resolvedEntryFee,
+          max_slots: resolvedMaxSlots,
+          payment_config_json: mergedPaymentConfig,
+          appearance_json: mergedAppearance,
+          updated_at: now,
+        };
+
+        const { data: savedRow, error } = await (supabase.from('registration_form_config') as any)
+          .update(updatePayload)
+          .eq('id', existingRow.id)
+          .select('*')
+          .single();
+
+        if (error || !savedRow) {
+          return {
+            success: false,
+            error: error?.message || 'Failed to persist tournament settings in Supabase.',
+          };
+        }
+
+        const savedConfig = this.mapDbFormRow(savedRow as DbRegistrationFormConfig);
+        const extracted = this.extractTournamentSettingsFromConfig(savedConfig);
+        return {
+          success: true,
+          config: savedConfig,
+          settings: extracted.settings,
+          payment: extracted.payment,
+        };
+      } else {
+        const insertPayload = {
+          id: targetSlug,
+          season_slug: targetSlug,
+          tournament_name: resolvedName,
+          season_title: resolvedSeason,
+          deadline: defaultForm.deadline ? new Date(defaultForm.deadline).toISOString() : null,
+          max_slots: resolvedMaxSlots,
+          entry_fee: resolvedEntryFee,
+          venue: resolvedVenue,
+          date: resolvedDate,
+          enabled: true,
+          closed_notice: defaultForm.closedNotice || null,
+          is_published: true,
+          payment_config_json: mergedPaymentConfig,
+          appearance_json: mergedAppearance,
+          fields_json: defaultForm.fields || [],
+          version: 1,
+          published_at: now,
+          updated_at: now,
+        };
+
+        const { data: savedRow, error } = await supabase
+          .from('registration_form_config')
+          .upsert(insertPayload as any, { onConflict: 'season_slug' })
+          .select('*')
+          .single();
+
+        if (error || !savedRow) {
+          return {
+            success: false,
+            error: error?.message || 'Failed to create tournament settings record in Supabase.',
+          };
+        }
+
+        const savedConfig = this.mapDbFormRow(savedRow as DbRegistrationFormConfig);
+        const extracted = this.extractTournamentSettingsFromConfig(savedConfig);
+        return {
+          success: true,
+          config: savedConfig,
+          settings: extracted.settings,
+          payment: extracted.payment,
+        };
+      }
+    } catch (e: any) {
+      return {
+        success: false,
+        error: e?.message || 'Unexpected error persisting settings to Supabase.',
+      };
+    }
+  }
+
   static async updateTournamentSettings(
     seasonSlug = 'season-4',
-    settingsUpdate?: Partial<{ tournamentName: string; venue: string; date: string; maxSlots: number; entryFee: number; status: string }>,
+    settingsUpdate?: Partial<{ tournamentName: string; seasonTitle: string; venue: string; date: string; maxSlots: number; entryFee: number; status: string }>,
     paymentUpdate?: any
   ): Promise<boolean> {
-    if (!this.isAvailable()) return false;
-    try {
-      const existing = await this.fetchFormConfig(seasonSlug);
-      const updatedConfig: RegistrationFormConfig = {
-        seasonSlug,
-        tournamentName: settingsUpdate?.tournamentName || existing?.tournamentName || 'Smash Premier League',
-        seasonTitle: existing?.seasonTitle || 'Season IV (Championship Edition)',
-        venue: settingsUpdate?.venue !== undefined ? settingsUpdate.venue : existing?.venue,
-        date: settingsUpdate?.date !== undefined ? settingsUpdate.date : existing?.date,
-        maxSlots: settingsUpdate?.maxSlots !== undefined ? settingsUpdate.maxSlots : (existing?.maxSlots ?? 32),
-        entryFee: settingsUpdate?.entryFee !== undefined ? settingsUpdate.entryFee : (existing?.entryFee ?? 500),
-        enabled: existing?.enabled ?? true,
-        isPublished: existing?.isPublished ?? true,
-        payment: paymentUpdate ? { ...(existing?.payment || {}), ...paymentUpdate } : (existing?.payment || { upiId: 'karan-hdfc@ybl', upiName: 'SPL Admin', qrUrl: '', instructions: '' }),
-        appearance: existing?.appearance || {
-          formTitle: 'Player Entry & Registration Form',
-          formDescription: 'Official Smash Premier League athlete entry form.',
-          welcomeMessage: 'Welcome athletes! Please fill in your details accurately.',
-          accentColor: '#10b981',
-          accentName: 'Emerald Green',
-          submitButtonText: 'Submit Registration & Confirm Entry',
-          successTitle: 'Registration Submitted Successfully!',
-          successMessage: 'Thank you for registering for Smash Premier League.',
-        },
-        fields: existing?.fields || [],
-      };
-      return await this.saveFormConfig(updatedConfig, false);
-    } catch {
-      return false;
-    }
+    const mappedSettings: Partial<TournamentSettings> | undefined = settingsUpdate
+      ? {
+          ...(settingsUpdate.tournamentName !== undefined ? { name: settingsUpdate.tournamentName } : {}),
+          ...(settingsUpdate.seasonTitle !== undefined ? { season: settingsUpdate.seasonTitle } : {}),
+          ...(settingsUpdate.venue !== undefined ? { venue: settingsUpdate.venue } : {}),
+          ...(settingsUpdate.date !== undefined ? { date: settingsUpdate.date } : {}),
+          ...(settingsUpdate.maxSlots !== undefined ? { slotLimit: settingsUpdate.maxSlots } : {}),
+          ...(settingsUpdate.entryFee !== undefined ? { entryFee: settingsUpdate.entryFee } : {}),
+        }
+      : undefined;
+
+    const res = await this.saveTournamentConfig(seasonSlug, mappedSettings, paymentUpdate);
+    return res.success;
   }
 
   static async saveCustomUrlSlug(slug: string, seasonSlug = 'season-4'): Promise<boolean> {

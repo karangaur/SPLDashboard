@@ -85,7 +85,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
             />
             <div className="min-w-0">
               <span className="block font-display text-sm sm:text-base md:text-lg font-black tracking-tight text-white truncate">
-                Smash Premier League
+                {state.settings.name || 'Smash Premier League'}
               </span>
               <span className="block text-[10px] sm:text-[11px] font-medium text-slate-400 truncate -mt-0.5">
                 {state.settings.season || 'Maharajganj Tournament Central'}

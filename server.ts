@@ -112,7 +112,7 @@ function createDefaultForm(seasonSlug = 'season-4') {
       upiId: 'karan-hdfc@ybl',
       accountName: 'Smash Premier League (Karan Gaur)',
       note: 'SPL Maharajganj Player Entry Fee',
-      instructions: 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm. Submit the 12-digit transaction UTR reference below for verification.',
+      instructions: 'Scan the QR code or tap the UPI button to pay via Google Pay, PhonePe, or Paytm.',
       buttonText: 'Pay Registration Fee',
       baseFee: 500,
       categoryFees: {
