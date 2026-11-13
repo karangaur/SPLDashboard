@@ -3,7 +3,6 @@ import {
   X,
   Minimize2,
   Maximize2,
-  ExternalLink,
   Radio,
   Clock,
   Film,
@@ -23,7 +22,6 @@ import type {
 import {
   YOUTUBE_VIDEO_ID_REGEX,
   getYouTubeEmbedUrl,
-  getYouTubeWatchUrl,
   resolveYouTubeLiveCtaState,
 } from '../../utils/youtube';
 
@@ -227,7 +225,6 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
   const playerMap = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
 
   const shouldAutoplay = config.status === 'live' || config.status === 'ended';
-  const watchUrl = useMemo(() => getYouTubeWatchUrl(config.videoId), [config.videoId]);
 
   // Completely unmount iframe whenever closed, disabled, or missing valid video ID
   if (!isOpen || !hasValidId || !cta.visible) {
@@ -346,18 +343,6 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {!isMinimized && watchUrl && (
-              <a
-                href={watchUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hidden sm:inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-xl text-xs font-bold text-slate-200 hover:text-white bg-white/[0.06] hover:bg-white/12 border border-white/10 transition-colors"
-              >
-                <span>Watch on YouTube</span>
-                <ExternalLink className="w-3.5 h-3.5 text-red-400 shrink-0" />
-              </a>
-            )}
-
             <button
               type="button"
               onClick={onToggleMinimize}
@@ -414,35 +399,22 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
             />
 
             {!isMinimized && (
-              <div className="px-4 py-3 sm:px-5 bg-[#0a0f1c] border-t border-white/10 flex flex-wrap items-center justify-between gap-2.5 text-xs">
-                <div className="flex items-center gap-2 text-slate-300 min-w-0">
-                  <Tv className="w-4 h-4 text-red-400 shrink-0" />
-                  <span className="truncate">
-                    {config.status === 'scheduled'
-                      ? 'Broadcast scheduled — live player updates automatically when stream starts.'
-                      : config.status === 'ended'
-                      ? 'Official SPL Championship Replay Broadcast'
-                      : 'Streaming live inside Smash Premier League 3.0 · Use player controls for HD & volume.'}
-                  </span>
-                </div>
-                {watchUrl && (
-                  <a
-                    href={watchUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="sm:hidden inline-flex items-center gap-1.5 px-3 py-2 min-h-[38px] rounded-xl text-xs font-bold text-white bg-red-600/25 border border-red-500/40"
-                  >
-                    <span>Watch on YouTube</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
+              <div className="px-4 py-3 sm:px-5 bg-[#0a0f1c] border-t border-white/10 flex items-center gap-2 text-xs text-slate-300 min-w-0">
+                <Tv className="w-4 h-4 text-red-400 shrink-0" />
+                <span className="truncate">
+                  {config.status === 'scheduled'
+                    ? 'Broadcast scheduled — live player updates automatically when stream starts.'
+                    : config.status === 'ended'
+                    ? 'Official SPL Championship Replay Broadcast'
+                    : 'Streaming live inside Smash Premier League 3.0 · Use player controls for HD & volume.'}
+                </span>
               </div>
             )}
           </div>
 
           {/* Minimized Compact Live Score Ticker */}
           {isMinimized && activeMatch && (
-            <div className="px-3 py-2 bg-[#0b101d] border-t border-white/10 flex items-center justify-between gap-2 text-[11px]">
+            <div className="px-3 py-2 bg-[#0b101d] border-t border-white/10 flex items-center gap-2 text-[11px]">
               <div className="flex items-center gap-1.5 min-w-0 font-bold text-white truncate">
                 <span
                   className={`w-1.5 h-1.5 rounded-full shrink-0 ${
@@ -461,17 +433,6 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
                 </span>
                 <span className="truncate">{activeTeamB?.name || 'Team B'}</span>
               </div>
-              {watchUrl && (
-                <a
-                  href={watchUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Watch on YouTube"
-                  className="text-slate-400 hover:text-white shrink-0"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
             </div>
           )}
 
