@@ -870,12 +870,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return;
       }
       fallbackPollInterval = setInterval(() => {
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+          return;
+        }
         if (!isDisposed && !currentChannelHealthy && (typeof navigator === 'undefined' || navigator.onLine)) {
           void reconcileAuthoritativeData();
         } else {
           clearFallbackPolling();
         }
-      }, 4000);
+      }, 5000);
     };
 
     const normalizeStatus = (s: any): KnockoutMatch['status'] =>

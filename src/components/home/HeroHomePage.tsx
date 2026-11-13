@@ -79,6 +79,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     setIsLivestreamMinimized(false);
   }, [livestreamCta.visible]);
 
+  const handleCloseLivestream = useCallback(() => {
+    setIsLivestreamOpen(false);
+    setIsLivestreamMinimized(false);
+  }, []);
+
+  const handleToggleMinimizeLivestream = useCallback(() => {
+    setIsLivestreamMinimized((prev) => !prev);
+  }, []);
+
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -1007,16 +1016,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
         config={youtubeLiveConfig}
         isOpen={isLivestreamOpen}
         isMinimized={isLivestreamMinimized}
-        onClose={() => {
-          setIsLivestreamOpen(false);
-          setIsLivestreamMinimized(false);
-        }}
-        onToggleMinimize={() => setIsLivestreamMinimized((prev) => !prev)}
+        onClose={handleCloseLivestream}
+        onToggleMinimize={handleToggleMinimizeLivestream}
         matches={allPublicMatches}
         teams={state.teams}
         players={state.players}
         courtNames={state.settings.courtNames}
         scoringRules={state.settings.scoringRules}
+        realtimeStatus={realtimeStatus}
+        onRetryRealtime={reconnectRealtime}
       />
 
     </div>

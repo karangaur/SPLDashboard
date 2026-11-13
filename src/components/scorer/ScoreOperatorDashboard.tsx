@@ -134,6 +134,22 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     const isKo = (activeMatch as any).isKnockout;
     const currentScore = team === 'A' ? (activeMatch.scoreA ?? 0) : (activeMatch.scoreB ?? 0);
     const newScore = Math.max(0, currentScore + delta);
+    const nextScoreA = team === 'A' ? newScore : (activeMatch.scoreA ?? 0);
+    const nextScoreB = team === 'B' ? newScore : (activeMatch.scoreB ?? 0);
+
+    const existingSets = Array.isArray(activeMatch.sets) ? activeMatch.sets : [];
+    const lastSet = existingSets.length > 0 ? existingSets[existingSets.length - 1] : undefined;
+    const syncedSets =
+      existingSets.length > 0 && lastSet && !lastSet.isCompleted
+        ? [
+            ...existingSets.slice(0, -1),
+            {
+              ...lastSet,
+              scoreA: nextScoreA,
+              scoreB: nextScoreB,
+            },
+          ]
+        : undefined;
 
     if (delta > 0) {
       sportsAudio.playScorePing();
@@ -145,11 +161,13 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
       updateKnockoutMatch(activeMatch.id, {
         [team === 'A' ? 'scoreA' : 'scoreB']: newScore,
         status: 'live',
+        ...(syncedSets ? { sets: syncedSets } : {}),
       });
     } else {
       updateMatch(activeMatch.id, {
         [team === 'A' ? 'scoreA' : 'scoreB']: newScore,
         status: 'live',
+        ...(syncedSets ? { sets: syncedSets } : {}),
       });
     }
   };
@@ -184,9 +202,9 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     const isKo = (activeMatch as any).isKnockout;
     sportsAudio.playButtonClick();
     if (isKo) {
-      updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
+      updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined, sets: [] });
     } else {
-      updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
+      updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined, sets: [] });
     }
   };
 
