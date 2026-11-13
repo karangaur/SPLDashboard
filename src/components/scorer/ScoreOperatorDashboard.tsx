@@ -55,6 +55,8 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
   const [playerSearch, setPlayerSearch] = useState('');
   const [playerCategoryFilter, setPlayerCategoryFilter] = useState('all');
 
+  const [confirmHeaderReset, setConfirmHeaderReset] = useState(false);
+
   // Combined matches list
   const matches = useMemo(() => {
     return state.matches || [];
@@ -64,46 +66,53 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     return state.knockout?.matches || [];
   }, [state.knockout?.matches]);
 
+  const formatMatchStageLabel = (m: any) => {
+    if (m?.isKnockout) {
+      if (m.stage === 'F') return 'Grand Final';
+      if (m.stage === 'SF') return `Semi-Final ${m.slot || 1}`;
+      return `Quarter-Final ${m.slot || 1}`;
+    }
+    return `Round ${m?.round || 1}`;
+  };
+
+  // Unified selectable matches across League & Knockout stages
+  const allSelectableMatches = useMemo(() => {
+    const normalizedKnockouts = knockoutMatches.map((km) => ({
+      ...km,
+      isKnockout: true,
+      round: km.stage === 'F' ? 99 : km.stage === 'SF' ? 90 : 80,
+      court: km.court || 1,
+    }));
+    // Keep knockouts & league matches both accessible across all status filters
+    return [...normalizedKnockouts, ...matches];
+  }, [matches, knockoutMatches]);
+
   // Filtered matches
   const filteredMatches = useMemo(() => {
     if (matchTypeFilter === 'knockout') {
-      return knockoutMatches.map((km) => ({
-        ...km,
-        isKnockout: true,
-        round: km.stage === 'F' ? 99 : km.stage === 'SF' ? 90 : 80,
-        court: km.court || 1,
-      }));
+      return allSelectableMatches.filter((m) => (m as any).isKnockout);
     }
 
-    return matches.filter((m) => {
+    return allSelectableMatches.filter((m) => {
       if (matchTypeFilter === 'live') return m.status === 'live';
-      if (matchTypeFilter === 'upcoming') return m.status === 'upcoming';
+      if (matchTypeFilter === 'upcoming') return m.status === 'upcoming' || m.status === 'paused';
       if (matchTypeFilter === 'completed') return m.status === 'completed';
       return true;
     });
-  }, [matches, knockoutMatches, matchTypeFilter]);
+  }, [allSelectableMatches, matchTypeFilter]);
 
   // Selected match for live scoring
   const activeMatch = useMemo(() => {
     if (!selectedMatchId) {
-      // Auto-select first live match, or first match overall
-      const live = matches.find((m) => m.status === 'live');
+      // Auto-select first live match (including knockout matches), or first available match
+      const live = allSelectableMatches.find((m) => m.status === 'live');
       if (live) return live;
-      return matches[0] || null;
+      return matches[0] || allSelectableMatches[0] || null;
     }
-    const foundGroup = matches.find((m) => m.id === selectedMatchId);
-    if (foundGroup) return foundGroup;
-    const foundKo = knockoutMatches.find((m) => m.id === selectedMatchId);
-    if (foundKo) {
-      return {
-        ...foundKo,
-        isKnockout: true,
-        round: foundKo.stage === 'F' ? 99 : foundKo.stage === 'SF' ? 90 : 80,
-        court: foundKo.court || 1,
-      } as any;
-    }
-    return matches[0] || null;
-  }, [matches, knockoutMatches, selectedMatchId]);
+    const found = allSelectableMatches.find((m) => m.id === selectedMatchId);
+    if (found) return found;
+    return allSelectableMatches.find((m) => m.status === 'live') || matches[0] || allSelectableMatches[0] || null;
+  }, [allSelectableMatches, matches, selectedMatchId]);
 
   // Helpers to get team info
   const getTeamName = (teamId?: string) => {
@@ -163,17 +172,21 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     }
   };
 
-  // Reset current match score
+  // Reset current match score (two-click inline confirmation avoids iframe window.confirm blocks)
   const handleResetScores = () => {
     if (!activeMatch) return;
+    if (!confirmHeaderReset) {
+      setConfirmHeaderReset(true);
+      window.setTimeout(() => setConfirmHeaderReset(false), 4000);
+      return;
+    }
+    setConfirmHeaderReset(false);
     const isKo = (activeMatch as any).isKnockout;
-    if (confirm('Reset scores for this match to 0-0?')) {
-      sportsAudio.playButtonClick();
-      if (isKo) {
-        updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
-      } else {
-        updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
-      }
+    sportsAudio.playButtonClick();
+    if (isKo) {
+      updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
+    } else {
+      updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined });
     }
   };
 
@@ -397,7 +410,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                         }`}
                       >
                         <div className="flex items-center justify-between text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-1.5">
-                          <span>Court {m.court || 1} • Round {m.round}</span>
+                          <span>Court {m.court || 1} • {formatMatchStageLabel(m)}</span>
                           <span
                             className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${
                               m.status === 'live'
@@ -440,9 +453,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                         </span>
                         <span className="text-slate-600">•</span>
                         <span className="text-xs font-semibold text-slate-400">
-                          {(activeMatch as any).isKnockout
-                            ? `Knockout ${(activeMatch as any).stage}`
-                            : `Round ${activeMatch.round}`}
+                          {formatMatchStageLabel(activeMatch)}
                         </span>
                       </div>
                       <h2 className="text-xl sm:text-2xl font-black font-display text-white tracking-tight uppercase">
@@ -489,10 +500,15 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                     <button
                       type="button"
                       onClick={handleResetScores}
-                      className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                      title="Reset match scores to 0-0"
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors ${
+                        confirmHeaderReset
+                          ? 'bg-rose-500 text-white hover:bg-rose-400'
+                          : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
+                      }`}
+                      title={confirmHeaderReset ? 'Click again to confirm reset to 0-0' : 'Reset match scores to 0-0'}
                     >
                       <RefreshCw className="w-4 h-4" />
+                      {confirmHeaderReset && <span>Confirm 0-0</span>}
                     </button>
                   </div>
                 </div>
