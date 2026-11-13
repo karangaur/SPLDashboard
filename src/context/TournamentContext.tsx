@@ -17,6 +17,7 @@ import {
   PaymentStatus,
   HeroConfig,
   HeroVersionRecord,
+  YouTubeLiveConfig,
 } from '../types/tournament';
 import {
   STORAGE_KEY,
@@ -32,6 +33,10 @@ import {
   normalizeHeroConfig,
   cloneHeroConfig,
 } from '../utils/heroDefaults';
+import {
+  DEFAULT_YOUTUBE_LIVE_CONFIG,
+  normalizeYouTubeLiveConfig,
+} from '../utils/youtube';
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
 import { AuthService } from '../services/authService';
@@ -174,6 +179,13 @@ interface TournamentContextType {
     versionRecord: HeroVersionRecord
   ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
 
+  // YouTube Live Streaming Integration
+  youtubeLiveConfig: YouTubeLiveConfig;
+  saveYouTubeLiveConfig: (
+    config: YouTubeLiveConfig
+  ) => Promise<{ success: boolean; config?: YouTubeLiveConfig; error?: string }>;
+  refreshYouTubeLiveConfig: () => Promise<YouTubeLiveConfig | null>;
+
   // Global actions
   resetToDefault: () => void;
   clearTournamentData: () => void;
@@ -302,6 +314,29 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setPublishedHeroConfig(normalized);
     try {
       localStorage.setItem('spl_hero_published_cache_season-4', JSON.stringify(normalized));
+    } catch {}
+  }, []);
+
+  const [youtubeLiveConfig, setYoutubeLiveConfig] = useState<YouTubeLiveConfig>(() => {
+    try {
+      const cached = localStorage.getItem('spl_youtube_live_cache_season-4');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && typeof parsed === 'object') {
+          return normalizeYouTubeLiveConfig(parsed);
+        }
+      }
+    } catch {}
+    return { ...DEFAULT_YOUTUBE_LIVE_CONFIG };
+  });
+  const youtubeGuardRef = useRef<number>(0);
+
+  const applyYoutubeLiveConfig = useCallback((rawConfig: Partial<YouTubeLiveConfig> | null | undefined) => {
+    if (!rawConfig || typeof rawConfig !== 'object') return;
+    const normalized = normalizeYouTubeLiveConfig(rawConfig);
+    setYoutubeLiveConfig(normalized);
+    try {
+      localStorage.setItem('spl_youtube_live_cache_season-4', JSON.stringify(normalized));
     } catch {}
   }, []);
   const [isRegistrationStatusHydrated, setIsRegistrationStatusHydrated] = useState<boolean>(false);
@@ -532,6 +567,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 })
                 .catch(() => {});
             }
+
+            const isYoutubeGuardActive = Date.now() - youtubeGuardRef.current < 2500;
+            if (!isYoutubeGuardActive && (cfg?.appearance as any)?.youtubeLive) {
+              applyYoutubeLiveConfig((cfg?.appearance as any).youtubeLive);
+            } else if (!isYoutubeGuardActive && !cfg) {
+              fetch(`/api/livestream?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+                .then((r) => (r.ok ? r.json() : null))
+                .then((d) => {
+                  if (d?.config && !isDisposed) applyYoutubeLiveConfig(d.config);
+                })
+                .catch(() => {});
+            }
             const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const resolvedEnabled =
               isRegGuardActive
@@ -755,6 +802,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               .then((data) => {
                 if (data?.heroConfig && !isDisposed && Date.now() - heroPublishGuardRef.current >= 2500) {
                   applyPublishedHeroConfig(data.heroConfig);
+                }
+              })
+              .catch(() => {});
+
+            fetch(`/api/livestream?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+              .then((res) => (res.ok ? res.json() : null))
+              .then((data) => {
+                if (data?.config && !isDisposed && Date.now() - youtubeGuardRef.current >= 2500) {
+                  applyYoutubeLiveConfig(data.config);
                 }
               })
               .catch(() => {});
@@ -1273,10 +1329,28 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             applyPublishedHeroConfig((row.appearance_json as any).heroPublished);
           }
 
+          if (
+            Date.now() - youtubeGuardRef.current >= 2500 &&
+            (row.appearance_json as any)?.youtubeLive
+          ) {
+            const incomingYt = normalizeYouTubeLiveConfig((row.appearance_json as any).youtubeLive);
+            applyYoutubeLiveConfig(incomingYt);
+            if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+              try {
+                const ych = new BroadcastChannel('spl_livestream_channel');
+                ych.postMessage({ type: 'LIVESTREAM_UPDATED', config: incomingYt, seasonSlug });
+                ych.close();
+              } catch {}
+            }
+          }
+
           SupabaseService.fetchFormConfig(seasonSlug).then((cfg) => {
             if (!cfg || isDisposed) return;
             if (Date.now() - heroPublishGuardRef.current >= 2500 && (cfg.appearance as any)?.heroPublished) {
               applyPublishedHeroConfig((cfg.appearance as any).heroPublished);
+            }
+            if (Date.now() - youtubeGuardRef.current >= 2500 && (cfg.appearance as any)?.youtubeLive) {
+              applyYoutubeLiveConfig((cfg.appearance as any).youtubeLive);
             }
             const guardStillActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const resolvedEnabled = guardStillActive ? regToggleGuardRef.current.enabled : cfg.enabled !== false;
@@ -1571,12 +1645,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         } catch {}
       });
 
+      eventSource.addEventListener('livestream_updated', (event: MessageEvent) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data?.config && Date.now() - youtubeGuardRef.current >= 2500) {
+            applyYoutubeLiveConfig(data.config);
+          }
+        } catch {}
+      });
+
       eventSource.addEventListener('form_published', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
           if (data && data.config) {
             if ((data.config.appearance as any)?.heroPublished && Date.now() - heroPublishGuardRef.current >= 2500) {
               applyPublishedHeroConfig((data.config.appearance as any).heroPublished);
+            }
+            if ((data.config.appearance as any)?.youtubeLive && Date.now() - youtubeGuardRef.current >= 2500) {
+              applyYoutubeLiveConfig((data.config.appearance as any).youtubeLive);
             }
             const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const effectiveEnabled = isRegGuardActive
@@ -1669,12 +1755,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     let liveChannel: BroadcastChannel | null = null;
     let formChannel: BroadcastChannel | null = null;
     let heroChannel: BroadcastChannel | null = null;
+    let livestreamChannel: BroadcastChannel | null = null;
     let regChannel: BroadcastChannel | null = null;
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
       liveChannel = new BroadcastChannel('spl_live_scores_channel');
       formChannel = new BroadcastChannel('spl_form_config_channel');
       heroChannel = new BroadcastChannel('spl_hero_config_channel');
+      livestreamChannel = new BroadcastChannel('spl_livestream_channel');
       regChannel = new BroadcastChannel('spl_registrations_channel');
 
       regChannel.onmessage = (event) => {
@@ -1709,6 +1797,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       heroChannel.onmessage = (event) => {
         if (event.data?.type === 'HERO_PUBLISHED' && event.data.heroConfig) {
           applyPublishedHeroConfig(event.data.heroConfig);
+        }
+      };
+
+      livestreamChannel.onmessage = (event) => {
+        if (event.data?.type === 'LIVESTREAM_UPDATED' && event.data.config) {
+          applyYoutubeLiveConfig(event.data.config);
         }
       };
 
@@ -1867,6 +1961,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       liveChannel?.close();
       formChannel?.close();
       heroChannel?.close();
+      livestreamChannel?.close();
       regChannel?.close();
       unsubMaster?.();
     };
@@ -4572,6 +4667,39 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     [publishHeroConfig]
   );
 
+  const refreshYouTubeLiveConfig = useCallback(async () => {
+    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+    try {
+      const latest = await SupabaseService.fetchYouTubeLiveConfig(seasonSlug);
+      applyYoutubeLiveConfig(latest);
+      return latest;
+    } catch {
+      return null;
+    }
+  }, [applyYoutubeLiveConfig]);
+
+  const saveYouTubeLiveConfig = useCallback(
+    async (config: YouTubeLiveConfig) => {
+      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const currentUser = AuthService.getCurrentUser();
+      const author = currentUser?.name || currentUser?.username || 'Tournament Director';
+      youtubeGuardRef.current = Date.now();
+      const res = await SupabaseService.saveYouTubeLiveConfig(config, author, seasonSlug);
+      if (res.success && res.config) {
+        applyYoutubeLiveConfig(res.config);
+        if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+          try {
+            const ych = new BroadcastChannel('spl_livestream_channel');
+            ych.postMessage({ type: 'LIVESTREAM_UPDATED', config: res.config, seasonSlug });
+            ych.close();
+          } catch {}
+        }
+      }
+      return res;
+    },
+    [applyYoutubeLiveConfig]
+  );
+
   return (
     <TournamentContext.Provider
       value={{
@@ -4655,6 +4783,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         saveHeroDraft,
         publishHeroConfig,
         restoreHeroVersion,
+        youtubeLiveConfig,
+        saveYouTubeLiveConfig,
+        refreshYouTubeLiveConfig,
       }}
     >
       {children}

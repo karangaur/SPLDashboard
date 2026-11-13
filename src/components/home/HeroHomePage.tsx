@@ -30,9 +30,11 @@ import { HeroSectionCanvas } from './HeroSectionCanvas';
 import { LiveMatchHero } from './LiveMatchHero';
 import { FixturesShowcaseSection } from './FixturesShowcaseSection';
 import { TeamsShowcaseSection } from './TeamsShowcaseSection';
+import { YouTubeLivePlayerModal } from './YouTubeLivePlayerModal';
 import { SPLLogo, SPLLogoEmblemSvg } from '../common/SPLLogo';
 import { Match, Player } from '../../types/tournament';
 import { AuthService } from '../../services/authService';
+import { resolveYouTubeLiveCtaState } from '../../utils/youtube';
 
 interface HeroHomePageProps {
   onOpenPublicRegister: () => void;
@@ -52,11 +54,30 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     reconnectRealtime,
     isRegistrationOpen,
     publishedHeroConfig,
+    youtubeLiveConfig,
   } = useTournament();
 
   const [detailMatchSnapshot, setDetailMatch] = useState<Match | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [isLivestreamOpen, setIsLivestreamOpen] = useState(false);
+  const [isLivestreamMinimized, setIsLivestreamMinimized] = useState(false);
+
+  const livestreamCta = useMemo(() => resolveYouTubeLiveCtaState(youtubeLiveConfig), [youtubeLiveConfig]);
+
+  // Automatically close & unmount player iframe if stream is disabled remotely
+  React.useEffect(() => {
+    if (!livestreamCta.visible && isLivestreamOpen) {
+      setIsLivestreamOpen(false);
+      setIsLivestreamMinimized(false);
+    }
+  }, [livestreamCta.visible, isLivestreamOpen]);
+
+  const handleOpenLivestream = useCallback(() => {
+    if (!livestreamCta.visible) return;
+    setIsLivestreamOpen(true);
+    setIsLivestreamMinimized(false);
+  }, [livestreamCta.visible]);
 
   React.useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -484,7 +505,29 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               </p>
             </div>
 
-            <div className="flex items-center gap-3 shrink-0 self-start sm:self-end">
+            <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0 self-start sm:self-end">
+              {livestreamCta.visible && (
+                <button
+                  type="button"
+                  onClick={handleOpenLivestream}
+                  className={`inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                    livestreamCta.mode === 'live'
+                      ? 'text-white bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-500 border border-red-400/70 shadow-[0_0_24px_rgba(239,68,68,0.55)]'
+                      : livestreamCta.mode === 'scheduled'
+                      ? 'text-amber-100 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/45'
+                      : 'text-indigo-100 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50'
+                  }`}
+                >
+                  {livestreamCta.mode === 'live' ? (
+                    <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse motion-reduce:animate-none shrink-0" />
+                  ) : (
+                    <Play className="w-3.5 h-3.5 shrink-0" />
+                  )}
+                  <span>{livestreamCta.label}</span>
+                  {livestreamCta.mode === 'live' && <Play className="w-3.5 h-3.5 fill-current shrink-0" />}
+                </button>
+              )}
+
               {liveMatchesCount > 0 ? (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0d0a14] border border-rose-500/40 text-rose-300 text-xs font-mono font-bold uppercase tracking-wider shadow-lg shadow-rose-950/30">
                   <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
@@ -511,6 +554,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             onRetryRealtime={reconnectRealtime}
             onOpenMatchModal={handleOpenMatchModal}
             onGoToFixtures={handleGoToFixtures}
+            youtubeLiveConfig={youtubeLiveConfig}
+            onWatchLive={handleOpenLivestream}
           />
         </section>
 
@@ -956,6 +1001,23 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           </div>
         </div>
       )}
+
+      {/* Embedded YouTube Live Broadcast Theater + Live Scoreboard Modal */}
+      <YouTubeLivePlayerModal
+        config={youtubeLiveConfig}
+        isOpen={isLivestreamOpen}
+        isMinimized={isLivestreamMinimized}
+        onClose={() => {
+          setIsLivestreamOpen(false);
+          setIsLivestreamMinimized(false);
+        }}
+        onToggleMinimize={() => setIsLivestreamMinimized((prev) => !prev)}
+        matches={allPublicMatches}
+        teams={state.teams}
+        players={state.players}
+        courtNames={state.settings.courtNames}
+        scoringRules={state.settings.scoringRules}
+      />
 
     </div>
   );

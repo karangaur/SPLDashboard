@@ -13,6 +13,11 @@ import {
   sanitizeSvgMarkup,
   sanitizePlainText,
 } from './src/utils/heroDefaults';
+import {
+  DEFAULT_YOUTUBE_LIVE_CONFIG,
+  normalizeYouTubeLiveConfig,
+  extractYouTubeVideoId,
+} from './src/utils/youtube';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -55,6 +60,7 @@ const AUTH_FILE = path.join(DATA_DIR, 'admin_auth.json');
 const TOURNAMENT_FILE = path.join(DATA_DIR, 'tournament_state.json');
 const HERO_FILE = path.join(DATA_DIR, 'hero_config.json');
 const HERO_MEDIA_DIR = path.join(DATA_DIR, 'hero-media');
+const LIVESTREAM_FILE = path.join(DATA_DIR, 'youtube_live.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -829,6 +835,7 @@ async function startServer() {
           ...(existingApp.heroDraft ? { heroDraft: existingApp.heroDraft } : {}),
           ...(existingApp.heroLastPublishedAt ? { heroLastPublishedAt: existingApp.heroLastPublishedAt } : {}),
           ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
+          ...(existingApp.youtubeLive ? { youtubeLive: existingApp.youtubeLive } : {}),
           ...(existingApp.tournamentSettings && !updated.appearance?.tournamentSettings
             ? { tournamentSettings: existingApp.tournamentSettings }
             : {}),
@@ -3113,6 +3120,123 @@ async function startServer() {
       success: true,
       published: publishedConfig,
       version: versionRecord,
+    });
+  });
+
+  // Public & Admin YouTube Live Stream Configuration Endpoints
+  app.get('/api/livestream', async (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const seasonSlug = String(req.query.season || 'season-4');
+    if (serverSupabase) {
+      try {
+        const row = await fetchServerSupabaseFormRow(seasonSlug);
+        const rawLive = (row?.appearance_json as any)?.youtubeLive;
+        if (rawLive && typeof rawLive === 'object') {
+          return res.json({
+            config: normalizeYouTubeLiveConfig(rawLive),
+            source: 'supabase',
+          });
+        }
+      } catch {}
+    }
+
+    const localCfg = normalizeYouTubeLiveConfig(
+      readJSON(LIVESTREAM_FILE, DEFAULT_YOUTUBE_LIVE_CONFIG)
+    );
+    return res.json({ config: localCfg, source: 'server' });
+  });
+
+  app.post('/api/livestream', async (req, res) => {
+    const auth = await verifyHeroAdminRequest(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+
+    const seasonSlug = String(req.body?.seasonSlug || 'season-4');
+    const rawConfig = req.body?.config;
+    if (!rawConfig || typeof rawConfig !== 'object') {
+      return res.status(400).json({ error: 'Invalid YouTube Live configuration payload.' });
+    }
+
+    const rawUrl = typeof rawConfig.videoUrl === 'string' ? rawConfig.videoUrl.trim() : '';
+    const extracted = rawUrl ? extractYouTubeVideoId(rawUrl) : null;
+    if (rawUrl && (!extracted || !extracted.valid)) {
+      return res.status(400).json({
+        error: extracted?.error || 'Invalid YouTube URL. Only official youtube.com or youtu.be URLs are permitted.',
+      });
+    }
+
+    if (rawConfig.enabled && (!extracted || !extracted.valid)) {
+      return res.status(400).json({
+        error: 'Provide a valid YouTube stream URL before enabling the Watch Live button.',
+      });
+    }
+
+    const author =
+      sanitizePlainText(req.body?.author || auth.adminName || 'Tournament Director', 80) ||
+      'Tournament Director';
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+
+    const sanitizedConfig = normalizeYouTubeLiveConfig({
+      ...rawConfig,
+      videoUrl: extracted?.valid ? extracted.normalizedUrl : '',
+      videoId: extracted?.valid ? extracted.videoId : '',
+      updatedAt: nowMs,
+      updatedBy: author,
+    });
+
+    if (serverSupabase) {
+      try {
+        const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+        if (existingRow) {
+          const existingApp = (existingRow.appearance_json as any) || {};
+          const mergedApp = {
+            ...existingApp,
+            youtubeLive: sanitizedConfig,
+          };
+          const { error: sbErr } = await serverSupabase
+            .from('registration_form_config')
+            .update({
+              appearance_json: mergedApp,
+              updated_at: nowIso,
+            })
+            .eq('id', existingRow.id);
+          if (sbErr) {
+            return res.status(500).json({ error: sbErr.message });
+          }
+
+          serverSupabase
+            .from('audit_logs')
+            .insert({
+              action: 'youtube_live_updated',
+              entity_type: 'livestream_config',
+              entity_id: existingRow.id,
+              user_email: author,
+              details_json: {
+                enabled: sanitizedConfig.enabled,
+                status: sanitizedConfig.status,
+                videoId: sanitizedConfig.videoId,
+                allowReplay: sanitizedConfig.allowReplay,
+              },
+            })
+            .then(() => {});
+        }
+      } catch (err: any) {
+        return res.status(500).json({ error: err?.message || 'Supabase livestream save failed.' });
+      }
+    }
+
+    writeJSON(LIVESTREAM_FILE, sanitizedConfig);
+
+    broadcastSse('livestream_updated', {
+      seasonSlug,
+      config: sanitizedConfig,
+    });
+
+    return res.json({
+      success: true,
+      config: sanitizedConfig,
     });
   });
 

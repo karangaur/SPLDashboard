@@ -13,9 +13,15 @@ import {
   PaymentSettings,
   HeroConfig,
   HeroVersionRecord,
+  YouTubeLiveConfig,
 } from '../types/tournament';
 import { createDefaultFormConfig } from '../utils/tournamentEngine';
 import { DEFAULT_HERO_CONFIG, normalizeHeroConfig, cloneHeroConfig } from '../utils/heroDefaults';
+import {
+  DEFAULT_YOUTUBE_LIVE_CONFIG,
+  normalizeYouTubeLiveConfig,
+  extractYouTubeVideoId,
+} from '../utils/youtube';
 import { AuthService } from './authService';
 import {
   DbPlayer,
@@ -1559,6 +1565,7 @@ export class SupabaseService {
         ...(existingApp.heroDraft ? { heroDraft: existingApp.heroDraft } : {}),
         ...(existingApp.heroLastPublishedAt ? { heroLastPublishedAt: existingApp.heroLastPublishedAt } : {}),
         ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
+        ...(existingApp.youtubeLive ? { youtubeLive: existingApp.youtubeLive } : {}),
         ...(existingTournamentSettings || incomingTournamentSettings
           ? {
               tournamentSettings: {
@@ -2605,6 +2612,135 @@ export class SupabaseService {
       };
     } catch (e: any) {
       return { success: false, error: e?.message || 'Media upload network error.' };
+    }
+  }
+
+  // ============================================================================
+  // 10. YOUTUBE LIVE STREAMING MANAGEMENT (SUPABASE PERSISTENCE + RBAC)
+  // ============================================================================
+  static extractYouTubeLiveFromRow(row: DbRegistrationFormConfig | null): YouTubeLiveConfig | null {
+    const raw = (row?.appearance_json as any)?.youtubeLive;
+    if (!raw || typeof raw !== 'object') return null;
+    return normalizeYouTubeLiveConfig(raw);
+  }
+
+  static extractYouTubeLiveFromConfig(cfg: RegistrationFormConfig | null): YouTubeLiveConfig | null {
+    const raw = (cfg?.appearance as any)?.youtubeLive;
+    if (!raw || typeof raw !== 'object') return null;
+    return normalizeYouTubeLiveConfig(raw);
+  }
+
+  static async fetchYouTubeLiveConfig(seasonSlug = 'season-4'): Promise<YouTubeLiveConfig> {
+    if (this.isAvailable()) {
+      try {
+        const row = await this.fetchFormConfigRow(seasonSlug);
+        const extracted = this.extractYouTubeLiveFromRow(row);
+        if (extracted) return extracted;
+      } catch {}
+    }
+
+    try {
+      const res = await fetch(`/api/livestream?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, {
+        cache: 'no-store',
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.config) {
+          return normalizeYouTubeLiveConfig(data.config);
+        }
+      }
+    } catch {}
+
+    return { ...DEFAULT_YOUTUBE_LIVE_CONFIG };
+  }
+
+  static async saveYouTubeLiveConfig(
+    input: Partial<YouTubeLiveConfig>,
+    author = 'Tournament Director',
+    seasonSlug = 'season-4'
+  ): Promise<{ success: boolean; config?: YouTubeLiveConfig; error?: string }> {
+    const rawUrl = typeof input.videoUrl === 'string' ? input.videoUrl.trim() : '';
+    const parsedUrl = rawUrl ? extractYouTubeVideoId(rawUrl) : null;
+
+    if (rawUrl && (!parsedUrl || !parsedUrl.valid)) {
+      return {
+        success: false,
+        error: parsedUrl?.error || 'Please enter a valid YouTube URL or 11-character Video ID.',
+      };
+    }
+
+    if (input.enabled && !parsedUrl?.valid) {
+      return {
+        success: false,
+        error: 'Provide a valid YouTube live stream URL before enabling the public Watch Live button.',
+      };
+    }
+
+    const sanitized = normalizeYouTubeLiveConfig({
+      ...input,
+      videoUrl: parsedUrl?.valid ? parsedUrl.normalizedUrl : '',
+      videoId: parsedUrl?.valid ? parsedUrl.videoId : '',
+      updatedAt: Date.now(),
+      updatedBy: author,
+    });
+
+    try {
+      const res = await fetch('/api/livestream', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...AuthService.getAuthHeader(),
+        },
+        body: JSON.stringify({ config: sanitized, author, seasonSlug }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success && data?.config) {
+        return { success: true, config: normalizeYouTubeLiveConfig(data.config) };
+      }
+      if (res.status === 400 || res.status === 401 || res.status === 403) {
+        return { success: false, error: data?.error || 'Unauthorized or invalid YouTube stream settings.' };
+      }
+    } catch {}
+
+    if (!AuthService.canManageTournament()) {
+      return { success: false, error: 'Unauthorized: Tournament Director or Super Admin required.' };
+    }
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Unable to save YouTube Live settings: database unreachable.' };
+    }
+
+    try {
+      const existingRow = await this.fetchFormConfigRow(seasonSlug);
+      if (!existingRow) {
+        return { success: false, error: 'Tournament configuration record not found in Supabase.' };
+      }
+      const nowIso = new Date().toISOString();
+      const existingApp = (existingRow.appearance_json as any) || {};
+      const mergedAppearance = {
+        ...existingApp,
+        youtubeLive: sanitized,
+      };
+      const { error } = await (supabase.from('registration_form_config') as any)
+        .update({
+          appearance_json: mergedAppearance,
+          updated_at: nowIso,
+        })
+        .eq('id', existingRow.id);
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+
+      void this.logAudit('youtube_live_updated', 'livestream_config', existingRow.id, {
+        status: sanitized.status,
+        enabled: sanitized.enabled,
+        videoId: sanitized.videoId,
+        allowReplay: sanitized.allowReplay,
+      });
+
+      return { success: true, config: sanitized };
+    } catch (e: any) {
+      return { success: false, error: e?.message || 'Failed to save YouTube Live settings.' };
     }
   }
 }

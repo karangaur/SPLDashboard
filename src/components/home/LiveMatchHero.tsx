@@ -6,8 +6,10 @@ import {
   Clock,
   Crown,
   Flame,
+  Film,
   Maximize2,
   PartyPopper,
+  Play,
   RefreshCw,
   RotateCcw,
   Sparkles,
@@ -15,9 +17,10 @@ import {
   WifiOff,
   Zap,
 } from 'lucide-react';
-import { Match, Team, Player, BadmintonScoringRules } from '../../types/tournament';
+import { Match, Team, Player, BadmintonScoringRules, YouTubeLiveConfig } from '../../types/tournament';
 import { RealtimeConnectionStatus } from '../../context/TournamentContext';
 import { DEFAULT_BADMINTON_RULES, evaluateSetStatus } from '../../utils/badmintonEngine';
+import { resolveYouTubeLiveCtaState } from '../../utils/youtube';
 
 interface LiveMatchHeroProps {
   matches: Match[];
@@ -30,6 +33,8 @@ interface LiveMatchHeroProps {
   onRetryRealtime?: () => void;
   onOpenMatchModal?: (match: Match) => void;
   onGoToFixtures?: () => void;
+  youtubeLiveConfig?: YouTubeLiveConfig;
+  onWatchLive?: () => void;
 }
 
 const SEMI_FINAL_PARTICLES = [
@@ -178,6 +183,8 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
   onRetryRealtime,
   onOpenMatchModal,
   onGoToFixtures,
+  youtubeLiveConfig,
+  onWatchLive,
 }) => {
   const effectiveRules = scoringRules || DEFAULT_BADMINTON_RULES;
 
@@ -1844,6 +1851,34 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
           </div>
 
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 sm:gap-3 w-full sm:w-auto">
+            {(() => {
+              const ytCta = resolveYouTubeLiveCtaState(youtubeLiveConfig);
+              if (!ytCta.visible || !onWatchLive) return null;
+              return (
+                <button
+                  type="button"
+                  onClick={onWatchLive}
+                  className={`w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2.5 min-h-[44px] rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
+                    ytCta.mode === 'live'
+                      ? 'text-white bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-500 border border-red-400/70 shadow-[0_0_24px_rgba(239,68,68,0.5)]'
+                      : ytCta.mode === 'scheduled'
+                      ? 'text-amber-100 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/45 shadow-md shadow-amber-950/30'
+                      : 'text-indigo-100 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50 shadow-md shadow-indigo-950/30'
+                  }`}
+                >
+                  {ytCta.mode === 'live' ? (
+                    <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse motion-reduce:animate-none shrink-0" />
+                  ) : ytCta.mode === 'scheduled' ? (
+                    <Clock className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                  ) : (
+                    <Film className="w-3.5 h-3.5 text-indigo-300 shrink-0" />
+                  )}
+                  <span>{ytCta.label}</span>
+                  {ytCta.mode === 'live' && <Play className="w-3.5 h-3.5 fill-current shrink-0" />}
+                </button>
+              );
+            })()}
+
             {activeMatch && onOpenMatchModal && (
               <button
                 onClick={() => onOpenMatchModal(activeMatch)}

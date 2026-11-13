@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   User,
   Palette,
+  Tv,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { AuthService } from '../../services/authService';
@@ -33,6 +34,7 @@ export type NavTab =
   | 'statistics'
   | 'champion'
   | 'hero'
+  | 'livestream'
   | 'settings'
   | 'users';
 
@@ -44,7 +46,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogout, onViewPublicHome }) => {
-  const { state } = useTournament();
+  const { state, youtubeLiveConfig } = useTournament();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
@@ -52,6 +54,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
   const isSuperAdmin = AuthService.isSuperAdmin();
   const canManageTournament = AuthService.canManageTournament();
   const liveMatchesCount = state.matches.filter((m) => m.status === 'live').length;
+  const isStreamLive = Boolean(youtubeLiveConfig?.enabled && youtubeLiveConfig?.status === 'live' && youtubeLiveConfig?.videoId);
 
   const handleNav = (tab: NavTab) => {
     onSelectTab(tab);
@@ -177,7 +180,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               aria-expanded={moreDropdownOpen}
               aria-haspopup="true"
               className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 ${
-                ['tokens', 'registered', 'statistics', 'champion', 'hero', 'settings', 'users'].includes(currentTab)
+                ['tokens', 'registered', 'statistics', 'champion', 'hero', 'livestream', 'settings', 'users'].includes(currentTab)
                   ? 'bg-white/10 text-amber-400 font-semibold'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
@@ -238,6 +241,24 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                     >
                       <Palette className="w-4 h-4 text-amber-400" />
                       <span>Hero Section Manager</span>
+                    </button>
+                  )}
+                  {canManageTournament && (
+                    <button
+                      onClick={() => handleNav('livestream')}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-slate-200 hover:text-white flex items-center justify-between gap-2 ${
+                        currentTab === 'livestream' ? 'bg-red-500/20 text-red-200 font-semibold' : 'hover:bg-white/10'
+                      }`}
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Tv className="w-4 h-4 text-red-400" />
+                        <span>YouTube Live Stream</span>
+                      </span>
+                      {isStreamLive && (
+                        <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-red-600/30 text-red-300 border border-red-500/40">
+                          LIVE
+                        </span>
+                      )}
                     </button>
                   )}
                   <button
@@ -452,6 +473,24 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                 >
                   <span>Hero Section Manager</span>
                   <Palette className="w-4 h-4 text-amber-400" />
+                </button>
+              )}
+              {canManageTournament && (
+                <button
+                  onClick={() => handleNav('livestream')}
+                  className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm font-semibold ${
+                    currentTab === 'livestream' ? 'bg-red-500/20 text-red-200 border border-red-500/30' : 'hover:bg-white/5 text-slate-200'
+                  }`}
+                >
+                  <span className="flex items-center gap-2">
+                    <span>YouTube Live Stream</span>
+                    {isStreamLive && (
+                      <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-red-600/30 text-red-300 border border-red-500/40">
+                        LIVE
+                      </span>
+                    )}
+                  </span>
+                  <Tv className="w-4 h-4 text-red-400" />
                 </button>
               )}
               <button

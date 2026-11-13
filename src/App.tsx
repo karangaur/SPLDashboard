@@ -16,6 +16,7 @@ import { ChampionView } from './components/champion/ChampionView';
 import { SettingsView } from './components/settings/SettingsView';
 import { UserManagementView } from './components/users/UserManagementView';
 import { HeroSectionManagerView } from './components/hero-admin/HeroSectionManagerView';
+import { YouTubeLiveManagerView } from './components/admin/YouTubeLiveManagerView';
 import { ScoreOperatorDashboard } from './components/scorer/ScoreOperatorDashboard';
 import { PublicRegistrationPage } from './components/registration/PublicRegistrationPage';
 import { AdminLoginPage } from './components/auth/AdminLoginPage';
@@ -50,6 +51,8 @@ const RESERVED_PATHS = new Set([
   'champion',
   'hero',
   'hero-manager',
+  'livestream',
+  'youtube-live',
   'settings',
   'users',
 ]);
@@ -69,6 +72,8 @@ const VALID_ADMIN_TABS: Record<string, NavTab> = {
   champion: 'champion',
   hero: 'hero',
   'hero-manager': 'hero',
+  livestream: 'livestream',
+  'youtube-live': 'livestream',
   settings: 'settings',
   users: 'users',
 };
@@ -283,6 +288,8 @@ export default function App() {
         return <ChampionView />;
       case 'hero':
         return <HeroSectionManagerView />;
+      case 'livestream':
+        return <YouTubeLiveManagerView />;
       case 'settings':
         return <SettingsView />;
       case 'users':

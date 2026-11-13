@@ -501,3 +501,22 @@ export interface HeroVersionRecord {
   summary: string;
   config: HeroConfig;
 }
+
+// ============================================================================
+// YOUTUBE LIVE STREAMING INTEGRATION TYPES
+// ============================================================================
+
+export type YouTubeLiveStatus = 'scheduled' | 'live' | 'ended';
+
+export interface YouTubeLiveConfig {
+  enabled: boolean;
+  videoUrl: string;
+  videoId: string;
+  status: YouTubeLiveStatus;
+  title: string;
+  scheduledAt?: string;
+  allowReplay: boolean;
+  updatedAt?: number;
+  updatedBy?: string;
+}
+
