@@ -9,8 +9,10 @@ import {
   ArrowRight,
   ExternalLink,
   Flame,
+  CheckCircle2,
   Clock,
   Share2,
+  Copy,
   ChevronDown,
   Activity,
   Shield,
@@ -27,7 +29,6 @@ import { BadmintonHeroVisual } from './BadmintonHeroVisual';
 import { LiveMatchHero } from './LiveMatchHero';
 import { FixturesShowcaseSection } from './FixturesShowcaseSection';
 import { TeamsShowcaseSection } from './TeamsShowcaseSection';
-import { StandingsShowcaseSection } from './StandingsShowcaseSection';
 import { SPLLogo, SPLLogoEmblemSvg } from '../common/SPLLogo';
 import { Match, Player } from '../../types/tournament';
 import { AuthService } from '../../services/authService';
@@ -46,7 +47,6 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const { state, standings, realtimeStatus, reconnectRealtime } = useTournament();
 
   const [detailMatchSnapshot, setDetailMatch] = useState<Match | null>(null);
-  const [selectedTeamId, setSelectedTeamId] = useState<string | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
@@ -681,21 +681,184 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           tournamentName={tournamentName}
           onOpenPublicRegister={onOpenPublicRegister}
           onSelectMatch={handleOpenMatchModal}
-          selectedTeamId={selectedTeamId}
-          onSelectTeamChange={setSelectedTeamId}
         />
 
-        {/* 6. REDESIGNED OFFICIAL LEAGUE STANDINGS */}
-        <StandingsShowcaseSection
-          standings={standings}
-          teams={state.teams}
-          players={state.players}
-          matches={state.matches}
-          knockout={state.knockout}
-          copiedStandings={copiedStandings}
-          onCopyStandings={copyStandingsText}
-          onSelectTeam={setSelectedTeamId}
-        />
+        {/* 6. LIVE STANDINGS TABLE */}
+        <section id="standings-table" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24">
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 mb-8">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-400">
+                <Trophy className="w-4 h-4" />
+                <span>Leaderboard</span>
+              </div>
+              <h2 className="text-3xl sm:text-4xl font-black text-white font-display uppercase tracking-tight mt-1">
+                Official League Standings
+              </h2>
+              <p className="text-sm text-slate-400 mt-1">
+                Top 4 teams at the conclusion of group play advance directly to the Knockout Semifinals.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={copyStandingsText}
+                className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
+              >
+                <Copy className="w-3.5 h-3.5 text-lime-400" />
+                <span>{copiedStandings ? 'Copied Table!' : 'Share Standings'}</span>
+              </button>
+            </div>
+          </div>
+
+          {standings.length === 0 ? (
+            <div className="p-12 text-center rounded-3xl bg-slate-900/60 border border-white/10">
+              <Trophy className="w-8 h-8 text-slate-500 mx-auto" />
+              <p className="text-sm text-slate-400 mt-2">Standings will populate once teams and matches are loaded.</p>
+            </div>
+          ) : (
+            <div className="rounded-3xl border border-white/10 bg-slate-900/80 shadow-2xl overflow-hidden">
+              {/* Mobile Standings Card View (< 640px) */}
+              <div className="sm:hidden divide-y divide-white/5">
+                {standings.map((row, idx) => {
+                  const isTop4 = idx < 4;
+                  return (
+                    <div
+                      key={row.team.id}
+                      className={`p-4 space-y-2.5 ${
+                        idx === 3 ? 'border-b-2 border-lime-400/40' : ''
+                      }`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-6 text-center font-mono font-bold text-sm shrink-0">
+                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : `#${idx + 1}`}
+                          </span>
+                          <span className="text-lg shrink-0">{row.team.badge || '🏸'}</span>
+                          <span className="font-bold text-white text-sm truncate">{row.team.name}</span>
+                          {isTop4 && (
+                            <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-lime-400/15 text-lime-400 border border-lime-400/30 shrink-0">
+                              Top 4
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-right shrink-0">
+                          <span className="font-mono font-black text-base text-lime-400">{row.points}</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold ml-1">PTS</span>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-4 gap-2 pt-1 text-center font-mono text-xs bg-white/[0.02] rounded-xl p-2 border border-white/5">
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Played</span>
+                          <span className="font-bold text-slate-200">{row.played}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Won</span>
+                          <span className="font-bold text-emerald-400">{row.won}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Lost</span>
+                          <span className="font-bold text-rose-400">{row.lost}</span>
+                        </div>
+                        <div>
+                          <span className="text-[9px] text-slate-400 uppercase block font-sans">Net Diff</span>
+                          <span className="font-bold text-slate-200">
+                            {row.diff > 0 ? `+${row.diff}` : row.diff}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Tablet & Desktop Table View (>= 640px) */}
+              <div className="hidden sm:block overflow-x-auto">
+                <table className="w-full text-left text-sm text-slate-300">
+                  <thead className="text-[11px] uppercase font-bold text-slate-400 bg-slate-950/80 border-b border-white/10 tracking-wider">
+                    <tr>
+                      <th scope="col" className="px-5 py-4 w-16 text-center">Rank</th>
+                      <th scope="col" className="px-5 py-4">Team</th>
+                      <th scope="col" className="px-3 py-4 text-center">P</th>
+                      <th scope="col" className="px-3 py-4 text-center">W</th>
+                      <th scope="col" className="px-3 py-4 text-center">L</th>
+                      <th scope="col" className="px-3 py-4 text-center">Diff</th>
+                      <th scope="col" className="px-5 py-4 text-center font-black text-lime-400">PTS</th>
+                      <th scope="col" className="px-5 py-4 text-center">Recent Form</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 font-mono text-xs">
+                    {standings.map((row, idx) => {
+                      const isTop4 = idx < 4;
+                      return (
+                        <tr
+                          key={row.team.id}
+                          className={`hover:bg-white/[0.04] transition-colors ${
+                            idx === 3 ? 'border-b-2 border-lime-400/40' : ''
+                          }`}
+                        >
+                          <td className="px-5 py-4 text-center font-bold">
+                            {idx === 0 ? '🥇' : idx === 1 ? '🥈' : idx === 2 ? '🥉' : idx + 1}
+                          </td>
+
+                          <td className="px-5 py-4 font-sans font-bold text-white">
+                            <div className="flex items-center gap-2.5">
+                              <span className="text-lg">{row.team.badge || '🏸'}</span>
+                              <span>{row.team.name}</span>
+                              {isTop4 && (
+                                <span className="hidden sm:inline px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-lime-400/15 text-lime-400 border border-lime-400/30">
+                                  Playoff
+                                </span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="px-3 py-4 text-center">{row.played}</td>
+                          <td className="px-3 py-4 text-center text-emerald-400 font-bold">{row.won}</td>
+                          <td className="px-3 py-4 text-center text-rose-400">{row.lost}</td>
+                          <td className="px-3 py-4 text-center">
+                            {row.diff > 0 ? `+${row.diff}` : row.diff}
+                          </td>
+                          <td className="px-5 py-4 text-center font-black text-base text-lime-400">
+                            {row.points}
+                          </td>
+
+                          <td className="px-5 py-4 text-center">
+                            {row.form && row.form.length > 0 ? (
+                              <div className="flex items-center justify-center gap-1">
+                                {row.form.slice(-5).map((f, i) => (
+                                  <span
+                                    key={i}
+                                    className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black ${
+                                      f === 'W' ? 'bg-emerald-500 text-slate-950' : 'bg-rose-500/30 text-rose-300'
+                                    }`}
+                                  >
+                                    {f}
+                                  </span>
+                                ))}
+                              </div>
+                            ) : (
+                              <span className="text-slate-400">-</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Table Footer Cutoff Note */}
+              <div className="px-4 sm:px-6 py-3.5 bg-slate-950/90 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2 text-center sm:text-left">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-lime-400 shrink-0" />
+                  <span>Green line signifies Top 4 Knockout Qualification Cutoff</span>
+                </div>
+                <span>BWF Badminton Standard Tiebreak Applied</span>
+              </div>
+            </div>
+          )}
+        </section>
 
         {/* 7. TOURNAMENT VENUE & MAHARAJGANJ COMMUNITY SECTION */}
         <section id="tournament-info" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24">
