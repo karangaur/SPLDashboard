@@ -20,7 +20,6 @@ import {
   PlusCircle,
   LogIn,
   X,
-  Play,
   Sliders,
   Menu,
   Lock,
@@ -515,28 +514,6 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2.5 sm:gap-3 shrink-0 self-start sm:self-end">
-              {livestreamCta.visible && (
-                <button
-                  type="button"
-                  onClick={handleOpenLivestream}
-                  className={`inline-flex items-center gap-2 px-4 py-2 min-h-[40px] rounded-xl text-xs font-black uppercase tracking-wider transition-all cursor-pointer whitespace-nowrap ${
-                    livestreamCta.mode === 'live'
-                      ? 'text-white bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-500 border border-red-400/70 shadow-[0_0_24px_rgba(239,68,68,0.55)]'
-                      : livestreamCta.mode === 'scheduled'
-                      ? 'text-amber-100 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/45'
-                      : 'text-indigo-100 bg-indigo-500/20 hover:bg-indigo-500/30 border border-indigo-400/50'
-                  }`}
-                >
-                  {livestreamCta.mode === 'live' ? (
-                    <span className="w-2.5 h-2.5 rounded-full bg-white animate-pulse motion-reduce:animate-none shrink-0" />
-                  ) : (
-                    <Play className="w-3.5 h-3.5 shrink-0" />
-                  )}
-                  <span>{livestreamCta.label}</span>
-                  {livestreamCta.mode === 'live' && <Play className="w-3.5 h-3.5 fill-current shrink-0" />}
-                </button>
-              )}
-
               {liveMatchesCount > 0 ? (
                 <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-[#0d0a14] border border-rose-500/40 text-rose-300 text-xs font-mono font-bold uppercase tracking-wider shadow-lg shadow-rose-950/30">
                   <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
