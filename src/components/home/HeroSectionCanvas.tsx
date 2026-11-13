@@ -336,7 +336,11 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
 
   // Responsive computed pixel font sizes for desktop/mobile or simulated preview viewport
   const computeResponsiveFontSize = (desk: number, mob: number) => {
-    if (isMobileViewport) return `${mob}px`;
+    if (isMobileViewport) {
+      const minMobilePx = Math.max(13, Math.round(mob * 0.78));
+      const fluidVw = (mob / 3.85).toFixed(2);
+      return `clamp(${minMobilePx}px, ${fluidVw}vw, ${mob}px)`;
+    }
     if (isTabletViewport || isCompactPreview) return `${Math.round((desk + mob) / 2)}px`;
     return `clamp(${mob}px, ${(desk / 14.4).toFixed(2)}vw, ${desk}px)`;
   };
@@ -513,21 +517,21 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
           <div
             className={`${
               showTwoColumnGrid ? 'lg:col-span-6 xl:col-span-7' : 'col-span-1 max-w-4xl mx-auto w-full'
-            } flex flex-col justify-center space-y-5 sm:space-y-6 ${alignWrapperClass}`}
+            } min-w-0 flex flex-col justify-center space-y-5 sm:space-y-6 ${alignWrapperClass}`}
           >
             {/* Hero Logo Block */}
             {logo.visible && (
-              <div className={`w-full flex ${logoJustifyClass} ${getStaggerClass('logo')}`}>
+              <div className={`w-full min-w-0 flex ${logoJustifyClass} ${getStaggerClass('logo')}`}>
                 {logo.customLogoUrl ? (
-                  <div className="inline-flex flex-col sm:flex-row items-center gap-3">
+                  <div className="inline-flex flex-col sm:flex-row items-center gap-3 max-w-full">
                     <img
                       src={logo.customLogoUrl}
                       alt="Smash Premier League Official Logo"
-                      className={`${customLogoHeightClass} w-auto max-w-[240px] sm:max-w-[320px] object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.65)]`}
+                      className={`${customLogoHeightClass} w-auto max-w-[220px] sm:max-w-[320px] object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.65)]`}
                     />
                     {logo.subtitle && (
-                      <div className="text-center sm:text-left">
-                        <span className="block text-xs font-display font-bold uppercase tracking-[0.22em] text-amber-300">
+                      <div className="text-center sm:text-left min-w-0">
+                        <span className="block text-xs font-display font-bold uppercase tracking-[0.16em] sm:tracking-[0.22em] text-amber-300 break-words">
                           {logo.subtitle}
                         </span>
                       </div>
@@ -544,29 +548,52 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
               </div>
             )}
 
-            {/* Kicker */}
-            {text.kickerVisible && text.kickerText && (
+            {/* Kicker & Tournament Committee Header */}
+            {text.kickerVisible && (text.kickerText || organizerLabel) && (
               <div
-                className={`${getStaggerClass('heading')} flex items-center ${alignFlexJustify} gap-2.5 text-xs font-display font-black uppercase tracking-[0.26em]`}
-                style={{ color: text.kickerColor || '#fcd34d' }}
+                className={`${getStaggerClass('heading')} w-full flex flex-col sm:flex-row sm:flex-wrap items-center ${
+                  effectiveAlign === 'center'
+                    ? 'justify-center text-center'
+                    : effectiveAlign === 'right'
+                      ? 'sm:justify-end text-center sm:text-right'
+                      : 'sm:justify-start text-center sm:text-left'
+                } gap-y-1.5 gap-x-2.5 font-display font-black uppercase leading-snug`}
+                style={{
+                  color: text.kickerColor || '#fcd34d',
+                  fontSize: 'clamp(11px, 3.1vw, 13px)',
+                }}
               >
-                <span
-                  className="h-[2px] w-7 rounded-full shrink-0"
-                  style={{
-                    background: `linear-gradient(90deg, ${theme.accentColor || '#ef4444'} 0%, ${text.kickerColor || '#fcd34d'} 100%)`,
-                  }}
-                />
-                <span>{text.kickerText}</span>
-                <span className="text-slate-600">·</span>
-                <span className="text-slate-300 truncate">{organizerLabel}</span>
+                {text.kickerText && (
+                  <div className="inline-flex items-center justify-center gap-2 max-w-full">
+                    <span
+                      className="h-[2px] w-5 sm:w-7 rounded-full shrink-0"
+                      style={{
+                        background: `linear-gradient(90deg, ${theme.accentColor || '#ef4444'} 0%, ${text.kickerColor || '#fcd34d'} 100%)`,
+                      }}
+                    />
+                    <span className="tracking-[0.15em] sm:tracking-[0.24em] break-words whitespace-normal">
+                      {text.kickerText}
+                    </span>
+                  </div>
+                )}
+                {text.kickerText && organizerLabel && (
+                  <span className="hidden sm:inline text-slate-500 select-none" aria-hidden="true">
+                    ·
+                  </span>
+                )}
+                {organizerLabel && (
+                  <span className="text-slate-200 tracking-[0.14em] sm:tracking-[0.22em] break-words whitespace-normal max-w-full px-1 sm:px-0">
+                    {organizerLabel}
+                  </span>
+                )}
               </div>
             )}
 
             {/* Headings & Copy */}
-            <div className={`${getStaggerClass('heading')} space-y-3 w-full`}>
+            <div className={`${getStaggerClass('heading')} space-y-3 w-full min-w-0`}>
               {text.mainHeading.visible && text.mainHeading.text && (
                 <h1
-                  className="font-display tracking-tight uppercase leading-[1.03] text-balance break-words"
+                  className="font-display tracking-tight uppercase leading-[1.05] sm:leading-[1.03] text-balance break-words"
                   style={{
                     color: text.mainHeading.color || theme.headingColor || '#ffffff',
                     fontWeight: Number(text.mainHeading.fontWeight) || 900,
@@ -654,7 +681,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                         type="button"
                         disabled
                         aria-disabled="true"
-                        className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-400 bg-slate-800/90 border border-slate-700 cursor-not-allowed whitespace-nowrap"
+                        className="w-full sm:w-auto flex items-center justify-center gap-2.5 px-4 sm:px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider text-slate-400 bg-slate-800/90 border border-slate-700 cursor-not-allowed text-center whitespace-normal sm:whitespace-nowrap"
                       >
                         <Lock className="w-4 h-4 shrink-0 text-slate-400" />
                         <span>REGISTRATION CLOSED</span>
@@ -670,7 +697,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                       type="button"
                       onClick={() => handleActionClick(btn)}
                       style={resolved.style}
-                      className={`group relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2.5 px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 cursor-pointer whitespace-nowrap ${resolved.className}`}
+                      className={`group relative overflow-hidden w-full sm:w-auto flex items-center justify-center gap-2.5 px-4 sm:px-6 py-3.5 min-h-[48px] rounded-xl font-display font-black text-xs sm:text-sm uppercase tracking-wider transition-all duration-200 cursor-pointer text-center whitespace-normal sm:whitespace-nowrap ${resolved.className}`}
                     >
                       {btn.role === 'registration' ? (
                         <>
@@ -703,7 +730,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
             )}
 
             {!isRegistrationOpen && (
-              <p className={`text-xs sm:text-sm text-slate-400 font-medium flex items-center ${alignFlexJustify} gap-2`}>
+              <p className={`text-xs sm:text-sm text-slate-400 font-medium flex flex-wrap items-center ${alignFlexJustify} gap-2 text-center sm:text-left`}>
                 <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                 <span>Registration for Smash Premier League 3.0 is currently closed.</span>
               </p>
@@ -738,7 +765,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                 </span>
                 <span
                   title={tournamentName}
-                  className="mt-1 block text-sm sm:text-base font-display font-black text-white truncate"
+                  className="mt-1 block text-sm sm:text-base font-display font-black text-white break-words sm:truncate"
                 >
                   {tournamentName || 'Not Configured'}
                 </span>
@@ -749,7 +776,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                 <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
                   Current Stage
                 </span>
-                <span className="mt-1 block text-sm sm:text-base font-display font-black text-amber-300 truncate">
+                <span className="mt-1 block text-sm sm:text-base font-display font-black text-amber-300 break-words sm:truncate">
                   {currentTournamentStage}
                 </span>
               </div>
@@ -790,17 +817,17 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                 </span>
                 {featuredFixture ? (
                   <div className="mt-1 min-w-0">
-                    <span className="block text-xs sm:text-sm font-bold text-white truncate">
+                    <span className="block text-xs sm:text-sm font-bold text-white break-words sm:truncate">
                       {(getTeam?.(featuredFixture.teamA)?.name || 'TBD')} vs{' '}
                       {(getTeam?.(featuredFixture.teamB)?.name || 'TBD')}
                     </span>
-                    <span className="block text-[11px] font-mono text-amber-300/90 truncate">
+                    <span className="block text-[11px] font-mono text-amber-300/90 break-words sm:truncate">
                       {featuredFixture.courtName || `Court ${featuredFixture.court}`}
                       {featuredFixture.stageLabel ? ` · ${featuredFixture.stageLabel}` : ''}
                     </span>
                   </div>
                 ) : (
-                  <span className="mt-1 block text-xs sm:text-sm font-semibold text-slate-400 truncate">
+                  <span className="mt-1 block text-xs sm:text-sm font-semibold text-slate-400 break-words sm:truncate">
                     No Upcoming Fixtures
                   </span>
                 )}

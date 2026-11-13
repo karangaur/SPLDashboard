@@ -532,7 +532,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                 Registration Closed
               </span>
               <h2 className="font-display text-2xl sm:text-3xl font-black text-white uppercase tracking-tight">
-                REGISTRATION CLOSED
+                Registration is Currently Closed
               </h2>
               <p className="text-sm sm:text-base text-slate-300 max-w-md mx-auto leading-relaxed">
                 Registration for Smash Premier League 3.0 is currently closed.
@@ -1285,8 +1285,19 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       </main>
 
       {/* Footer */}
-      <footer className="max-w-3xl w-full mx-auto pt-6 border-t border-white/10 text-center text-xs text-slate-500">
-        <p>Smash Premier League Tournament Organization Platform · All athlete data encrypted</p>
+      <footer className="max-w-3xl w-full mx-auto pt-6 border-t border-white/10 flex flex-col items-center justify-center gap-1.5 text-center px-2">
+        <p className="font-display font-bold uppercase tracking-[0.14em] text-slate-200 text-xs sm:text-sm leading-relaxed max-w-full">
+          © 2026 SMASH PREMIER LEAGUE
+        </p>
+        <p className="flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 text-xs sm:text-sm text-slate-300 font-medium leading-relaxed md:whitespace-nowrap max-w-full">
+          <span>Every Champion Deserves a Great Platform</span>
+          <span className="hidden md:inline text-slate-500 select-none" aria-hidden="true">
+            |
+          </span>
+          <span>
+            Built by <span className="font-bold text-amber-400">Karan Gaur</span>
+          </span>
+        </p>
       </footer>
     </div>
   );

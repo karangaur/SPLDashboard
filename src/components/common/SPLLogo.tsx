@@ -198,7 +198,7 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
 
   return (
     <div
-      className={`inline-flex items-center gap-2.5 sm:gap-3.5 min-w-0 select-none ${
+      className={`inline-flex items-center gap-2.5 sm:gap-3.5 min-w-0 max-w-full select-none ${
         animated ? 'spl-hero-logo-reveal' : ''
       } ${className}`}
     >
@@ -216,13 +216,13 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
       </div>
 
       <div className="min-w-0 text-left">
-        <div className={`font-display font-black uppercase tracking-tight text-white leading-tight truncate ${s.text}`}>
+        <div className={`font-display font-black uppercase tracking-tight text-white leading-tight break-words sm:truncate ${s.text}`}>
           SMASH PREMIER LEAGUE
         </div>
         {showTagline && (
-          <div className="flex items-center gap-2 mt-0.5">
+          <div className="flex items-center gap-2 mt-0.5 min-w-0">
             <span className="h-[2px] w-4 bg-gradient-to-r from-red-500 to-amber-400 rounded-full shrink-0" />
-            <span className={`font-display font-extrabold uppercase tracking-[0.18em] text-amber-400 truncate ${s.sub}`}>
+            <span className={`font-display font-extrabold uppercase tracking-[0.12em] sm:tracking-[0.18em] text-amber-400 break-words sm:truncate ${s.sub}`}>
               {subtitle}
             </span>
           </div>

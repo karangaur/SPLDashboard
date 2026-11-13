@@ -531,6 +531,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       reconcileInFlight = (async () => {
         try {
           if (SupabaseService.isAvailable()) {
+            // Immediately kick off authoritative registration_form_config fetch in parallel with connection check
+            // so registration open/closed status hydrates from Supabase without waiting on other tables
+            const earlyFormConfigPromise = SupabaseService.fetchFormConfig(seasonSlug).then((earlyCfg) => {
+              if (!isDisposed && earlyCfg !== null) {
+                const isRegGuardActiveEarly = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
+                const earlyEnabled = isRegGuardActiveEarly
+                  ? regToggleGuardRef.current.enabled
+                  : earlyCfg.enabled !== false;
+                if (Array.isArray(earlyCfg.fields) && earlyCfg.fields.length > 0) {
+                  setFormConfig({ ...earlyCfg, enabled: earlyEnabled });
+                }
+                syncRegistrationEnabledState(earlyEnabled, earlyCfg.closedNotice, true);
+              }
+              return earlyCfg;
+            });
+
             const testRes = await testSupabaseConnection();
             if (isDisposed) return;
             setIsCentralizedDbConnected(testRes.connected);
@@ -542,7 +558,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               SupabaseService.fetchTeams(),
               SupabaseService.fetchMatches(seasonSlug),
               SupabaseService.fetchRegistrations('all'),
-              SupabaseService.fetchFormConfig(seasonSlug),
+              earlyFormConfigPromise,
               SupabaseService.fetchTokens(seasonSlug),
             ]);
 

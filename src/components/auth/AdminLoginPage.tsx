@@ -131,28 +131,16 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             </button>
           )}
 
-          {/* Quick action: Link to athlete registration form */}
-          {onGoToPublicRegister && (
-            isRegistrationOpen ? (
-              <button
-                type="button"
-                onClick={onGoToPublicRegister}
-                className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
-              >
-                <span>Public Registration</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled
-                aria-disabled="true"
-                className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-slate-400 bg-slate-800 border border-slate-700 rounded-xl cursor-not-allowed"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span>Registration Closed</span>
-              </button>
-            )
+          {/* Quick action: Link to athlete registration form (only shown when registration is open) */}
+          {onGoToPublicRegister && isRegistrationOpen && (
+            <button
+              type="button"
+              onClick={onGoToPublicRegister}
+              className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
+            >
+              <span>Public Registration</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
           )}
         </div>
       </header>

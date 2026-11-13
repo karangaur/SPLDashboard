@@ -52,9 +52,12 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     realtimeStatus,
     reconnectRealtime,
     isRegistrationOpen,
+    isRegistrationStatusHydrated,
     publishedHeroConfig,
     youtubeLiveConfig,
   } = useTournament();
+
+  const showNavbarRegistration = isRegistrationStatusHydrated && isRegistrationOpen;
 
   const [detailMatchSnapshot, setDetailMatch] = useState<Match | null>(null);
   const [copiedStandings, setCopiedStandings] = useState(false);
@@ -351,27 +354,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
           {/* Right Action Buttons */}
           <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-            {/* Athlete Registration Button */}
-            {isRegistrationOpen ? (
+            {/* Athlete Registration Button (Desktop Navbar — hidden when registration is closed or hydrating) */}
+            {showNavbarRegistration && (
               <button
                 type="button"
                 onClick={onOpenPublicRegister}
-                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95 whitespace-nowrap"
+                className="hidden md:flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 hover:from-amber-300 hover:to-yellow-300 rounded-xl shadow-md shadow-amber-400/20 transition-all active:scale-95 whitespace-nowrap cursor-pointer"
               >
                 <PlusCircle className="w-3.5 h-3.5 shrink-0" />
-                <span className="hidden sm:inline">Register Player</span>
-                <span className="sm:hidden">Register</span>
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled
-                aria-disabled="true"
-                className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-400 bg-slate-800/90 border border-slate-700 rounded-xl cursor-not-allowed whitespace-nowrap"
-              >
-                <Lock className="w-3.5 h-3.5 shrink-0 text-slate-400" />
-                <span className="hidden sm:inline">Registration Closed</span>
-                <span className="sm:hidden">Closed</span>
+                <span>Register Player</span>
               </button>
             )}
 
@@ -434,27 +425,17 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <MapPin className="w-4 h-4 text-amber-400" />
               </button>
 
-              {isRegistrationOpen ? (
+              {showNavbarRegistration && (
                 <button
                   type="button"
                   onClick={() => {
                     setMobileNavOpen(false);
                     onOpenPublicRegister();
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg"
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg cursor-pointer"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Register as an Athlete</span>
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  aria-disabled="true"
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 cursor-not-allowed"
-                >
-                  <Lock className="w-4 h-4 text-slate-400" />
-                  <span>REGISTRATION CLOSED</span>
                 </button>
               )}
 
@@ -846,7 +827,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   {tournamentName}
                 </span>
                 <span className="text-slate-400 text-xs">
-                  Official Badminton Tournament Portal · {seasonLabel}
+                  Official Badminton Tournament Portal · {seasonLabel} · BWF {pointsFormat}-Point Rally System • {venueLabel}
                 </span>
               </div>
             </div>
@@ -858,27 +839,30 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               >
                 Back to Top ↑
               </button>
-              <span>•</span>
-              {isRegistrationOpen ? (
-                <button onClick={onOpenPublicRegister} className="hover:text-lime-400 transition-colors">
-                  Athlete Entry Form
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  disabled
-                  aria-disabled="true"
-                  className="text-slate-500 cursor-not-allowed"
-                >
-                  Registration Closed
-                </button>
+              {showNavbarRegistration && (
+                <>
+                  <span>•</span>
+                  <button onClick={onOpenPublicRegister} className="hover:text-lime-400 transition-colors">
+                    Athlete Entry Form
+                  </button>
+                </>
               )}
             </div>
           </div>
 
-          <div className="pt-6 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2 text-[11px] text-slate-400 text-center sm:text-left">
-            <span>© {new Date().getFullYear()} {tournamentName}. All rights reserved.</span>
-            <span>BWF {pointsFormat}-Point Rally System • {venueLabel}</span>
+          <div className="pt-6 border-t border-white/10 flex flex-col items-center justify-center gap-1.5 text-center px-2">
+            <p className="font-display font-bold uppercase tracking-[0.14em] text-slate-200 text-xs sm:text-sm leading-relaxed max-w-full">
+              © 2026 SMASH PREMIER LEAGUE
+            </p>
+            <p className="flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 text-xs sm:text-sm text-slate-300 font-medium leading-relaxed md:whitespace-nowrap max-w-full">
+              <span>Every Champion Deserves a Great Platform</span>
+              <span className="hidden md:inline text-slate-500 select-none" aria-hidden="true">
+                |
+              </span>
+              <span>
+                Built by <span className="font-bold text-amber-400">Karan Gaur</span>
+              </span>
+            </p>
           </div>
         </div>
       </footer>
