@@ -24,6 +24,10 @@ import {
 } from '../utils/youtube';
 import { AuthService } from './authService';
 import {
+  parseMatchScheduleTime,
+  sortMatchesByScheduleOrder,
+} from '../utils/scheduleEditorEngine';
+import {
   DbPlayer,
   DbTeam,
   DbMatch,
@@ -749,10 +753,14 @@ export class SupabaseService {
             mvpPlayerId: m.mvp_player_id || undefined,
           });
         } else {
+          const parsedTime = parseMatchScheduleTime(m.time || undefined);
           groupMatches.push({
             id: m.id,
             round: m.round,
             court: parsedCourt,
+            courtSlot: m.slot != null ? m.slot : undefined,
+            slot: m.slot != null ? m.slot : undefined,
+            matchNumber: m.slot != null ? m.slot : undefined,
             teamA: m.team_a_id || '',
             teamB: m.team_b_id || '',
             scoreA: m.score_a != null ? m.score_a : undefined,
@@ -760,11 +768,15 @@ export class SupabaseService {
             status: normalizedStatus,
             winner: m.winner_id || undefined,
             time: m.time || undefined,
+            date: parsedTime.date,
+            startTime: parsedTime.startTime,
             sets: m.sets_json || undefined,
             mvpPlayerId: m.mvp_player_id || undefined,
           });
         }
       }
+
+      const orderedGroupMatches = sortMatchesByScheduleOrder(groupMatches);
 
       koMatches.sort((a, b) => {
         const sa = stageOrder[a.stage] ?? 9;
@@ -773,7 +785,7 @@ export class SupabaseService {
         return (a.slot || 1) - (b.slot || 1);
       });
 
-      return { matches: groupMatches, knockout: koMatches };
+      return { matches: orderedGroupMatches, knockout: koMatches };
     } catch {
       return null;
     }
@@ -985,18 +997,18 @@ export class SupabaseService {
   ): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      const rows = matches.map((m) => ({
+      const rows = matches.map((m, idx) => ({
         id: m.id,
         tournament_season: season,
-        round: m.round,
+        round: m.round || 1,
         court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
         match_type: 'group' as const,
-        slot: m.courtSlot || null,
+        slot: m.matchNumber ?? m.courtSlot ?? m.slot ?? idx + 1,
         team_a_id: m.teamA || null,
         team_b_id: m.teamB || null,
         score_a: m.scoreA != null ? m.scoreA : null,
         score_b: m.scoreB != null ? m.scoreB : null,
-        status: m.status,
+        status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
         winner_id: m.winner || null,
         time: m.time || null,
         sets_json: m.sets || null,
@@ -1008,6 +1020,156 @@ export class SupabaseService {
       return !error;
     } catch {
       return false;
+    }
+  }
+
+  static async saveEditedSchedule(params: {
+    draftMatches: Match[];
+    removedMatchIds: string[];
+    season?: string;
+    auditDetails?: Record<string, any>;
+  }): Promise<{
+    success: boolean;
+    conflict?: boolean;
+    error?: string;
+    matches?: Match[];
+  }> {
+    const { draftMatches, removedMatchIds = [], season = 'season-4', auditDetails } = params;
+    if (!this.isAvailable()) {
+      return { success: true, matches: draftMatches };
+    }
+
+    try {
+      // 1. Fetch authoritative current group matches from Supabase to protect concurrent live/completed updates
+      const { data: currentDbRows, error: fetchErr } = await supabase
+        .from('matches')
+        .select('*')
+        .eq('tournament_season', season)
+        .eq('match_type', 'group');
+
+      if (fetchErr) {
+        console.error('[SupabaseService] saveEditedSchedule fetch error:', fetchErr.message);
+        return { success: false, error: fetchErr.message };
+      }
+
+      const dbMatchMap = new Map<string, DbMatch>();
+      for (const row of (currentDbRows || []) as DbMatch[]) {
+        if (row && row.id) dbMatchMap.set(row.id, row);
+      }
+
+      // 2. Verify none of the removedMatchIds became live or completed concurrently
+      const safeRemovedIds: string[] = [];
+      for (const remId of removedMatchIds) {
+        const dbRow = dbMatchMap.get(remId);
+        if (!dbRow) continue;
+        if (dbRow.status === 'live' || dbRow.status === 'completed' || dbRow.status === 'postponed') {
+          return {
+            success: false,
+            conflict: true,
+            error:
+              'Concurrent update detected: A match you attempted to remove is now active or completed in the database. Latest schedule has been synced.',
+          };
+        }
+        safeRemovedIds.push(remId);
+      }
+
+      // 3. Merge authoritative live/completed scores from DB so schedule rearrangements never overwrite live points
+      const nowIso = new Date().toISOString();
+      const mergedDraftMatches: Match[] = draftMatches.map((m, idx) => {
+        const seqSlot = idx + 1;
+        const dbRow = dbMatchMap.get(m.id);
+        if (dbRow && (dbRow.status === 'live' || dbRow.status === 'completed' || dbRow.status === 'postponed')) {
+          const normalizedDbStatus: Match['status'] =
+            dbRow.status === 'postponed' ? 'paused' : dbRow.status;
+          return {
+            ...m,
+            courtSlot: seqSlot,
+            slot: seqSlot,
+            matchNumber: seqSlot,
+            scoreA: dbRow.score_a != null ? dbRow.score_a : m.scoreA,
+            scoreB: dbRow.score_b != null ? dbRow.score_b : m.scoreB,
+            status: normalizedDbStatus,
+            winner: dbRow.winner_id || m.winner,
+            sets: dbRow.sets_json || m.sets,
+            mvpPlayerId: dbRow.mvp_player_id || m.mvpPlayerId,
+          };
+        }
+        return {
+          ...m,
+          courtSlot: seqSlot,
+          slot: seqSlot,
+          matchNumber: seqSlot,
+        };
+      });
+
+      // 4. Delete only explicitly removed upcoming matches
+      if (safeRemovedIds.length > 0) {
+        await supabase.from('match_scores').delete().in('match_id', safeRemovedIds);
+        const { error: delErr } = await supabase
+          .from('matches')
+          .delete()
+          .in('id', safeRemovedIds)
+          .eq('tournament_season', season);
+
+        if (delErr) {
+          console.error('[SupabaseService] saveEditedSchedule delete error:', delErr.message);
+          return { success: false, error: delErr.message };
+        }
+      }
+
+      // 5. Upsert all draft matches preserving IDs, scores, and 1-based slot order
+      if (mergedDraftMatches.length > 0) {
+        const rows = mergedDraftMatches.map((m, idx) => ({
+          id: m.id,
+          tournament_season: season,
+          round: Math.max(1, Number(m.round) || 1),
+          court:
+            typeof m.court === 'number'
+              ? m.court
+              : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1,
+          match_type: 'group' as const,
+          slot: idx + 1,
+          team_a_id: m.teamA || null,
+          team_b_id: m.teamB || null,
+          score_a: m.scoreA != null ? m.scoreA : null,
+          score_b: m.scoreB != null ? m.scoreB : null,
+          status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
+          winner_id: m.winner || null,
+          time: m.time || null,
+          sets_json: m.sets || null,
+          mvp_player_id: m.mvpPlayerId || null,
+          updated_at: nowIso,
+        }));
+
+        const { error: upsertErr } = await supabase
+          .from('matches')
+          .upsert(rows as any, { onConflict: 'id' });
+
+        if (upsertErr) {
+          console.error('[SupabaseService] saveEditedSchedule upsert error:', upsertErr.message);
+          return { success: false, error: upsertErr.message };
+        }
+      }
+
+      if (auditDetails) {
+        void this.logAudit(
+          'schedule_manual_edit',
+          'matches',
+          `Edited schedule (${mergedDraftMatches.length} fixtures)`,
+          auditDetails
+        );
+      }
+
+      return {
+        success: true,
+        matches: mergedDraftMatches,
+      };
+    } catch (err: any) {
+      console.error('[SupabaseService] saveEditedSchedule exception:', err);
+      return {
+        success: false,
+        error: err?.message || 'Failed to save schedule changes to Supabase.',
+      };
     }
   }
 

@@ -68,6 +68,9 @@ export interface Match {
   status: 'upcoming' | 'live' | 'paused' | 'completed' | 'postponed';
   winner?: string; // Team ID
   time?: string;
+  date?: string;
+  startTime?: string;
+  matchNumber?: number;
   sets?: MatchSet[];
   mvpPlayerId?: string;
   version?: number;

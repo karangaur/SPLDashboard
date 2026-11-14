@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import {
   Calendar,
   Clock,
-  Swords,
   RefreshCw,
   Plus,
   Trash2,
@@ -11,7 +10,6 @@ import {
   Play,
   Pause,
   RotateCcw,
-  Edit2,
   SlidersHorizontal,
   Maximize2,
 } from 'lucide-react';
@@ -20,20 +18,38 @@ import { Match } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { LiveMatchScoringModal } from '../admin/LiveMatchScoringModal';
 import { GenerateScheduleModal } from './GenerateScheduleModal';
+import { ScheduleEditorPanel } from './ScheduleEditorPanel';
 import { evaluateSetStatus } from '../../utils/badmintonEngine';
+import {
+  normalizeScheduleSequence,
+  parseMatchScheduleTime,
+} from '../../utils/scheduleEditorEngine';
+import { AuthService } from '../../services/authService';
 
 export const FixturesView: React.FC = () => {
-  const { state, updateMatch, clearResults, setMatches, deleteMatch, clearAllMatches } = useTournament();
+  const {
+    state,
+    updateMatch,
+    clearResults,
+    setMatches,
+    saveEditedSchedule,
+    deleteMatch,
+    clearAllMatches,
+  } = useTournament();
 
   const [filterStatus, setFilterStatus] = useState<'all' | 'live' | 'upcoming' | 'completed'>('all');
   const [selectedCourt, setSelectedCourt] = useState<number | 'all'>('all');
-  const [editingMatch, setEditingMatch] = useState<Match | null>(null);
+  const [isScheduleEditMode, setIsScheduleEditMode] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [showClearAllMatchesConfirm, setShowClearAllMatchesConfirm] = useState(false);
   const [generateModalOpen, setGenerateModalOpen] = useState(false);
   const [deleteConfirmMatchId, setDeleteConfirmMatchId] = useState<string | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
-  const [liveScoringMatchId, setLiveScoringMatchId] = useState<string | null>(null);
+  const [liveScoringMatchId, setLiveScoringMatchId] = useState(null as string | null);
+
+  const currentUser = AuthService.getCurrentUser();
+  const canEditSchedule =
+    !currentUser || currentUser.role === 'tournament_director';
 
   // Manual Match creation state
   const [manualTeamA, setManualTeamA] = useState('');
@@ -54,7 +70,12 @@ export const FixturesView: React.FC = () => {
     return state.settings.courtNames?.[courtNum - 1]?.trim() || `Court ${courtNum}`;
   };
 
-  const filteredMatches = state.matches.filter((m) => {
+  const sequencedMatches = normalizeScheduleSequence(
+    state.matches,
+    state.settings.courtNames
+  );
+
+  const filteredMatches = sequencedMatches.filter((m) => {
     if (filterStatus !== 'all' && m.status !== filterStatus) return false;
     if (selectedCourt !== 'all' && m.court !== selectedCourt) return false;
     return true;
@@ -132,11 +153,19 @@ export const FixturesView: React.FC = () => {
       '',
     ];
 
-    state.matches.forEach((m) => {
+    sequencedMatches.forEach((m, idx) => {
       const tA = getTeam(m.teamA)?.name || 'Team A';
       const tB = getTeam(m.teamB)?.name || 'Team B';
       const scoreStr = m.status === 'completed' ? `(${m.scoreA} - ${m.scoreB})` : `[${m.status.toUpperCase()}]`;
-      lines.push(`R${m.round} · Court ${m.court}: ${tA} vs ${tB} ${scoreStr}`);
+      const parsedTime = parseMatchScheduleTime(m.time);
+      const timeTag = [m.date || parsedTime.date, m.startTime || parsedTime.startTime]
+        .filter(Boolean)
+        .join(' ');
+      lines.push(
+        `M#${m.matchNumber ?? idx + 1} · R${m.round} · ${m.courtName || `Court ${m.court}`}${
+          timeTag ? ` (${timeTag})` : ''
+        }: ${tA} vs ${tB} ${scoreStr}`
+      );
     });
 
     const text = lines.join('\n');
@@ -158,11 +187,14 @@ export const FixturesView: React.FC = () => {
     }
 
     const courtName = getCourtDisplayName(manualCourt);
+    const nextSeq = state.matches.length + 1;
     const newMatch: Match = {
       id: crypto.randomUUID(),
       round: manualRound,
       court: manualCourt,
       courtName,
+      courtSlot: nextSeq,
+      matchNumber: nextSeq,
       teamA: manualTeamA,
       teamB: manualTeamB,
       status: 'upcoming',
@@ -237,6 +269,22 @@ export const FixturesView: React.FC = () => {
             <span>Generate Schedule</span>
           </button>
 
+          {state.matches.length > 0 && canEditSchedule && (
+            <button
+              type="button"
+              onClick={() => setIsScheduleEditMode((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 border ${
+                isScheduleEditMode
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-400/40'
+                  : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/35'
+              }`}
+              title="Manually edit, reorder, or customize generated tournament fixtures"
+            >
+              <span aria-hidden="true">✏️</span>
+              <span>{isScheduleEditMode ? 'Editing Schedule' : 'Edit Schedule'}</span>
+            </button>
+          )}
+
           <button
             onClick={() => setManualModalOpen(true)}
             className="flex items-center gap-1.5 px-3 py-2 min-h-[38px] text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10"
@@ -273,6 +321,21 @@ export const FixturesView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Manual Schedule Editor Panel */}
+      {isScheduleEditMode && state.matches.length > 0 && canEditSchedule && (
+        <ScheduleEditorPanel
+          baselineMatches={state.matches}
+          teams={state.teams}
+          courtsCount={courtsCount}
+          courtNames={state.settings.courtNames}
+          defaultTournamentDate={state.settings.date}
+          knockoutMatches={state.knockout?.matches || []}
+          onSaveSchedule={saveEditedSchedule}
+          onCancelEditMode={() => setIsScheduleEditMode(false)}
+          onNotify={(text, type) => showToast(text, type)}
+        />
+      )}
 
       {/* Interactive Filters: Status segmented control + Court filter */}
       <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 p-2 rounded-2xl glass-panel">
@@ -348,6 +411,9 @@ export const FixturesView: React.FC = () => {
             const isCompleted = match.status === 'completed';
             const isAWinner = match.winner === match.teamA;
             const isBWinner = match.winner === match.teamB;
+            const parsedSchedule = parseMatchScheduleTime(match.time);
+            const displayDate = match.date || parsedSchedule.date;
+            const displayStartTime = match.startTime || parsedSchedule.startTime;
 
             return (
               <div
@@ -362,7 +428,7 @@ export const FixturesView: React.FC = () => {
               >
                 {/* Match Header info */}
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-3 border-b border-white/10">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span
                       className={`h-2 w-2 rounded-full shrink-0 ${
                         isLive
@@ -372,9 +438,28 @@ export const FixturesView: React.FC = () => {
                           : 'bg-slate-500'
                       }`}
                     />
+                    <span className="px-2 py-0.5 rounded-md bg-amber-500/15 border border-amber-500/30 text-[10px] font-mono font-black text-amber-300">
+                      #{String(match.matchNumber ?? match.courtSlot ?? 1).padStart(2, '0')}
+                    </span>
                     <span className="font-bold uppercase tracking-wider text-slate-300">
                       Round {match.round} · {match.courtName || getCourtDisplayName(match.court)}
                     </span>
+                    {(displayDate || displayStartTime) && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] font-semibold text-slate-300">
+                        {displayDate && (
+                          <span className="inline-flex items-center gap-1">
+                            <Calendar className="w-2.5 h-2.5 text-amber-400" />
+                            {displayDate}
+                          </span>
+                        )}
+                        {displayStartTime && (
+                          <span className="inline-flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5 text-emerald-400" />
+                            {displayStartTime}
+                          </span>
+                        )}
+                      </span>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-1.5 sm:gap-2">

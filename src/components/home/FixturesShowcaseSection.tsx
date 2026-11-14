@@ -199,8 +199,11 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
     return [...filtered].sort((a, b) => {
       const sw = statusWeight(a.status) - statusWeight(b.status);
       if (sw !== 0) return sw;
+      const seqA = a.matchNumber ?? a.courtSlot ?? a.slot;
+      const seqB = b.matchNumber ?? b.courtSlot ?? b.slot;
+      if (seqA != null && seqB != null && seqA !== seqB) return seqA - seqB;
       if ((a.round || 0) !== (b.round || 0)) return (a.round || 0) - (b.round || 0);
-      return (a.slot || a.courtSlot || 0) - (b.slot || b.courtSlot || 0);
+      return 0;
     });
   }, [leagueMatches, activeTab, selectedCourt]);
 

@@ -47,6 +47,13 @@ import {
   ManualTeamEditInput,
   ManualTeamEditPreviewResult,
 } from '../utils/manualTeamEditEngine';
+import {
+  normalizeScheduleSequence,
+  parseMatchScheduleTime,
+  ScheduleValidationReport,
+  sortMatchesByScheduleOrder,
+  validateScheduleDraft,
+} from '../utils/scheduleEditorEngine';
 
 export interface DatabaseDiagnosticResult {
   connected: boolean;
@@ -135,6 +142,14 @@ interface TournamentContextType {
   // Matches & Fixtures
   updateMatch: (id: string, updates: Partial<Match>) => void;
   setMatches: (matches: Match[]) => void;
+  saveEditedSchedule: (
+    draftMatches: Match[]
+  ) => Promise<{
+    success: boolean;
+    conflict?: boolean;
+    error?: string;
+    report?: ScheduleValidationReport;
+  }>;
   generateFixtures: (courtConfig?: { courts: number; courtNames?: string[] }) => Promise<{ success: boolean; count?: number; error?: string }>;
   deleteMatch: (id: string) => Promise<boolean>;
   clearResults: () => void;
@@ -1007,12 +1022,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 };
               });
             } else {
+              const parsedTime = parseMatchScheduleTime(m.time || undefined);
               const groupMatch: Match = {
                 id: m.id,
                 round: m.round || 1,
                 court: cNum,
                 courtName: cName,
-                courtSlot: m.slot || undefined,
+                courtSlot: m.slot != null ? m.slot : undefined,
+                slot: m.slot != null ? m.slot : undefined,
+                matchNumber: m.slot != null ? m.slot : undefined,
                 teamA: m.team_a_id || '',
                 teamB: m.team_b_id || '',
                 scoreA: m.score_a != null ? m.score_a : undefined,
@@ -1020,16 +1038,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 status: nextStatus,
                 winner: m.winner_id || undefined,
                 time: m.time || undefined,
+                date: parsedTime.date,
+                startTime: parsedTime.startTime,
                 sets: m.sets_json || undefined,
                 mvpPlayerId: m.mvp_player_id || undefined,
               };
               setState((prev) => {
                 const exists = prev.matches.some((existing) => existing.id === groupMatch.id);
+                const merged = exists
+                  ? prev.matches.map((existing) => (existing.id === groupMatch.id ? { ...existing, ...groupMatch } : existing))
+                  : [...prev.matches, groupMatch];
                 return {
                   ...prev,
-                  matches: exists
-                    ? prev.matches.map((existing) => (existing.id === groupMatch.id ? { ...existing, ...groupMatch } : existing))
-                    : [...prev.matches, groupMatch],
+                  matches: sortMatchesByScheduleOrder(merged),
                   knockout: {
                     ...prev.knockout,
                     matches: prev.knockout.matches.filter((k) => k.id !== groupMatch.id),
@@ -1066,6 +1087,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   if (nextStatus === 'live' || m.status === 'live') {
                     isLiveMatch = true;
                   }
+                  const nextSlot = updated.slot !== undefined ? (updated.slot ?? undefined) : m.courtSlot;
+                  const nextTime = updated.time !== undefined ? (updated.time || undefined) : m.time;
+                  const parsedNextTime = parseMatchScheduleTime(nextTime);
                   return {
                     ...m,
                     teamA: updated.team_a_id !== undefined ? (updated.team_a_id || '') : m.teamA,
@@ -1076,9 +1100,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                     winner: updated.winner_id !== undefined ? (updated.winner_id || undefined) : m.winner,
                     court: resolvedCourt ?? m.court,
                     courtName: resolvedCourtName ?? m.courtName,
-                    courtSlot: updated.slot !== undefined ? (updated.slot || undefined) : m.courtSlot,
+                    courtSlot: nextSlot,
+                    slot: nextSlot,
+                    matchNumber: nextSlot,
                     round: updated.round || m.round,
-                    time: updated.time !== undefined ? (updated.time || undefined) : m.time,
+                    time: nextTime,
+                    date: parsedNextTime.date,
+                    startTime: parsedNextTime.startTime,
                     sets: updated.sets_json !== undefined ? (updated.sets_json || undefined) : m.sets,
                     mvpPlayerId: updated.mvp_player_id !== undefined ? (updated.mvp_player_id || undefined) : m.mvpPlayerId,
                   };
@@ -1153,7 +1181,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               const cleanedMatches =
                 updated.match_type === 'knockout'
                   ? nextMatches.filter((m) => m.id !== updated.id)
-                  : nextMatches;
+                  : sortMatchesByScheduleOrder(nextMatches);
 
               const cleanedKnockoutMatches =
                 updated.match_type && updated.match_type !== 'knockout'
@@ -1862,6 +1890,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             teams: prev.teams.some((t) => t.id === team.id)
               ? prev.teams.map((t) => (t.id === team.id ? { ...t, ...team } : t))
               : [...prev.teams, team],
+          }));
+        } else if (event.data?.type === 'SCHEDULE_UPDATED' && Array.isArray(event.data.matches)) {
+          const { matches, lastUpdated } = event.data;
+          if (lastUpdated) lastServerScoreTime.current = lastUpdated;
+          setState((prev) => ({
+            ...prev,
+            matches: sortMatchesByScheduleOrder(matches),
           }));
         } else if (event.data?.type === 'SETTINGS_UPDATED') {
           const { settings, payment, lastUpdated } = event.data;
@@ -3125,6 +3160,137 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }).catch(() => {});
       return { ...prev, matches };
     });
+  };
+
+  const saveEditedSchedule = async (
+    draftMatches: Match[]
+  ): Promise<{
+    success: boolean;
+    conflict?: boolean;
+    error?: string;
+    report?: ScheduleValidationReport;
+  }> => {
+    const current = stateRef.current;
+    const seasonSlug = current.registrationSettings.seasonSlug || 'season-4';
+    const normalizedDraft = normalizeScheduleSequence(
+      draftMatches,
+      current.settings.courtNames
+    );
+
+    const report = validateScheduleDraft({
+      draftMatches: normalizedDraft,
+      baselineMatches: current.matches,
+      teams: current.teams,
+      courtsCount: current.settings.courts || 1,
+      knockoutMatches: current.knockout?.matches || [],
+    });
+
+    if (!report.valid) {
+      return {
+        success: false,
+        error: report.errors[0]?.message || 'Schedule validation failed.',
+        report,
+      };
+    }
+
+    if (!report.hasChanges) {
+      return {
+        success: true,
+        report,
+      };
+    }
+
+    lastServerScoreTime.current = Date.now();
+    let authoritativeMatches = normalizedDraft;
+
+    if (SupabaseService.isAvailable()) {
+      const dbRes = await SupabaseService.saveEditedSchedule({
+        draftMatches: normalizedDraft,
+        removedMatchIds: report.removedMatchIds,
+        season: seasonSlug,
+        auditDetails: {
+          totalMatches: normalizedDraft.length,
+          changedCount: report.changedMatchIds.length,
+          addedCount: report.addedMatchIds.length,
+          removedCount: report.removedMatchIds.length,
+        },
+      });
+
+      if (dbRes.conflict) {
+        const latest = await SupabaseService.fetchMatches(seasonSlug);
+        if (latest) {
+          setState((prev) => ({
+            ...prev,
+            matches: latest.matches,
+          }));
+        }
+        return {
+          success: false,
+          conflict: true,
+          error:
+            dbRes.error ||
+            'Concurrent schedule change detected. Latest schedule has been loaded.',
+          report,
+        };
+      }
+
+      if (!dbRes.success) {
+        return {
+          success: false,
+          error: dbRes.error || 'Failed to save schedule changes to Supabase.',
+          report,
+        };
+      }
+
+      if (dbRes.matches) {
+        authoritativeMatches = dbRes.matches;
+      }
+    }
+
+    const nowTs = Date.now();
+    for (const m of authoritativeMatches) {
+      localMatchGuardRef.current.set(m.id, {
+        updatedAt: nowTs,
+        scoreA: m.scoreA,
+        scoreB: m.scoreB,
+        status: m.status,
+        court: m.court,
+      });
+    }
+
+    setState((prev) => ({
+      ...prev,
+      matches: authoritativeMatches,
+    }));
+
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const ch = new BroadcastChannel('spl_live_scores_channel');
+        ch.postMessage({
+          type: 'SCHEDULE_UPDATED',
+          matches: authoritativeMatches,
+          lastUpdated: nowTs,
+        });
+        ch.close();
+      } catch {}
+    }
+
+    try {
+      await fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({
+          matches: authoritativeMatches,
+        }),
+      });
+    } catch {}
+
+    lastServerScoreTime.current = Date.now();
+
+    return {
+      success: true,
+      report,
+    };
   };
 
   const generateFixtures = async (
@@ -4975,6 +5141,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         clearPredefinedTeams,
         updateMatch,
         setMatches,
+        saveEditedSchedule,
         generateFixtures,
         deleteMatch,
         clearResults,
