@@ -42,6 +42,11 @@ import {
 import { SupabaseService } from '../services/supabaseService';
 import { isSupabaseConfigured, testSupabaseConnection } from '../lib/supabase';
 import { AuthService } from '../services/authService';
+import {
+  computeManualTeamEdit,
+  ManualTeamEditInput,
+  ManualTeamEditPreviewResult,
+} from '../utils/manualTeamEditEngine';
 
 export interface DatabaseDiagnosticResult {
   connected: boolean;
@@ -108,6 +113,15 @@ interface TournamentContextType {
   setTeamPlayer: (teamId: string, playerIndex: number, newPlayerId: string) => void;
   assignPlayerToTeam: (teamId: string, playerId: string) => void;
   removePlayerFromTeam: (teamId: string, playerId: string) => void;
+  saveManualTeamEdit: (
+    input: ManualTeamEditInput
+  ) => Promise<{
+    success: boolean;
+    conflict?: boolean;
+    error?: string;
+    code?: string;
+    preview?: ManualTeamEditPreviewResult;
+  }>;
   setTeams: (teams: Team[]) => Promise<boolean>;
   clearTeams: () => void;
   
@@ -2742,6 +2756,145 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     });
   };
 
+  const saveManualTeamEdit = async (
+    input: ManualTeamEditInput
+  ): Promise<{
+    success: boolean;
+    conflict?: boolean;
+    error?: string;
+    code?: string;
+    preview?: ManualTeamEditPreviewResult;
+  }> => {
+    const current = stateRef.current;
+    const preview = computeManualTeamEdit(input, {
+      teams: current.teams,
+      players: current.players,
+      predefinedTeams: current.predefinedTeams,
+      teamFormationMode: current.teamFormationMode,
+      matches: current.matches,
+      knockoutMatches: current.knockout?.matches || [],
+    });
+
+    if (!preview.valid) {
+      return {
+        success: false,
+        error: preview.error || 'Team validation failed.',
+        code: preview.code,
+        preview,
+      };
+    }
+
+    if (!preview.hasChanges) {
+      return {
+        success: true,
+        preview,
+      };
+    }
+
+    const affectedTeams: Team[] = [];
+    if (preview.primaryTeamAfter) {
+      affectedTeams.push(preview.primaryTeamAfter);
+    }
+    for (const ct of preview.counterpartTeamsAfter) {
+      affectedTeams.push(ct);
+    }
+
+    const baselineRostersByTeamId: Record<string, string[]> = {};
+    if (preview.primaryTeamBefore) {
+      baselineRostersByTeamId[preview.primaryTeamBefore.id] = [
+        ...preview.primaryTeamBefore.players,
+      ];
+    }
+    for (const ctBefore of preview.counterpartTeamsBefore) {
+      baselineRostersByTeamId[ctBefore.id] = [...ctBefore.players];
+    }
+
+    lastLocalTeamMutationTime.current = Date.now();
+    lastServerScoreTime.current = Date.now();
+
+    if (SupabaseService.isAvailable()) {
+      const dbRes = await SupabaseService.saveManualTeamRosterEdit({
+        affectedTeams,
+        baselineRostersByTeamId,
+        auditDetails: {
+          mode: current.teamFormationMode,
+          primaryTeamId: input.primaryTeamId,
+          primaryTeamName: preview.primaryTeamAfter?.name,
+          isSwap: preview.isSwap,
+          swaps: preview.swaps,
+          replacements: preview.replacements,
+          lockAction: input.lockAction || 'keep',
+        },
+      });
+
+      if (dbRes.conflict) {
+        const latestTeams = await SupabaseService.fetchTeams();
+        if (latestTeams && latestTeams.length > 0) {
+          setState((prev) => ({ ...prev, teams: latestTeams }));
+        }
+        return {
+          success: false,
+          conflict: true,
+          error:
+            dbRes.error ||
+            'Concurrent edit detected: Another admin modified one of these teams. Latest rosters have been loaded.',
+          preview,
+        };
+      }
+
+      if (!dbRes.success) {
+        return {
+          success: false,
+          error: dbRes.error || 'Failed to save team changes to Supabase database.',
+          preview,
+        };
+      }
+    }
+
+    // Apply verified state update locally
+    setState((prev) => ({
+      ...prev,
+      teams: preview.nextTeams,
+      predefinedTeams: preview.nextPredefinedTeams,
+    }));
+
+    // Broadcast immediate per-team updates across tabs (Public Homepage, Match Center, Umpire Mode, YouTube Live)
+    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+      try {
+        const ch = new BroadcastChannel('spl_live_scores_channel');
+        for (const updatedTeam of affectedTeams) {
+          ch.postMessage({
+            type: 'TEAM_UPDATED',
+            teamId: updatedTeam.id,
+            team: updatedTeam,
+            lastUpdated: Date.now(),
+          });
+        }
+        ch.close();
+      } catch {}
+    }
+
+    // Sync to local Express state backup
+    try {
+      await fetch('/api/tournament/state', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({
+          teams: preview.nextTeams,
+          predefinedTeams: preview.nextPredefinedTeams,
+        }),
+      });
+    } catch {}
+
+    lastLocalTeamMutationTime.current = Date.now();
+    lastServerScoreTime.current = Date.now();
+
+    return {
+      success: true,
+      preview,
+    };
+  };
+
   const setTeams = async (teams: Team[]): Promise<boolean> => {
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
@@ -4812,6 +4965,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setTeamPlayer,
         assignPlayerToTeam,
         removePlayerFromTeam,
+        saveManualTeamEdit,
         setTeams,
         clearTeams,
         setTeamFormationMode,

@@ -10,6 +10,7 @@ import {
   Copy,
   Trash2,
   ShieldCheck,
+  Edit2,
 } from 'lucide-react';
 import { useReducedMotion } from 'motion/react';
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
@@ -26,6 +27,7 @@ import {
   LotteryDrawAnimationStage,
   DrawAnimationPhase,
 } from './LotteryDrawAnimationStage';
+import { EditShuffledTeamModal } from './EditShuffledTeamModal';
 
 export const TokensView: React.FC = () => {
   const {
@@ -38,6 +40,7 @@ export const TokensView: React.FC = () => {
     toggleTeamLock,
     togglePlayerLockInTeam,
     setCaptainsBulk,
+    saveManualTeamEdit,
     generateFixtures,
     triggerCelebration,
   } = useTournament();
@@ -123,7 +126,13 @@ export const TokensView: React.FC = () => {
   // Captain slots & selection modal
   const [selectedCaptains, setSelectedCaptains] = useState<string[]>([]);
   const [isCaptainModalOpen, setIsCaptainModalOpen] = useState(false);
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
   const [toastMsg, setToastMsg] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const editingTeam = useMemo(
+    () => existingTeams.find((t) => t.id === editingTeamId) || null,
+    [existingTeams, editingTeamId]
+  );
 
   const showNotice = useCallback((text: string, type: 'success' | 'error' = 'error') => {
     setToastMsg({ text, type });
@@ -891,7 +900,19 @@ export const TokensView: React.FC = () => {
                         <span>Token {letter}</span>
                         {team.locked && <Lock className="w-3 h-3" />}
                       </span>
-                      <span>{team.badge || '🏸'}</span>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => setEditingTeamId(team.id)}
+                          title={`Edit ${team.name} members`}
+                          aria-label={`Edit ${team.name}`}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-black/25 hover:bg-black/40 text-white text-[10px] font-bold tracking-normal normal-case border border-white/20 transition-colors"
+                        >
+                          <Edit2 className="w-2.5 h-2.5" />
+                          <span>Edit</span>
+                        </button>
+                        <span>{team.badge || '🏸'}</span>
+                      </div>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <h4 className="font-display font-black text-lg truncate">{team.name}</h4>
@@ -983,7 +1004,7 @@ export const TokensView: React.FC = () => {
                       );
                     })}
 
-                    <div className="pt-2 flex items-center justify-between text-[11px] text-slate-400">
+                    <div className="pt-2 flex items-center justify-between gap-2 text-[11px] text-slate-400">
                       <button
                         type="button"
                         onClick={() => toggleTeamLock(team.id)}
@@ -1003,11 +1024,21 @@ export const TokensView: React.FC = () => {
                         </span>
                       </button>
 
-                      {lockedPlayersSet.size > 0 && !team.locked && (
-                        <span className="text-[10px] text-amber-400/90 font-semibold">
-                          {lockedPlayersSet.size} player{lockedPlayersSet.size === 1 ? '' : 's'} locked
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {lockedPlayersSet.size > 0 && !team.locked && (
+                          <span className="text-[10px] text-amber-400/90 font-semibold hidden sm:inline">
+                            {lockedPlayersSet.size} locked
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setEditingTeamId(team.id)}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] transition-all"
+                        >
+                          <Edit2 className="w-3 h-3" />
+                          <span>Edit Team</span>
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -1016,6 +1047,40 @@ export const TokensView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Manual Team Member Edit & Swap Modal */}
+      <EditShuffledTeamModal
+        isOpen={Boolean(editingTeam)}
+        team={editingTeam}
+        allTeams={existingTeams}
+        allPlayers={eligiblePlayers}
+        predefinedTeams={state.predefinedTeams}
+        teamFormationMode={state.teamFormationMode}
+        matches={state.matches}
+        knockoutMatches={state.knockout?.matches || []}
+        onClose={() => setEditingTeamId(null)}
+        onSave={async (input) => {
+          const res = await saveManualTeamEdit(input);
+          if (res.success && res.preview?.hasChanges) {
+            if (soundEnabled) sportsAudio.playFanfare();
+            if (res.preview.isSwap) {
+              const swappedNames = res.preview.counterpartTeamsAfter
+                .map((t) => t.name)
+                .join(', ');
+              showNotice(
+                `Swapped players between ${res.preview.primaryTeamAfter?.name} and ${swappedNames}!`,
+                'success'
+              );
+            } else {
+              showNotice(
+                `Updated ${res.preview.primaryTeamAfter?.name || 'team'} roster successfully!`,
+                'success'
+              );
+            }
+          }
+          return res;
+        }}
+      />
 
       {/* Clear Confirmation */}
       <ConfirmModal

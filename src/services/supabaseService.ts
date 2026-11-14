@@ -468,6 +468,162 @@ export class SupabaseService {
     }
   }
 
+  static async saveManualTeamRosterEdit(params: {
+    affectedTeams: Team[];
+    baselineRostersByTeamId?: Record<string, string[]>;
+    auditDetails?: Record<string, any>;
+  }): Promise<{ success: boolean; conflict?: boolean; error?: string }> {
+    const { affectedTeams, baselineRostersByTeamId, auditDetails } = params;
+    if (!this.isAvailable()) {
+      return { success: true };
+    }
+    if (!affectedTeams || affectedTeams.length === 0) {
+      return { success: false, error: 'No affected teams provided.' };
+    }
+
+    try {
+      const affectedTeamIds = affectedTeams.map((t) => t.id).filter(Boolean);
+      const affectedTeamIdSet = new Set(affectedTeamIds);
+      const proposedPlayerIds = Array.from(
+        new Set(affectedTeams.flatMap((t) => (t.players || []).filter(Boolean)))
+      );
+
+      // 1. Concurrency check against authoritative Supabase state
+      if (baselineRostersByTeamId && Object.keys(baselineRostersByTeamId).length > 0) {
+        const [{ data: currentTeamRosters }, { data: currentPlayerBindings }] = await Promise.all([
+          supabase
+            .from('team_players')
+            .select('team_id, player_id, slot_index')
+            .in('team_id', affectedTeamIds)
+            .order('slot_index', { ascending: true }),
+          proposedPlayerIds.length > 0
+            ? supabase
+                .from('team_players')
+                .select('team_id, player_id')
+                .in('player_id', proposedPlayerIds)
+            : Promise.resolve({ data: [] as any[] }),
+        ]);
+
+        if (currentTeamRosters && currentTeamRosters.length > 0) {
+          const dbRosterByTeam = new Map<string, string[]>();
+          for (const row of currentTeamRosters as any[]) {
+            const list = dbRosterByTeam.get(row.team_id) || [];
+            list.push(row.player_id);
+            dbRosterByTeam.set(row.team_id, list);
+          }
+
+          for (const teamId of affectedTeamIds) {
+            const expected = baselineRostersByTeamId[teamId];
+            const actual = dbRosterByTeam.get(teamId);
+            // Only flag a conflict if the team already existed in DB with a different roster set
+            if (expected && actual && actual.length > 0) {
+              const expectedSorted = [...expected].sort().join(',');
+              const actualSorted = [...actual].sort().join(',');
+              if (expectedSorted !== actualSorted) {
+                return {
+                  success: false,
+                  conflict: true,
+                  error:
+                    'Concurrent edit detected: Another admin modified one of these teams since you opened the editor. Latest rosters have been synced.',
+                };
+              }
+            }
+          }
+        }
+
+        if (currentPlayerBindings && currentPlayerBindings.length > 0) {
+          for (const row of currentPlayerBindings as any[]) {
+            if (row.team_id && !affectedTeamIdSet.has(row.team_id)) {
+              return {
+                success: false,
+                conflict: true,
+                error:
+                  'Concurrent edit detected: One of the selected players was just assigned to another team by another admin.',
+              };
+            }
+          }
+        }
+      }
+
+      const nowIso = new Date().toISOString();
+      const teamPayloads = affectedTeams.map((team) => ({
+        id: team.id,
+        name: team.name,
+        short_name: this.encodeShortName(team.token, team.lockedPlayerIds),
+        captain_id: team.captainId || null,
+        avatar_color: team.avatarColor || 'from-amber-500 to-orange-600',
+        badge: team.badge || '🏸',
+        locked: Boolean(team.locked),
+        updated_at: nowIso,
+      }));
+
+      // 2. Upsert only affected teams
+      let { error: teamUpsertErr } = await supabase
+        .from('teams')
+        .upsert(teamPayloads as any, { onConflict: 'id' });
+
+      if (teamUpsertErr) {
+        // Fallback with captain_id nulled if captain player row is not yet in public.players
+        const safePayloads = teamPayloads.map((tp) => ({ ...tp, captain_id: null }));
+        const retryRes = await supabase
+          .from('teams')
+          .upsert(safePayloads as any, { onConflict: 'id' });
+        teamUpsertErr = retryRes.error;
+      }
+
+      if (teamUpsertErr) {
+        console.error('[SupabaseService] saveManualTeamRosterEdit team upsert error:', teamUpsertErr.message);
+        return { success: false, error: teamUpsertErr.message };
+      }
+
+      // 3. Remove previous player bindings for affected teams AND any stale bindings for proposed players
+      await supabase.from('team_players').delete().in('team_id', affectedTeamIds);
+      if (proposedPlayerIds.length > 0) {
+        await supabase.from('team_players').delete().in('player_id', proposedPlayerIds);
+      }
+
+      // 4. Insert updated team_players rows for affected teams
+      const rosterRows: {
+        team_id: string;
+        player_id: string;
+        slot_index: number;
+        is_captain: boolean;
+      }[] = [];
+
+      for (const team of affectedTeams) {
+        const uniquePlayers = Array.from(new Set((team.players || []).filter(Boolean)));
+        uniquePlayers.forEach((playerId, idx) => {
+          rosterRows.push({
+            team_id: team.id,
+            player_id: playerId,
+            slot_index: idx,
+            is_captain: team.captainId === playerId,
+          });
+        });
+      }
+
+      if (rosterRows.length > 0) {
+        const { error: rosterInsertErr } = await supabase
+          .from('team_players')
+          .insert(rosterRows as any);
+
+        if (rosterInsertErr) {
+          console.error('[SupabaseService] saveManualTeamRosterEdit roster insert error:', rosterInsertErr.message);
+          return { success: false, error: rosterInsertErr.message };
+        }
+      }
+
+      if (auditDetails) {
+        void this.logAudit('team_manual_edit', 'team', affectedTeams[0]?.id, auditDetails);
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      console.error('[SupabaseService] saveManualTeamRosterEdit exception:', err);
+      return { success: false, error: err?.message || 'Failed to save manual team edit' };
+    }
+  }
+
   static async deleteTeam(id: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
