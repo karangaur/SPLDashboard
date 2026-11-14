@@ -30,7 +30,7 @@ export const BadmintonHeroVisual: React.FC<BadmintonHeroVisualProps> = ({
             loading="eager"
             decoding="async"
             onError={() => setImgError(true)}
-            className="absolute inset-0 w-full h-full object-cover object-[center_22%] transition-transform duration-700 hover:scale-[1.03]"
+            className="absolute inset-0 w-full h-full object-cover object-[78%_22%] transition-transform duration-700 hover:scale-[1.03]"
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#121728] via-[#090b12] to-[#1a0d08] flex items-center justify-center">
