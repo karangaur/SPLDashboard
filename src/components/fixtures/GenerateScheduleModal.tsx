@@ -18,12 +18,14 @@ interface GenerateScheduleModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess?: (count: number) => void;
+  onOpenScheduleEditor?: () => void;
 }
 
 export const GenerateScheduleModal: React.FC<GenerateScheduleModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
+  onOpenScheduleEditor,
 }) => {
   const { state, generateFixtures } = useTournament();
 
@@ -186,10 +188,10 @@ export const GenerateScheduleModal: React.FC<GenerateScheduleModalProps> = ({
 
           {/* Warning Banner when replacing existing schedule */}
           {existingMatchesCount > 0 && (
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2">
+            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 space-y-2.5">
               <div className="flex items-start gap-2.5">
                 <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-                <div className="space-y-1 text-xs">
+                <div className="space-y-1 text-xs flex-1">
                   <h4 className="font-bold text-amber-300">
                     Replace Existing Schedule ({existingMatchesCount} Matches)
                   </h4>
@@ -204,6 +206,21 @@ export const GenerateScheduleModal: React.FC<GenerateScheduleModalProps> = ({
                         Notice: {liveMatchesCount} live and {completedMatchesCount} finished match
                         results will be cleared upon replacement.
                       </span>
+                    </div>
+                  )}
+                  {onOpenScheduleEditor && (
+                    <div className="pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          onClose();
+                          onOpenScheduleEditor();
+                        }}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 text-xs font-black shadow-md transition-all active:scale-95"
+                      >
+                        <span aria-hidden="true">✏️</span>
+                        <span>Edit Existing Schedule Instead (Preserve Scores & Order)</span>
+                      </button>
                     </div>
                   )}
                 </div>

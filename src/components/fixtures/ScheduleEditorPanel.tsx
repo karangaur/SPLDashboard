@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   GripVertical,
   ArrowUp,
@@ -77,6 +77,37 @@ export const ScheduleEditorPanel: React.FC<ScheduleEditorPanelProps> = ({
   const [draftMatches, setDraftMatches] = useState<Match[]>(normalizedInitial);
   const [historyStack, setHistoryStack] = useState<Match[][]>([]);
   const [editorTab, setEditorTab] = useState<EditorTabMode>('sequence');
+
+  // Keep draftMatches synced with Supabase baselineMatches when there are no unsaved local edits,
+  // and always preserve live/completed scores if a match updates in real time while editing.
+  useEffect(() => {
+    if (historyStack.length === 0) {
+      setDraftMatches(normalizedInitial);
+    } else {
+      const latestById = new Map(normalizedInitial.map((m) => [m.id, m]));
+      setDraftMatches((prev) =>
+        prev.map((dm) => {
+          const fresh = latestById.get(dm.id);
+          if (!fresh) return dm;
+          if (
+            fresh.status === 'live' ||
+            fresh.status === 'paused' ||
+            fresh.status === 'completed'
+          ) {
+            return {
+              ...dm,
+              status: fresh.status,
+              scoreA: fresh.scoreA,
+              scoreB: fresh.scoreB,
+              winner: fresh.winner,
+              sets: fresh.sets,
+            };
+          }
+          return dm;
+        })
+      );
+    }
+  }, [normalizedInitial, historyStack.length]);
 
   // Drag-and-drop state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);

@@ -49,7 +49,21 @@ export const FixturesView: React.FC = () => {
 
   const currentUser = AuthService.getCurrentUser();
   const canEditSchedule =
-    !currentUser || currentUser.role === 'tournament_director';
+    !currentUser ||
+    AuthService.canManageTournament() ||
+    currentUser.role === 'super_admin' ||
+    currentUser.role === 'tournament_director';
+
+  const handleToggleScheduleEditor = () => {
+    if (state.matches.length === 0) {
+      showToast(
+        'No generated fixtures available to edit yet. Please click "Generate Schedule" or "Add Match" first.',
+        'error'
+      );
+      return;
+    }
+    setIsScheduleEditMode((prev) => !prev);
+  };
 
   // Manual Match creation state
   const [manualTeamA, setManualTeamA] = useState('');
@@ -269,16 +283,24 @@ export const FixturesView: React.FC = () => {
             <span>Generate Schedule</span>
           </button>
 
-          {state.matches.length > 0 && canEditSchedule && (
+          {canEditSchedule && (
             <button
               type="button"
-              onClick={() => setIsScheduleEditMode((prev) => !prev)}
+              onClick={handleToggleScheduleEditor}
+              aria-disabled={state.matches.length === 0}
+              data-testid="edit-schedule-button"
               className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 border ${
-                isScheduleEditMode
+                state.matches.length === 0
+                  ? 'bg-white/5 text-slate-400 border-white/10 opacity-75 hover:bg-white/10'
+                  : isScheduleEditMode
                   ? 'bg-amber-400 text-slate-950 border-amber-300 ring-2 ring-amber-400/40'
-                  : 'bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border-amber-500/35'
+                  : 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/40'
               }`}
-              title="Manually edit, reorder, or customize generated tournament fixtures"
+              title={
+                state.matches.length === 0
+                  ? 'Generate fixtures first to enable manual schedule editing'
+                  : 'Manually edit, reorder, or customize generated tournament fixtures'
+              }
             >
               <span aria-hidden="true">✏️</span>
               <span>{isScheduleEditMode ? 'Editing Schedule' : 'Edit Schedule'}</span>
@@ -401,6 +423,49 @@ export const FixturesView: React.FC = () => {
         </div>
       </div>
 
+      {/* Generated Fixtures Section Header Bar with Prominent Edit Schedule Button */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-4 py-3 rounded-2xl bg-slate-900/70 border border-white/10">
+        <div className="flex flex-wrap items-center gap-2">
+          <h2 className="text-sm sm:text-base font-extrabold text-white tracking-tight">
+            Generated Fixtures
+          </h2>
+          <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[11px] font-mono font-bold text-amber-300">
+            {filteredMatches.length} of {state.matches.length} Matches
+          </span>
+          {state.matches.length === 0 && (
+            <span className="text-xs text-slate-400">
+              — Generate fixtures first to unlock manual schedule editing
+            </span>
+          )}
+        </div>
+
+        {canEditSchedule && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleToggleScheduleEditor}
+              aria-disabled={state.matches.length === 0}
+              className={`w-full sm:w-auto flex items-center justify-center gap-1.5 px-3.5 py-2 min-h-[36px] text-xs font-bold rounded-xl transition-all active:scale-95 border ${
+                state.matches.length === 0
+                  ? 'bg-white/5 text-slate-400 border-white/10 opacity-70 cursor-not-allowed'
+                  : isScheduleEditMode
+                  ? 'bg-amber-400 text-slate-950 border-amber-300 shadow-md'
+                  : 'bg-gradient-to-r from-amber-500/25 to-orange-500/20 hover:from-amber-500/35 hover:to-orange-500/30 text-amber-300 border-amber-500/40 shadow-sm'
+              }`}
+            >
+              <span aria-hidden="true">✏️</span>
+              <span>
+                {isScheduleEditMode
+                  ? 'Close Schedule Editor'
+                  : state.matches.length > 0
+                  ? 'Edit Schedule'
+                  : 'Edit Schedule (No Fixtures)'}
+              </span>
+            </button>
+          </div>
+        )}
+      </div>
+
       {/* Matches Grid */}
       {filteredMatches.length > 0 ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -463,6 +528,17 @@ export const FixturesView: React.FC = () => {
                   </div>
 
                   <div className="flex items-center gap-1.5 sm:gap-2">
+                    {canEditSchedule && (
+                      <button
+                        type="button"
+                        onClick={() => setIsScheduleEditMode(true)}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-slate-200 bg-white/5 hover:bg-amber-500/20 hover:text-amber-300 border border-white/10 hover:border-amber-500/30 transition-all active:scale-95"
+                        title="Edit this fixture in Schedule Editing Mode"
+                      >
+                        <span aria-hidden="true">✏️</span>
+                        <span>Edit</span>
+                      </button>
+                    )}
                     <button
                       onClick={() => setLiveScoringMatchId(match.id)}
                       className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
@@ -795,8 +871,18 @@ export const FixturesView: React.FC = () => {
       <GenerateScheduleModal
         isOpen={generateModalOpen}
         onClose={() => setGenerateModalOpen(false)}
+        onOpenScheduleEditor={
+          canEditSchedule
+            ? () => {
+                setIsScheduleEditMode(true);
+              }
+            : undefined
+        }
         onSuccess={(count) => {
-          showToast(`Tournament schedule regenerated with ${count} matches.`, 'success');
+          showToast(
+            `Tournament schedule generated with ${count} matches. Click "✏️ Edit Schedule" to customize fixtures.`,
+            'success'
+          );
         }}
       />
 
