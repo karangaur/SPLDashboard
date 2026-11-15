@@ -323,7 +323,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                     role="tab"
                     aria-selected={isActive}
                     onClick={() => handleSelectTab(tab.id)}
-                    className={`px-3 py-2 min-h-[40px] rounded-lg text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
+                    className={`px-3 py-2 min-h-[44px] sm:min-h-[40px] rounded-lg text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
                       isActive
                         ? tab.id === 'live'
                           ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
@@ -352,7 +352,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                 <button
                   type="button"
                   onClick={() => setSelectedCourt('all')}
-                  className={`px-3 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-3 py-1.5 min-h-[40px] sm:min-h-[36px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
                     selectedCourt === 'all'
                       ? 'bg-white/15 text-white'
                       : 'text-slate-400 hover:text-white'
@@ -368,7 +368,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                       key={c}
                       type="button"
                       onClick={() => setSelectedCourt(c)}
-                      className={`px-3 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                      className={`px-3 py-1.5 min-h-[40px] sm:min-h-[36px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
                         isActive
                           ? 'bg-amber-400/20 text-amber-300 border border-amber-400/35'
                           : 'text-slate-400 hover:text-white'

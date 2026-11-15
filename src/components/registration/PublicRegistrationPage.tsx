@@ -438,18 +438,18 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   return (
     <div className="min-h-screen bg-[#070a13] text-slate-100 selection:bg-emerald-400 selection:text-slate-950 flex flex-col justify-between py-6 px-4 sm:px-6 lg:px-8">
       {/* Top Header Bar */}
-      <header className="max-w-3xl w-full mx-auto flex items-center justify-between pb-6 border-b border-white/10">
-        <div className="flex items-center gap-3">
+      <header className="max-w-3xl w-full mx-auto flex flex-wrap items-center justify-between gap-3 pb-5 sm:pb-6 border-b border-white/10">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <img
             src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
             alt="Smash Premier League Logo"
-            className="h-10 sm:h-12 w-auto object-contain drop-shadow"
+            className="h-9 sm:h-12 w-auto object-contain drop-shadow shrink-0"
           />
-          <div>
-            <span className="block font-display text-base sm:text-lg font-black tracking-tight text-white leading-tight">
+          <div className="min-w-0">
+            <span className="block font-display text-sm sm:text-lg font-black tracking-tight text-white leading-tight truncate">
               {formConfig.tournamentName || 'Smash Premier League'}
             </span>
-            <span className="block text-[11px] font-semibold text-slate-400">
+            <span className="block text-[11px] font-semibold text-slate-400 truncate">
               Official Athlete Registration Portal · {formConfig.seasonTitle}
             </span>
           </div>
@@ -458,7 +458,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
         {onBackToApp && (
           <button
             onClick={onBackToApp}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors shrink-0"
           >
             <span>Organizer Hub</span>
           </button>
@@ -669,7 +669,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
           </div>
         ) : (
           /* State 3: Public Athlete Registration Form */
-          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-6 sm:p-8 shadow-2xl relative overflow-hidden space-y-6">
+          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-4 sm:p-8 shadow-2xl relative overflow-hidden space-y-6">
             {/* Athletic subtle glow banner */}
             <div
               className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-3xl opacity-10 pointer-events-none"
@@ -809,7 +809,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           value={currentValue || ''}
                           onChange={(e) => handleFieldChange(field.id, e.target.value)}
                           placeholder={field.placeholder || `Enter ${field.label.toLowerCase()}`}
-                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
                         />
                       )}
 
@@ -821,14 +821,14 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           value={currentValue || ''}
                           onChange={(e) => handleFieldChange(field.id, e.target.value)}
                           placeholder={field.placeholder || 'Enter notes or information...'}
-                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors resize-none"
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-base sm:text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors resize-none"
                         />
                       )}
 
                       {/* Field Type: Mobile / Phone with +91 */}
                       {(field.type === 'mobile' || field.type === 'phone') && (
                         <div className="relative">
-                          <span className="absolute left-3.5 top-2.5 text-xs font-mono font-bold text-slate-400">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs font-mono font-bold text-slate-400">
                             +91
                           </span>
                           <input
@@ -840,7 +840,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                               handleFieldChange(field.id, e.target.value.replace(/\D/g, ''))
                             }
                             placeholder="9876543210"
-                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-12 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono tracking-wider focus:outline-none focus:border-emerald-500 transition-colors"
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-12 pr-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white placeholder-slate-600 font-mono tracking-wider focus:outline-none focus:border-emerald-500 transition-colors"
                           />
                         </div>
                       )}
@@ -853,7 +853,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           value={currentValue || ''}
                           onChange={(e) => handleFieldChange(field.id, e.target.value)}
                           placeholder="player@example.com"
-                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
                         />
                       )}
 
@@ -865,7 +865,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           value={currentValue || ''}
                           onChange={(e) => handleFieldChange(field.id, e.target.value)}
                           placeholder={field.placeholder || 'e.g. 24'}
-                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 transition-colors"
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 transition-colors"
                         />
                       )}
 
@@ -880,7 +880,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                             value={currentValue || ''}
                             onChange={(e) => handleFieldChange(field.id, e.target.value)}
                             placeholder="e.g. 24"
-                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 transition-colors"
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white placeholder-slate-600 font-mono focus:outline-none focus:border-emerald-500 transition-colors"
                           />
                           {(field.min != null || field.max != null) && (
                             <span className="text-[10px] text-slate-500">
@@ -893,14 +893,14 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                       {/* Field Type: City / Locality */}
                       {field.type === 'city' && (
                         <div className="relative">
-                          <span className="absolute left-3.5 top-2.5 text-xs text-slate-400">📍</span>
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-xs text-slate-400">📍</span>
                           <input
                             type="text"
                             required={field.required}
                             value={currentValue || ''}
                             onChange={(e) => handleFieldChange(field.id, e.target.value)}
                             placeholder={field.placeholder || 'e.g. Maharajganj, Gorakhpur'}
-                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
+                            className="w-full bg-slate-900/90 border border-white/10 rounded-xl pl-9 pr-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white placeholder-slate-600 focus:outline-none focus:border-emerald-500 transition-colors"
                           />
                         </div>
                       )}
@@ -912,7 +912,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           required={field.required}
                           value={currentValue || ''}
                           onChange={(e) => handleFieldChange(field.id, e.target.value)}
-                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                          className="w-full bg-slate-900/90 border border-white/10 rounded-xl px-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                         />
                       )}
 
@@ -922,7 +922,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           required={field.required}
                           value={currentValue || ''}
                           onChange={(e) => handleFieldChange(field.id, e.target.value)}
-                          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
+                          className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 min-h-[44px] text-base sm:text-xs text-white focus:outline-none focus:border-emerald-500 transition-colors"
                         >
                           <option value="">Choose an option...</option>
                           {field.options?.map((opt, i) => (
@@ -943,7 +943,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                                 key={i}
                                 type="button"
                                 onClick={() => handleFieldChange(field.id, opt)}
-                                className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
+                                className={`flex items-center gap-3 p-3 min-h-[44px] rounded-xl border text-left transition-all ${
                                   isSelected
                                     ? 'bg-white/10 border-white/30 ring-1 ring-white/20'
                                     : 'bg-slate-900/60 border-white/5 hover:bg-slate-900 text-slate-300'
@@ -984,7 +984,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                                   handleFieldChange(field.id, g.id);
                                   handleFieldChange('gender', g.id === 'Male' ? 'M' : g.id === 'Female' ? 'F' : 'Other');
                                 }}
-                                className={`flex items-center justify-center gap-1.5 p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                                className={`flex items-center justify-center gap-1.5 p-2.5 min-h-[44px] rounded-xl border text-xs font-bold transition-all ${
                                   isSelected
                                     ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                                     : 'bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-900'
@@ -1008,7 +1008,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                                 key={opt}
                                 type="button"
                                 onClick={() => handleFieldChange(field.id, opt)}
-                                className={`flex items-center justify-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all ${
+                                className={`flex items-center justify-center gap-2 p-2.5 min-h-[44px] rounded-xl border text-xs font-bold transition-all ${
                                   isSelected
                                     ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
                                     : 'bg-slate-900/60 border-white/10 text-slate-400 hover:text-white hover:bg-slate-900'
@@ -1032,7 +1032,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                                 key={i}
                                 type="button"
                                 onClick={() => handleCheckboxToggle(field.id, opt)}
-                                className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${
+                                className={`flex items-center gap-3 p-3 min-h-[44px] rounded-xl border text-left transition-all ${
                                   isChecked
                                     ? 'bg-white/10 border-white/30 ring-1 ring-white/20'
                                     : 'bg-slate-900/60 border-white/5 hover:bg-slate-900 text-slate-300'
@@ -1160,7 +1160,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                     <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                       <a
                         href={gpayUri}
-                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white transition-all hover:scale-[1.02]"
+                        className="flex items-center justify-center gap-1.5 p-2.5 min-h-[44px] rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-bold text-white transition-all hover:scale-[1.02]"
                       >
                         <span className="text-emerald-400 font-black">G</span>
                         <span>Google Pay</span>
@@ -1168,7 +1168,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
                       <a
                         href={phonepeUri}
-                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-xs font-bold text-purple-300 transition-all hover:scale-[1.02]"
+                        className="flex items-center justify-center gap-1.5 p-2.5 min-h-[44px] rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-xs font-bold text-purple-300 transition-all hover:scale-[1.02]"
                       >
                         <span className="text-purple-400 font-black">Pe</span>
                         <span>PhonePe</span>
@@ -1176,7 +1176,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
                       <a
                         href={paytmUri}
-                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-xs font-bold text-sky-300 transition-all hover:scale-[1.02]"
+                        className="flex items-center justify-center gap-1.5 p-2.5 min-h-[44px] rounded-xl bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-xs font-bold text-sky-300 transition-all hover:scale-[1.02]"
                       >
                         <span className="text-sky-400 font-black">₹</span>
                         <span>Paytm</span>
@@ -1184,7 +1184,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
                       <a
                         href={genericUri}
-                        className="flex items-center justify-center gap-1.5 p-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 transition-all hover:scale-[1.02]"
+                        className="flex items-center justify-center gap-1.5 p-2.5 min-h-[44px] rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-xs font-bold text-amber-300 transition-all hover:scale-[1.02]"
                       >
                         <span>⚡ Any UPI App</span>
                       </a>
@@ -1220,7 +1220,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                           <button
                             type="button"
                             onClick={handleCopyUpiId}
-                            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/15 text-slate-300 transition-colors"
+                            className="flex items-center gap-1 px-2.5 py-1.5 min-h-[36px] rounded-lg text-xs font-bold bg-white/10 hover:bg-white/15 text-slate-300 transition-colors"
                           >
                             {copiedUpi ? (
                               <>
@@ -1263,7 +1263,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                   type="submit"
                   disabled={submitting}
                   style={{ backgroundColor: accentColor }}
-                  className="w-full py-3.5 rounded-2xl font-display font-black text-slate-950 text-sm tracking-wide shadow-xl hover:opacity-95 active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="w-full py-3.5 min-h-[48px] rounded-2xl font-display font-black text-slate-950 text-sm tracking-wide shadow-xl hover:opacity-95 active:scale-[0.99] transition-all flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {submitting ? (
                     <>

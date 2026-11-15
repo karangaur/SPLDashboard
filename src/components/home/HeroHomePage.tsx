@@ -109,9 +109,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
-  // Helper lookups
-  const getTeam = (teamId?: string) => state.teams.find((t) => t.id === teamId);
-  const getPlayer = (playerId?: string) => state.players.find((p) => p.id === playerId);
+  // Memoized O(1) helper lookups to prevent repeated linear array scans across renders
+  const teamMap = useMemo(() => new Map(state.teams.map((t) => [t.id, t])), [state.teams]);
+  const playerMap = useMemo(() => new Map(state.players.map((p) => [p.id, p])), [state.players]);
+  const getTeam = useCallback((teamId?: string) => (teamId ? teamMap.get(teamId) : undefined), [teamMap]);
+  const getPlayer = useCallback((playerId?: string) => (playerId ? playerMap.get(playerId) : undefined), [playerMap]);
 
   const formatKnockoutStageLabel = (ko: { stage?: 'ELIM' | 'QF' | 'SF' | 'F'; slot?: number; playoffRound?: any; matchLabel?: string }) => {
     return getPlayoffMatchDisplayLabel(ko, state.knockout?.format).title;
@@ -413,7 +415,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               onClick={() => setMobileNavOpen((prev) => !prev)}
               aria-label="Toggle public navigation menu"
               aria-expanded={mobileNavOpen}
-              className="md:hidden p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-colors"
+              className="md:hidden p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-colors"
             >
               {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -423,32 +425,32 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
         {/* Mobile Navigation Drawer */}
         {mobileNavOpen && (
-          <div className="md:hidden border-t border-white/10 bg-[#060813]/98 backdrop-blur-xl px-4 py-4 space-y-3 animate-fade-in shadow-2xl">
+          <div className="md:hidden border-t border-white/10 bg-[#060813]/98 backdrop-blur-xl px-4 py-4 max-h-[calc(100dvh-4rem)] overflow-y-auto space-y-3 animate-fade-in shadow-2xl">
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => scrollToSection('live-match')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-left"
               >
                 <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
                 <span>Live Scoreboard</span>
               </button>
               <button
                 onClick={() => scrollToSection('matches-schedule')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
               >
                 <Swords className="w-3.5 h-3.5 text-lime-400 shrink-0" />
                 <span>Match Schedule</span>
               </button>
               <button
                 onClick={() => scrollToSection('teams-roster')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
               >
                 <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 <span>The Teams ({state.teams.length})</span>
               </button>
               <button
                 onClick={() => scrollToSection('standings-table')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
               >
                 <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Points Table</span>
@@ -458,7 +460,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
               <button
                 onClick={() => scrollToSection('tournament-info')}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/10 text-slate-300 text-xs font-semibold"
+                className="w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl bg-white/[0.03] hover:bg-white/10 text-slate-300 text-xs font-semibold"
               >
                 <span>Venue & Tournament Rules</span>
                 <MapPin className="w-4 h-4 text-amber-400" />
@@ -471,7 +473,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     setMobileNavOpen(false);
                     onOpenPublicRegister();
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 min-h-[44px] rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg cursor-pointer"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Register as an Athlete</span>
@@ -1021,40 +1023,40 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           aria-modal="true"
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in"
         >
-          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/15 rounded-3xl p-5 sm:p-8 shadow-2xl relative">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/15 rounded-2xl sm:rounded-3xl p-4 sm:p-8 shadow-2xl relative">
             <button
               onClick={() => setDetailMatch(null)}
               aria-label="Close match details"
-              className="absolute top-4 right-4 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="absolute top-3.5 right-3.5 sm:top-4 sm:right-4 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-lime-400 mb-1">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 text-xs font-bold uppercase tracking-wider text-lime-400 mb-1 pr-10">
               <span>{detailMatch.matchType === 'knockout' ? 'Knockout Championship' : 'Match Center Card'}</span>
               <span>•</span>
               <span>{detailMatch.courtName || state.settings.courtNames?.[detailMatch.court - 1]?.trim() || `Court ${detailMatch.court}`}</span>
             </div>
 
-            <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">
+            <h3 className="text-lg sm:text-xl font-black text-white font-display uppercase tracking-tight pr-10">
               {detailMatch.matchType === 'knockout'
                 ? `${detailMatch.stageLabel || 'Knockout Stage'} Breakdown`
                 : `Round ${detailMatch.round} Fixture Breakdown`}
             </h3>
 
             {/* Scorecard Body */}
-            <div className="mt-6 p-5 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
-              <div className="flex items-center justify-between gap-3">
+            <div className="mt-5 sm:mt-6 p-3.5 sm:p-5 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
+              <div className="flex items-center justify-between gap-2.5 sm:gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="text-2xl shrink-0">{getTeam(detailMatch.teamA)?.badge || '🏸'}</span>
                   <div className="min-w-0">
-                    <p className="font-bold text-white text-base truncate">{getTeam(detailMatch.teamA)?.name || 'Awaiting Team'}</p>
+                    <p className="font-bold text-white text-sm sm:text-base truncate">{getTeam(detailMatch.teamA)?.name || 'Awaiting Team'}</p>
                     <p className="text-xs text-slate-400 mt-0.5 truncate">
                       {(getTeam(detailMatch.teamA)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
                     </p>
                   </div>
                 </div>
-                <span className="text-3xl font-black font-mono text-lime-400 shrink-0">
+                <span className="text-2xl sm:text-3xl font-black font-mono text-lime-400 shrink-0 tabular-nums">
                   {detailMatch.scoreA ?? 0}
                 </span>
               </div>
@@ -1070,7 +1072,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     : 'Scheduled Match'}
                 </span>
                 {detailMatch.sets && detailMatch.sets.length > 0 && (
-                  <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1.5">
                     {detailMatch.sets.map((s, idx) => (
                       <span
                         key={idx}
@@ -1083,17 +1085,17 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center justify-between gap-2.5 sm:gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="text-2xl shrink-0">{getTeam(detailMatch.teamB)?.badge || '🏸'}</span>
                   <div className="min-w-0">
-                    <p className="font-bold text-white text-base truncate">{getTeam(detailMatch.teamB)?.name || 'Awaiting Team'}</p>
+                    <p className="font-bold text-white text-sm sm:text-base truncate">{getTeam(detailMatch.teamB)?.name || 'Awaiting Team'}</p>
                     <p className="text-xs text-slate-400 mt-0.5 truncate">
                       {(getTeam(detailMatch.teamB)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
                     </p>
                   </div>
                 </div>
-                <span className="text-3xl font-black font-mono text-white shrink-0">
+                <span className="text-2xl sm:text-3xl font-black font-mono text-white shrink-0 tabular-nums">
                   {detailMatch.scoreB ?? 0}
                 </span>
               </div>
@@ -1107,10 +1109,10 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               </div>
             )}
 
-            <div className="mt-6 flex justify-end">
+            <div className="mt-5 sm:mt-6 flex justify-end">
               <button
                 onClick={() => setDetailMatch(null)}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white transition-colors"
+                className="w-full sm:w-auto px-5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white transition-colors"
               >
                 Close Scorecard
               </button>

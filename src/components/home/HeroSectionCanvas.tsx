@@ -502,14 +502,14 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
           type="button"
           onClick={toggleVideoPlay}
           aria-label={videoManuallyPaused ? 'Play background video' : 'Pause background video'}
-          className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950/75 hover:bg-slate-900 border border-white/15 text-[11px] font-semibold text-slate-200 backdrop-blur-md transition-colors cursor-pointer"
+          className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1.5 px-3 py-1.5 min-h-[40px] sm:min-h-[36px] rounded-lg bg-slate-950/75 hover:bg-slate-900 border border-white/15 text-[11px] font-semibold text-slate-200 backdrop-blur-md transition-colors cursor-pointer"
         >
           {videoManuallyPaused ? <Play className="w-3.5 h-3.5 text-amber-300" /> : <Pause className="w-3.5 h-3.5 text-amber-300" />}
           <span className="hidden sm:inline">{videoManuallyPaused ? 'Play Video' : 'Pause Video'}</span>
         </button>
       )}
 
-      <div className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div className="relative z-10 w-full max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8">
         <div
           className={
             showTwoColumnGrid

@@ -101,31 +101,31 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
       </div>
 
       {/* Top Bar / Minimal Navigation */}
-      <header className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex items-center justify-between border-b border-white/5">
-        <div className="flex items-center gap-3">
+      <header className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-3 border-b border-white/5">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <img
             src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
             alt="Smash Premier League"
-            className="h-10 sm:h-12 w-auto object-contain drop-shadow"
+            className="h-9 sm:h-12 w-auto object-contain drop-shadow shrink-0"
           />
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-display text-lg font-black tracking-tight text-white uppercase">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
+              <span className="font-display text-base sm:text-lg font-black tracking-tight text-white uppercase truncate">
                 Smash Premier League
               </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono">
+              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono shrink-0">
                 ADMIN
               </span>
             </div>
-            <p className="text-xs text-slate-400 font-medium">Maharajganj Badminton Tournament Suite</p>
+            <p className="text-[11px] sm:text-xs text-slate-400 font-medium truncate">Maharajganj Badminton Tournament Suite</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {onBackToHome && (
             <button
               onClick={onBackToHome}
-              className="px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
+              className="px-3.5 py-2 min-h-[40px] text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
             >
               ← Tournament Home
             </button>
@@ -136,7 +136,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             <button
               type="button"
               onClick={onGoToPublicRegister}
-              className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
+              className="flex items-center gap-2 px-3.5 py-2 min-h-[40px] text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
             >
               <span>Public Registration</span>
               <ArrowRight className="w-3.5 h-3.5" />
@@ -220,9 +220,9 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
 
             {/* Quick Athlete Registration Link Banner */}
             {onGoToPublicRegister && (
-              <div className="p-4 rounded-xl border border-lime-500/20 bg-lime-500/[0.04] flex items-center justify-between">
+              <div className="p-4 rounded-xl border border-lime-500/20 bg-lime-500/[0.04] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-2 rounded-lg bg-lime-400/10 text-lime-400">
+                  <div className="p-2 rounded-lg bg-lime-400/10 text-lime-400 shrink-0">
                     <Trophy className="w-5 h-5" />
                   </div>
                   <div>
@@ -238,7 +238,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
                   <button
                     type="button"
                     onClick={onGoToPublicRegister}
-                    className="px-3.5 py-2 text-xs font-black uppercase tracking-wider text-slate-950 bg-lime-400 hover:bg-lime-300 rounded-lg shadow-md transition-all shrink-0"
+                    className="w-full sm:w-auto px-4 py-2.5 min-h-[42px] text-xs font-black uppercase tracking-wider text-slate-950 bg-lime-400 hover:bg-lime-300 rounded-lg shadow-md transition-all shrink-0"
                   >
                     Register Now
                   </button>
@@ -247,7 +247,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
                     type="button"
                     disabled
                     aria-disabled="true"
-                    className="px-3.5 py-2 text-xs font-black uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded-lg cursor-not-allowed shrink-0"
+                    className="w-full sm:w-auto px-4 py-2.5 min-h-[42px] text-xs font-black uppercase tracking-wider text-slate-400 bg-slate-800 border border-slate-700 rounded-lg cursor-not-allowed shrink-0"
                   >
                     Registration Closed
                   </button>

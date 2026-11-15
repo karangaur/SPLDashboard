@@ -217,7 +217,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
     return (
       <WrapperTag
         {...wrapperProps}
-        className={`w-full text-left rounded-2xl border p-4 transition-all space-y-3 min-w-0 ${roundAccent} ${
+        className={`w-full text-left rounded-2xl border p-3.5 sm:p-4 transition-all space-y-3 min-w-0 ${roundAccent} ${
           isLive
             ? 'ring-2 ring-rose-500/50 shadow-[0_0_28px_-8px_rgba(244,63,94,0.45)]'
             : mode === 'public' && onSelectMatch
@@ -415,7 +415,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
                 <button
                   type="button"
                   onClick={() => onEditSchedule(km)}
-                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-semibold text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-1 transition-colors"
+                  className="px-3 py-1.5 min-h-[42px] sm:min-h-[36px] rounded-lg text-[11px] font-semibold text-slate-200 bg-white/5 hover:bg-white/10 border border-white/10 flex items-center gap-1 transition-colors"
                 >
                   <Edit3 className="w-3 h-3 text-amber-300" />
                   <span>Schedule &amp; Court</span>
@@ -426,7 +426,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
                 <button
                   type="button"
                   onClick={() => onGoLive(km.id)}
-                  className="px-2.5 py-1.5 rounded-lg text-[11px] font-black text-slate-950 bg-emerald-400 hover:bg-emerald-300 flex items-center gap-1 transition-colors"
+                  className="px-3 py-1.5 min-h-[42px] sm:min-h-[36px] rounded-lg text-[11px] font-black text-slate-950 bg-emerald-400 hover:bg-emerald-300 flex items-center gap-1 transition-colors"
                 >
                   <Flame className="w-3 h-3" />
                   <span>Go Live</span>
@@ -437,7 +437,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
                 <button
                   type="button"
                   onClick={() => onOpenUmpire(km.id)}
-                  className="ml-auto px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/35 flex items-center gap-1 transition-colors"
+                  className="ml-auto px-3 py-1.5 min-h-[42px] sm:min-h-[36px] rounded-lg text-[11px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/35 flex items-center gap-1 transition-colors"
                 >
                   <Maximize2 className="w-3 h-3" />
                   <span>{isCompleted ? 'Correct / View' : 'Umpire Mode'}</span>
