@@ -658,7 +658,7 @@ export const FixturesView: React.FC = () => {
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'A', -1)}
                       aria-label={`Decrease score for ${tA?.name || 'Team A'}`}
-                      className="min-w-[40px] min-h-[40px] sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
                     >
                       -
                     </button>
@@ -666,7 +666,7 @@ export const FixturesView: React.FC = () => {
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'A', 1)}
                       aria-label={`Add point for ${tA?.name || 'Team A'}`}
-                      className="px-3 min-h-[40px] sm:h-8 flex items-center justify-center rounded-lg bg-amber-400 text-slate-950 font-bold text-xs hover:bg-amber-300 active:scale-95 transition-all shadow"
+                      className="px-2.5 h-8 flex items-center justify-center rounded-lg bg-amber-400 text-slate-950 font-bold text-xs hover:bg-amber-300 active:scale-95 transition-all shadow"
                     >
                       +1 Pt
                     </button>
@@ -678,7 +678,7 @@ export const FixturesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => updateMatch(match.id, { status: 'live' })}
-                        className="px-3 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg flex items-center gap-1 transition-all shadow-sm active:scale-95"
                         title="Start match"
                       >
                         <Play className="w-3 h-3 fill-current" />
@@ -689,7 +689,7 @@ export const FixturesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => updateMatch(match.id, { status: 'paused' })}
-                        className="px-3 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-bold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-amber-300 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
                         title="Pause match"
                       >
                         <Pause className="w-3 h-3" />
@@ -700,7 +700,7 @@ export const FixturesView: React.FC = () => {
                       <button
                         type="button"
                         onClick={() => updateMatch(match.id, { status: 'live' })}
-                        className="px-3 py-1.5 min-h-[40px] sm:min-h-[32px] text-[11px] font-bold text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
+                        className="px-2.5 py-1.5 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30 rounded-lg flex items-center gap-1 transition-all active:scale-95"
                         title="Resume match"
                       >
                         <Play className="w-3 h-3 fill-current" />
@@ -711,7 +711,7 @@ export const FixturesView: React.FC = () => {
                     {!isCompleted ? (
                       <button
                         onClick={() => handleMarkComplete(match)}
-                        className="px-3 py-1.5 min-h-[40px] sm:min-h-[32px] text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-colors"
+                        className="px-2.5 py-1.5 text-xs font-semibold text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-lg transition-colors"
                       >
                         Finish
                       </button>
@@ -729,7 +729,7 @@ export const FixturesView: React.FC = () => {
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'B', 1)}
                       aria-label={`Add point for ${tB?.name || 'Team B'}`}
-                      className="px-3 min-h-[40px] sm:h-8 flex items-center justify-center rounded-lg bg-blue-500 text-white font-bold text-xs hover:bg-blue-400 active:scale-95 transition-all shadow"
+                      className="px-2.5 h-8 flex items-center justify-center rounded-lg bg-blue-500 text-white font-bold text-xs hover:bg-blue-400 active:scale-95 transition-all shadow"
                     >
                       +1 Pt
                     </button>
@@ -737,7 +737,7 @@ export const FixturesView: React.FC = () => {
                       type="button"
                       onClick={() => handleScoreChange(match.id, 'B', -1)}
                       aria-label={`Decrease score for ${tB?.name || 'Team B'}`}
-                      className="min-w-[40px] min-h-[40px] sm:w-8 sm:h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
+                      className="w-8 h-8 flex items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 font-bold text-sm"
                     >
                       -
                     </button>

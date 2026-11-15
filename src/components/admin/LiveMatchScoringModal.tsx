@@ -342,7 +342,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowRulesConfig(!showRulesConfig)}
-                className={`min-w-[44px] min-h-[44px] p-2 rounded-xl border flex items-center justify-center transition-all ${
+                className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 rounded-xl border flex items-center justify-center transition-all ${
                   showRulesConfig
                     ? 'bg-amber-400 text-slate-950 border-amber-400 font-bold'
                     : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
@@ -356,7 +356,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-w-[44px] min-h-[44px] p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 transition-colors flex items-center justify-center"
+                className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 transition-colors flex items-center justify-center"
                 title="Close Umpire Mode"
                 aria-label="Close Umpire Mode"
               >
@@ -406,7 +406,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               <select
                 value={selectedId}
                 onChange={(e) => setSelectedId(e.target.value)}
-                className="w-full appearance-none pl-3 pr-8 py-1.5 min-h-[42px] sm:min-h-[38px] rounded-xl text-base sm:text-xs font-bold text-slate-200 bg-white/10 border border-white/15 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
+                className="w-full appearance-none pl-3 pr-8 py-1.5 min-h-[38px] rounded-xl text-xs font-bold text-slate-200 bg-white/10 border border-white/15 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
               >
                 {allMatches.map((m) => {
                   const tA = state.teams.find((t) => t.id === m.teamA)?.name || 'TBD';
@@ -441,7 +441,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                     });
                   }}
                   aria-label="Assign Knockout Match Court"
-                  className="appearance-none pl-3 pr-7 py-1.5 min-h-[42px] sm:min-h-[38px] rounded-xl text-base sm:text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 focus:outline-none focus:border-amber-400 cursor-pointer"
+                  className="appearance-none pl-3 pr-7 py-1.5 min-h-[38px] rounded-xl text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 focus:outline-none focus:border-amber-400 cursor-pointer"
                 >
                   {Array.from({ length: courtsCount }, (_, i) => i + 1).map((c) => (
                     <option key={c} value={c} className="bg-slate-900 text-white">
@@ -613,22 +613,22 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
           {/* ==================================================================== */}
           {/* SECTION 2 & 3: TEAMS DETAILS & DUAL LIVE SCOREBOARD                  */}
           {/* ==================================================================== */}
-          <div className="rounded-2xl sm:rounded-3xl bg-slate-900/60 border border-white/10 p-3 sm:p-6 shadow-xl">
-            <div className="grid grid-cols-1 sm:grid-cols-2 landscape:grid-cols-2 gap-3 sm:gap-6 items-stretch">
+          <div className="rounded-2xl sm:rounded-3xl bg-slate-900/60 border border-white/10 p-3.5 sm:p-6 shadow-xl">
+            <div className="grid grid-cols-2 gap-2 sm:gap-6 items-start">
               
               {/* TEAM A CARD */}
-              <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-b from-amber-500/10 via-white/[0.02] to-transparent border border-amber-500/20 flex flex-col justify-between space-y-2.5 sm:space-y-3 min-w-0">
+              <div className="p-2.5 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-b from-amber-500/10 via-white/[0.02] to-transparent border border-amber-500/20 flex flex-col justify-between space-y-2 sm:space-y-3 min-w-0">
                 {/* Team Info & Serve Toggle */}
-                <div className="flex items-start justify-between gap-2 min-w-0">
+                <div className="flex items-start justify-between gap-1.5 min-w-0">
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="text-xl sm:text-2xl shrink-0">
                       {teamA?.badge || '🏸'}
                     </span>
                     <div className="min-w-0">
-                      <h2 className="text-sm sm:text-base font-black text-white font-display truncate">
+                      <h2 className="text-xs sm:text-base font-black text-white font-display truncate">
                         {teamA?.name || 'Team A'}
                       </h2>
-                      <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+                      <p className="text-[10px] sm:text-xs text-slate-400 truncate">
                         {teamAPlayers.length > 0
                           ? teamAPlayers.map((p) => p.name).join(' & ')
                           : 'Team Pair'}
@@ -639,7 +639,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                   <button
                     type="button"
                     onClick={() => setServerSide('A')}
-                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] sm:text-xs font-bold flex items-center gap-1 transition-all shrink-0 active:scale-95 ${
+                    className={`min-h-[36px] sm:min-h-[40px] px-2 py-1 rounded-xl border text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all shrink-0 active:scale-95 ${
                       serverSide === 'A'
                         ? 'bg-amber-400 text-slate-950 border-amber-400 shadow-md font-black ring-2 ring-amber-400/40'
                         : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
@@ -648,7 +648,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                     aria-label="Set Team A as Serving Team"
                   >
                     <span>🏸</span>
-                    <span>Serve</span>
+                    <span className="hidden sm:inline">Serve</span>
                   </button>
                 </div>
 
@@ -677,7 +677,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                     type="button"
                     onClick={() => handleScoreChange('A', 1)}
                     disabled={isCompleted || isScoringBlocked}
-                    className="w-full min-h-[52px] sm:min-h-[54px] rounded-xl sm:rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-base sm:text-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full min-h-[48px] sm:min-h-[54px] rounded-xl sm:rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-base sm:text-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Add 1 Point to Team A"
                     aria-label={`Add 1 point for ${teamA?.name || 'Team A'}`}
                   >
@@ -700,13 +700,13 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               </div>
 
               {/* TEAM B CARD */}
-              <div className="p-3 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-b from-cyan-500/10 via-white/[0.02] to-transparent border border-cyan-500/20 flex flex-col justify-between space-y-2.5 sm:space-y-3 min-w-0">
+              <div className="p-2.5 sm:p-4 rounded-xl sm:rounded-2xl bg-gradient-to-b from-cyan-500/10 via-white/[0.02] to-transparent border border-cyan-500/20 flex flex-col justify-between space-y-2 sm:space-y-3 min-w-0">
                 {/* Team Info & Serve Toggle */}
-                <div className="flex items-start justify-between gap-2 min-w-0">
+                <div className="flex items-start justify-between gap-1.5 min-w-0">
                   <button
                     type="button"
                     onClick={() => setServerSide('B')}
-                    className={`min-h-[40px] px-2.5 py-1.5 rounded-xl border text-[11px] sm:text-xs font-bold flex items-center gap-1 transition-all shrink-0 active:scale-95 ${
+                    className={`min-h-[36px] sm:min-h-[40px] px-2 py-1 rounded-xl border text-[10px] sm:text-xs font-bold flex items-center gap-1 transition-all shrink-0 active:scale-95 ${
                       serverSide === 'B'
                         ? 'bg-cyan-400 text-slate-950 border-cyan-400 shadow-md font-black ring-2 ring-cyan-400/40'
                         : 'bg-white/5 text-slate-400 border-white/10 hover:bg-white/10'
@@ -715,15 +715,15 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                     aria-label="Set Team B as Serving Team"
                   >
                     <span>🏸</span>
-                    <span>Serve</span>
+                    <span className="hidden sm:inline">Serve</span>
                   </button>
 
                   <div className="flex items-center gap-2 min-w-0 text-right justify-end">
                     <div className="min-w-0">
-                      <h2 className="text-sm sm:text-base font-black text-white font-display truncate">
+                      <h2 className="text-xs sm:text-base font-black text-white font-display truncate">
                         {teamB?.name || 'Team B'}
                       </h2>
-                      <p className="text-[11px] sm:text-xs text-slate-400 truncate">
+                      <p className="text-[10px] sm:text-xs text-slate-400 truncate">
                         {teamBPlayers.length > 0
                           ? teamBPlayers.map((p) => p.name).join(' & ')
                           : 'Team Pair'}
@@ -760,7 +760,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                     type="button"
                     onClick={() => handleScoreChange('B', 1)}
                     disabled={isCompleted || isScoringBlocked}
-                    className="w-full min-h-[52px] sm:min-h-[54px] rounded-xl sm:rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-black text-base sm:text-xl shadow-lg shadow-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full min-h-[48px] sm:min-h-[54px] rounded-xl sm:rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-black text-base sm:text-xl shadow-lg shadow-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Add 1 Point to Team B"
                     aria-label={`Add 1 point for ${teamB?.name || 'Team B'}`}
                   >

@@ -906,7 +906,7 @@ export const TokensView: React.FC = () => {
                           onClick={() => setEditingTeamId(team.id)}
                           title={`Edit ${team.name} members`}
                           aria-label={`Edit ${team.name}`}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] sm:min-h-[26px] rounded-md bg-black/25 hover:bg-black/40 text-white text-[10px] font-bold tracking-normal normal-case border border-white/20 transition-colors"
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-black/25 hover:bg-black/40 text-white text-[10px] font-bold tracking-normal normal-case border border-white/20 transition-colors"
                         >
                           <Edit2 className="w-2.5 h-2.5" />
                           <span>Edit</span>
@@ -1033,7 +1033,7 @@ export const TokensView: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setEditingTeamId(team.id)}
-                          className="inline-flex items-center gap-1 px-3 py-1.5 min-h-[38px] sm:min-h-[30px] rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] transition-all"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 font-bold text-[11px] transition-all"
                         >
                           <Edit2 className="w-3 h-3" />
                           <span>Edit Team</span>

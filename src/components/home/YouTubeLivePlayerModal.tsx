@@ -354,7 +354,7 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
               title={isMinimized ? 'Expand Theater View' : 'Minimize to Mini-Player'}
               aria-label={isMinimized ? 'Expand Live Video Player' : 'Minimize Live Video Player'}
               className={`inline-flex items-center justify-center rounded-xl text-slate-300 hover:text-white bg-white/[0.06] hover:bg-white/12 border border-white/10 transition-colors cursor-pointer ${
-                isMinimized ? 'w-9 h-9' : 'px-3 py-2 min-w-[44px] min-h-[44px] sm:min-h-[38px] gap-1.5 text-xs font-semibold'
+                isMinimized ? 'w-8 h-8' : 'px-3 py-2 min-h-[38px] gap-1.5 text-xs font-semibold'
               }`}
             >
               {isMinimized ? (
@@ -373,7 +373,7 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
               title="Close Stream Player"
               aria-label="Close Live Stream Player"
               className={`inline-flex items-center justify-center rounded-xl text-slate-300 hover:text-rose-300 bg-white/[0.06] hover:bg-rose-500/20 border border-white/10 hover:border-rose-500/40 transition-colors cursor-pointer ${
-                isMinimized ? 'w-9 h-9' : 'w-11 h-11 sm:w-10 sm:h-10'
+                isMinimized ? 'w-8 h-8' : 'w-10 h-10'
               }`}
             >
               <X className={isMinimized ? 'w-4 h-4' : 'w-5 h-5'} />
@@ -509,7 +509,7 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
                         key={m.id}
                         type="button"
                         onClick={() => setSelectedMatchId(m.id)}
-                        className={`px-3 py-1.5 min-h-[42px] sm:min-h-[36px] rounded-xl text-[11px] font-bold whitespace-nowrap transition-colors shrink-0 cursor-pointer flex items-center gap-1.5 border ${
+                        className={`px-2.5 py-1.5 min-h-[36px] rounded-xl text-[11px] font-bold whitespace-nowrap transition-colors shrink-0 cursor-pointer flex items-center gap-1.5 border ${
                           isActive
                             ? 'bg-amber-400/20 text-amber-200 border-amber-400/50'
                             : 'bg-white/[0.04] text-slate-300 border-white/10 hover:bg-white/10'

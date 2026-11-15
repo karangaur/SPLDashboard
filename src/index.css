@@ -68,11 +68,6 @@
   padding-top: max(0px, env(safe-area-inset-top, 0px));
 }
 
-.px-safe {
-  padding-left: max(0px, env(safe-area-inset-left, 0px));
-  padding-right: max(0px, env(safe-area-inset-right, 0px));
-}
-
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

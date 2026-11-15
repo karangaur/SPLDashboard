@@ -279,35 +279,35 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     <div className="min-h-screen bg-[#04060d] text-slate-100 flex flex-col font-sans selection:bg-cyan-400 selection:text-slate-950">
       {/* TOP HEADER */}
       <header className="sticky top-0 z-40 bg-slate-950/90 border-b border-white/10 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex items-center justify-between">
           {/* Logo & Court Branding */}
-          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
+          <div className="flex items-center gap-3">
             <img
               src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
               alt="SPL Logo"
-              className="h-9 sm:h-11 w-auto object-contain drop-shadow shrink-0"
+              className="h-10 sm:h-11 w-auto object-contain drop-shadow"
             />
-            <div className="min-w-0">
-              <div className="flex items-center gap-1.5 sm:gap-2 flex-wrap">
-                <span className="font-display text-sm sm:text-lg font-black tracking-tight text-white uppercase truncate">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="font-display text-base sm:text-lg font-black tracking-tight text-white uppercase">
                   Smash Premier League
                 </span>
-                <span className="px-2 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase tracking-wider bg-cyan-400 text-slate-950 font-mono flex items-center gap-1 shrink-0">
+                <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-cyan-400 text-slate-950 font-mono flex items-center gap-1">
                   <Activity className="w-3 h-3" />
                   <span>SCORE OPERATOR</span>
                 </span>
               </div>
-              <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">Court Scoring Console • Season IV Championship</p>
+              <p className="text-[11px] text-slate-400">Court Scoring Console • Season IV Championship</p>
             </div>
           </div>
 
           {/* User info & Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-3 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3">
             {onViewPublicHome && (
               <button
                 type="button"
                 onClick={onViewPublicHome}
-                className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-xl bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 border border-lime-400/30 text-xs font-semibold transition-colors"
+                className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-lime-400/10 hover:bg-lime-400/20 text-lime-400 border border-lime-400/30 text-xs font-semibold transition-colors"
                 title="View Public Tournament Home"
               >
                 <ExternalLink className="w-3.5 h-3.5" />
@@ -319,7 +319,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
             <button
               type="button"
               onClick={() => setIsAccountModalOpen(true)}
-              className="flex items-center gap-2 px-3 py-2 min-h-[40px] rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-200 transition-colors"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-200 transition-colors"
               title="My Account & Security"
             >
               <div className="w-6 h-6 rounded-lg bg-cyan-400/20 text-cyan-400 font-bold flex items-center justify-center text-xs">
@@ -332,7 +332,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
             <button
               type="button"
               onClick={onLogout}
-              className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-semibold transition-colors"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-xs font-semibold transition-colors"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
@@ -342,30 +342,30 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
         </div>
 
         {/* Tab Navigation */}
-        <div className="max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 border-t border-white/5 flex gap-2 overflow-x-auto no-scrollbar">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-white/5 flex gap-2">
           <button
             type="button"
             onClick={() => setActiveTab('scoring')}
-            className={`flex items-center gap-2 py-3 px-4 min-h-[44px] whitespace-nowrap text-xs font-bold border-b-2 transition-all ${
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition-all ${
               activeTab === 'scoring'
                 ? 'border-cyan-400 text-cyan-400 bg-cyan-400/5'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Activity className="w-4 h-4 shrink-0" />
+            <Activity className="w-4 h-4" />
             <span>Live Match Scoring</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveTab('players')}
-            className={`flex items-center gap-2 py-3 px-4 min-h-[44px] whitespace-nowrap text-xs font-bold border-b-2 transition-all ${
+            className={`flex items-center gap-2 py-3 px-4 text-xs font-bold border-b-2 transition-all ${
               activeTab === 'players'
                 ? 'border-cyan-400 text-cyan-400 bg-cyan-400/5'
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Users className="w-4 h-4 shrink-0" />
+            <Users className="w-4 h-4" />
             <span>Player Directory (Read-Only)</span>
           </button>
         </div>
@@ -425,15 +425,15 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
             {/* Match Filter & Match Selector Pills */}
             <div className="space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-400">Select Active Match:</p>
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 sm:pb-0">
+                <div className="flex items-center gap-1.5">
                   {(['all', 'live', 'upcoming', 'completed', 'knockout'] as const).map((filterKey) => (
                     <button
                       key={filterKey}
                       type="button"
                       onClick={() => setMatchTypeFilter(filterKey)}
-                      className={`px-3 py-1.5 min-h-[38px] sm:min-h-[32px] rounded-lg text-[11px] font-bold uppercase tracking-wider whitespace-nowrap shrink-0 transition-colors ${
+                      className={`px-2.5 py-1 rounded-lg text-[11px] font-bold uppercase tracking-wider transition-colors ${
                         matchTypeFilter === filterKey
                           ? 'bg-cyan-400 text-slate-950'
                           : 'bg-white/5 hover:bg-white/10 text-slate-400'
@@ -496,15 +496,15 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
             {/* MAIN TOUCH-FRIENDLY SCOREBOARD CONSOLE */}
             {activeMatch ? (
-              <div className="rounded-3xl bg-slate-900/80 border border-white/10 p-4 sm:p-8 space-y-5 sm:space-y-6 shadow-2xl backdrop-blur-xl">
+              <div className="rounded-3xl bg-slate-900/80 border border-white/10 p-6 sm:p-8 space-y-6 shadow-2xl backdrop-blur-xl">
                 {/* Court Info & Status Switcher */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-white/10">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-br from-cyan-400/20 to-blue-500/20 border border-cyan-400/30 text-cyan-400 shrink-0">
-                      <Trophy className="w-5 h-5 sm:w-6 sm:h-6" />
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 rounded-2xl bg-gradient-to-br from-cyan-400/20 to-blue-500/20 border border-cyan-400/30 text-cyan-400">
+                      <Trophy className="w-6 h-6" />
                     </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
+                    <div>
+                      <div className="flex items-center gap-2">
                         <span className="text-xs font-bold uppercase tracking-wider text-cyan-400 font-mono">
                           Court {activeMatch.court || 1}
                         </span>
@@ -513,20 +513,20 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                           {formatMatchStageLabel(activeMatch)}
                         </span>
                       </div>
-                      <h2 className="text-lg sm:text-2xl font-black font-display text-white tracking-tight uppercase break-words">
+                      <h2 className="text-xl sm:text-2xl font-black font-display text-white tracking-tight uppercase">
                         {getTeamName(activeMatch.teamA)} vs {getTeamName(activeMatch.teamB)}
                       </h2>
                     </div>
                   </div>
 
                   {/* Status Toggle Buttons */}
-                  <div className="flex flex-wrap items-center gap-2">
+                  <div className="flex items-center gap-2">
                     {activeMatch.status !== 'live' && activeMatch.status !== 'completed' && (
                       <button
                         type="button"
                         onClick={() => handleSetStatus('live')}
                         disabled={isActiveLocked}
-                        className="flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Play className="w-3.5 h-3.5 fill-current" />
                         <span>Go Live</span>
@@ -537,7 +537,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => handleSetStatus('paused')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs transition-all"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs transition-all"
                       >
                         <Pause className="w-3.5 h-3.5 fill-current" />
                         <span>Pause</span>
@@ -548,7 +548,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                       <button
                         type="button"
                         onClick={() => handleSetStatus('completed')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 min-h-[44px] rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all"
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs shadow-lg shadow-emerald-500/20 transition-all"
                       >
                         <Award className="w-3.5 h-3.5" />
                         <span>Complete Match</span>
@@ -558,7 +558,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                     <button
                       type="button"
                       onClick={handleResetScores}
-                      className={`px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold flex items-center gap-1 transition-colors ${
+                      className={`px-2.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1 transition-colors ${
                         confirmHeaderReset
                           ? 'bg-rose-500 text-white hover:bg-rose-400'
                           : 'bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white'
@@ -588,9 +588,9 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                 )}
 
                 {/* BIG SCOREBOARD CONTROLS */}
-                <div className="grid grid-cols-1 md:grid-cols-2 landscape:grid-cols-2 gap-4 sm:gap-6 items-stretch">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                   {/* TEAM A CARD */}
-                  <div className="rounded-2xl sm:rounded-3xl bg-slate-950/80 border border-white/10 p-4 sm:p-6 flex flex-col justify-between space-y-5 sm:space-y-6">
+                  <div className="rounded-3xl bg-slate-950/80 border border-white/10 p-6 flex flex-col justify-between space-y-6">
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[11px] font-bold uppercase tracking-widest text-cyan-400">Team A</span>
@@ -600,15 +600,15 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                           </span>
                         )}
                       </div>
-                      <h3 className="text-xl sm:text-3xl font-black font-display text-white uppercase tracking-tight break-words">
+                      <h3 className="text-2xl sm:text-3xl font-black font-display text-white uppercase tracking-tight">
                         {getTeamName(activeMatch.teamA)}
                       </h3>
                       {/* Team A Roster players */}
                       <div className="mt-2 text-xs text-slate-400 space-y-0.5">
                         {getTeamPlayers(activeMatch.teamA).map((p) => (
                           <div key={p.id} className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0" />
-                            <span className="truncate">{p.name}</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                            <span>{p.name}</span>
                           </div>
                         ))}
                       </div>
@@ -617,20 +617,20 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                     {/* Score Counter & Touch Controls */}
                     <div className="space-y-4">
                       {/* Big Score Display */}
-                      <div className="py-5 sm:py-6 rounded-2xl bg-gradient-to-b from-cyan-950/40 to-slate-900/60 border border-cyan-500/30 text-center">
-                        <span className="text-6xl sm:text-8xl font-black font-mono tracking-tight text-white drop-shadow tabular-nums">
+                      <div className="py-6 rounded-2xl bg-gradient-to-b from-cyan-950/40 to-slate-900/60 border border-cyan-500/30 text-center">
+                        <span className="text-7xl sm:text-8xl font-black font-mono tracking-tight text-white drop-shadow">
                           {activeMatch.scoreA ?? 0}
                         </span>
                         <p className="text-[10px] font-bold uppercase tracking-wider text-cyan-300 mt-1">Current Points</p>
                       </div>
 
                       {/* Large Touch Scoring Buttons */}
-                      <div className="grid grid-cols-4 gap-2.5 sm:gap-3">
+                      <div className="grid grid-cols-4 gap-3">
                         <button
                           type="button"
                           onClick={() => handleScoreChange('A', -1)}
                           disabled={(activeMatch.scoreA ?? 0) <= 0 || isActiveCompleted || isActiveLocked}
-                          className="col-span-1 py-4 min-h-[56px] rounded-2xl bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-slate-300 font-bold text-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="col-span-1 py-4 rounded-2xl bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-slate-300 font-bold text-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Decrease point"
                         >
                           <Minus className="w-6 h-6" />
@@ -640,9 +640,9 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                           type="button"
                           onClick={() => handleScoreChange('A', 1)}
                           disabled={isActiveCompleted || isActiveLocked}
-                          className="col-span-3 py-4 min-h-[56px] rounded-2xl bg-cyan-400 hover:bg-cyan-300 active:scale-95 text-slate-950 font-black text-lg sm:text-xl flex items-center justify-center gap-2 shadow-xl shadow-cyan-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="col-span-3 py-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 active:scale-95 text-slate-950 font-black text-xl flex items-center justify-center gap-2 shadow-xl shadow-cyan-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          <Plus className="w-6 h-6 sm:w-7 sm:h-7" />
+                          <Plus className="w-7 h-7" />
                           <span>+1 POINT</span>
                         </button>
                       </div>
@@ -650,7 +650,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                   </div>
 
                   {/* TEAM B CARD */}
-                  <div className="rounded-2xl sm:rounded-3xl bg-slate-950/80 border border-white/10 p-4 sm:p-6 flex flex-col justify-between space-y-5 sm:space-y-6">
+                  <div className="rounded-3xl bg-slate-950/80 border border-white/10 p-6 flex flex-col justify-between space-y-6">
                     <div>
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-[11px] font-bold uppercase tracking-widest text-lime-400">Team B</span>
@@ -660,15 +660,15 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                           </span>
                         )}
                       </div>
-                      <h3 className="text-xl sm:text-3xl font-black font-display text-white uppercase tracking-tight break-words">
+                      <h3 className="text-2xl sm:text-3xl font-black font-display text-white uppercase tracking-tight">
                         {getTeamName(activeMatch.teamB)}
                       </h3>
                       {/* Team B Roster players */}
                       <div className="mt-2 text-xs text-slate-400 space-y-0.5">
                         {getTeamPlayers(activeMatch.teamB).map((p) => (
                           <div key={p.id} className="flex items-center gap-1.5">
-                            <span className="w-1.5 h-1.5 rounded-full bg-lime-400 shrink-0" />
-                            <span className="truncate">{p.name}</span>
+                            <span className="w-1.5 h-1.5 rounded-full bg-lime-400" />
+                            <span>{p.name}</span>
                           </div>
                         ))}
                       </div>
@@ -677,20 +677,20 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                     {/* Score Counter & Touch Controls */}
                     <div className="space-y-4">
                       {/* Big Score Display */}
-                      <div className="py-5 sm:py-6 rounded-2xl bg-gradient-to-b from-lime-950/40 to-slate-900/60 border border-lime-500/30 text-center">
-                        <span className="text-6xl sm:text-8xl font-black font-mono tracking-tight text-white drop-shadow tabular-nums">
+                      <div className="py-6 rounded-2xl bg-gradient-to-b from-lime-950/40 to-slate-900/60 border border-lime-500/30 text-center">
+                        <span className="text-7xl sm:text-8xl font-black font-mono tracking-tight text-white drop-shadow">
                           {activeMatch.scoreB ?? 0}
                         </span>
                         <p className="text-[10px] font-bold uppercase tracking-wider text-lime-300 mt-1">Current Points</p>
                       </div>
 
                       {/* Large Touch Scoring Buttons */}
-                      <div className="grid grid-cols-4 gap-2.5 sm:gap-3">
+                      <div className="grid grid-cols-4 gap-3">
                         <button
                           type="button"
                           onClick={() => handleScoreChange('B', -1)}
                           disabled={(activeMatch.scoreB ?? 0) <= 0 || isActiveCompleted || isActiveLocked}
-                          className="col-span-1 py-4 min-h-[56px] rounded-2xl bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-slate-300 font-bold text-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="col-span-1 py-4 rounded-2xl bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-slate-300 font-bold text-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Decrease point"
                         >
                           <Minus className="w-6 h-6" />
@@ -700,9 +700,9 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                           type="button"
                           onClick={() => handleScoreChange('B', 1)}
                           disabled={isActiveCompleted || isActiveLocked}
-                          className="col-span-3 py-4 min-h-[56px] rounded-2xl bg-lime-400 hover:bg-lime-300 active:scale-95 text-slate-950 font-black text-lg sm:text-xl flex items-center justify-center gap-2 shadow-xl shadow-lime-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
+                          className="col-span-3 py-4 rounded-2xl bg-lime-400 hover:bg-lime-300 active:scale-95 text-slate-950 font-black text-xl flex items-center justify-center gap-2 shadow-xl shadow-lime-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          <Plus className="w-6 h-6 sm:w-7 sm:h-7" />
+                          <Plus className="w-7 h-7" />
                           <span>+1 POINT</span>
                         </button>
                       </div>

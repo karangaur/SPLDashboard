@@ -289,7 +289,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
         <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
           <button
             onClick={() => handleNav('registration')}
-            className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[42px] sm:min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all whitespace-nowrap shrink-0"
+            className="flex items-center gap-1.5 px-3 sm:px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 rounded-xl shadow-md shadow-amber-500/20 active:scale-95 transition-all whitespace-nowrap shrink-0"
           >
             <PlusCircle className="w-4 h-4 shrink-0" />
             <span className="hidden sm:inline">Register Player</span>
@@ -337,7 +337,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
             onClick={() => setMobileMenuOpen((o) => !o)}
             aria-label="Toggle navigation menu"
             aria-expanded={mobileMenuOpen}
-            className="lg:hidden p-2 min-w-[44px] min-h-[44px] flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
+            className="lg:hidden p-2 min-w-[40px] min-h-[40px] flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/5 rounded-xl transition-colors"
           >
             {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
