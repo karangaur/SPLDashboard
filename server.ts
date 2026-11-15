@@ -903,7 +903,9 @@ async function startServer() {
     teams: [] as any[],
     matches: [] as any[],
     knockout: {
-      format: 'top4',
+      format: 'ipl_top4',
+      published: true,
+      showOnPublicHomepage: true,
       matches: [] as any[],
     },
     predefinedTeams: [] as any[],
@@ -1151,25 +1153,45 @@ async function startServer() {
           }
 
           if (koList.length > 0) {
-            const koRows = koList.map((k: any) => ({
-              id: k.id,
-              tournament_season: 'season-4',
-              round: 99,
-              court: typeof k.court === 'number' ? k.court : parseInt(String(k.court || '').replace(/\D/g, '') || '1', 10) || 1,
-              match_type: 'knockout' as const,
-              stage: (k.stage === 'QF' ? 'ELIM' : k.stage) || 'SF',
-              slot: k.slot || 1,
-              team_a_id: k.teamA || null,
-              team_b_id: k.teamB || null,
-              score_a: k.scoreA != null ? k.scoreA : null,
-              score_b: k.scoreB != null ? k.scoreB : null,
-              status: k.status === 'paused' ? 'postponed' : k.status || 'upcoming',
-              winner_id: k.winner || null,
-              time: k.time || null,
-              sets_json: k.sets || null,
-              mvp_player_id: k.mvpPlayerId || null,
-              updated_at: nowIso,
-            }));
+            const koRows = koList.map((k: any) => {
+              const safeStage =
+                k.playoffRound === 'Q1' || k.playoffRound === 'Q2' || k.stage === 'Q1' || k.stage === 'Q2'
+                  ? 'SF'
+                  : k.playoffRound === 'ELIM'
+                  ? 'ELIM'
+                  : k.playoffRound === 'F'
+                  ? 'F'
+                  : (k.stage === 'QF' ? 'ELIM' : k.stage) || 'SF';
+              const safeSlot =
+                k.playoffRound === 'Q1'
+                  ? 1
+                  : k.playoffRound === 'ELIM'
+                  ? 2
+                  : k.playoffRound === 'Q2'
+                  ? 3
+                  : k.playoffRound === 'F'
+                  ? 1
+                  : k.slot || 1;
+              return {
+                id: k.id,
+                tournament_season: 'season-4',
+                round: 99,
+                court: typeof k.court === 'number' ? k.court : parseInt(String(k.court || '').replace(/\D/g, '') || '1', 10) || 1,
+                match_type: 'knockout' as const,
+                stage: safeStage,
+                slot: safeSlot,
+                team_a_id: k.teamA || null,
+                team_b_id: k.teamB || null,
+                score_a: k.scoreA != null ? k.scoreA : null,
+                score_b: k.scoreB != null ? k.scoreB : null,
+                status: k.status === 'paused' ? 'postponed' : k.status || 'upcoming',
+                winner_id: k.winner || null,
+                time: k.time || null,
+                sets_json: k.sets || null,
+                mvp_player_id: k.mvpPlayerId || null,
+                updated_at: nowIso,
+              };
+            });
             await serverSupabase.from('matches').upsert(koRows as any);
           }
         }
@@ -1443,8 +1465,24 @@ async function startServer() {
                 round: 99,
                 court: typeof matchObj.court === 'number' ? matchObj.court : 1,
                 match_type: 'knockout',
-                stage: (matchObj.stage === 'QF' ? 'ELIM' : matchObj.stage) || 'SF',
-                slot: matchObj.slot || 1,
+                stage:
+                  matchObj.playoffRound === 'Q1' || matchObj.playoffRound === 'Q2' || matchObj.stage === 'Q1' || matchObj.stage === 'Q2'
+                    ? 'SF'
+                    : matchObj.playoffRound === 'ELIM'
+                    ? 'ELIM'
+                    : matchObj.playoffRound === 'F'
+                    ? 'F'
+                    : (matchObj.stage === 'QF' ? 'ELIM' : matchObj.stage) || 'SF',
+                slot:
+                  matchObj.playoffRound === 'Q1'
+                    ? 1
+                    : matchObj.playoffRound === 'ELIM'
+                    ? 2
+                    : matchObj.playoffRound === 'Q2'
+                    ? 3
+                    : matchObj.playoffRound === 'F'
+                    ? 1
+                    : matchObj.slot || 1,
                 team_a_id: matchObj.teamA || null,
                 team_b_id: matchObj.teamB || null,
                 score_a: matchObj.scoreA != null ? matchObj.scoreA : null,
@@ -1509,8 +1547,24 @@ async function startServer() {
             round: 99,
             court: typeof newMatch.court === 'number' ? newMatch.court : 1,
             match_type: 'knockout',
-            stage: (newMatch.stage === 'QF' ? 'ELIM' : newMatch.stage) || 'SF',
-            slot: newMatch.slot || 1,
+            stage:
+              newMatch.playoffRound === 'Q1' || newMatch.playoffRound === 'Q2' || newMatch.stage === 'Q1' || newMatch.stage === 'Q2'
+                ? 'SF'
+                : newMatch.playoffRound === 'ELIM'
+                ? 'ELIM'
+                : newMatch.playoffRound === 'F'
+                ? 'F'
+                : (newMatch.stage === 'QF' ? 'ELIM' : newMatch.stage) || 'SF',
+            slot:
+              newMatch.playoffRound === 'Q1'
+                ? 1
+                : newMatch.playoffRound === 'ELIM'
+                ? 2
+                : newMatch.playoffRound === 'Q2'
+                ? 3
+                : newMatch.playoffRound === 'F'
+                ? 1
+                : newMatch.slot || 1,
             team_a_id: newMatch.teamA || null,
             team_b_id: newMatch.teamB || null,
             score_a: newMatch.scoreA != null ? newMatch.scoreA : null,

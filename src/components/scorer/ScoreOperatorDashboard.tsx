@@ -32,6 +32,10 @@ import { AuthService, AdminUser } from '../../services/authService';
 import { MyAccountModal } from '../auth/MyAccountModal';
 import { Match, KnockoutMatch, Player } from '../../types/tournament';
 import { sportsAudio } from '../../context/TournamentContext';
+import {
+  canStartOrScorePlayoffMatch,
+  getPlayoffMatchDisplayLabel,
+} from '../../utils/playoffEngine';
 
 interface ScoreOperatorDashboardProps {
   user: AdminUser;
@@ -68,9 +72,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
   const formatMatchStageLabel = (m: any) => {
     if (m?.isKnockout) {
-      if (m.stage === 'F') return 'Grand Final';
-      if (m.stage === 'SF') return `Semi-Final ${m.slot || 1}`;
-      return `Quarter-Final ${m.slot || 1}`;
+      return getPlayoffMatchDisplayLabel(m, state.knockout.format).title;
     }
     return `Round ${m?.round || 1}`;
   };
@@ -128,9 +130,23 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     return state.players.filter((p) => team.players.includes(p.id));
   };
 
+  const activePlayoffGuard = useMemo(() => {
+    if (!activeMatch || !(activeMatch as any).isKnockout) {
+      return { allowed: true as const };
+    }
+    return canStartOrScorePlayoffMatch(
+      activeMatch as unknown as KnockoutMatch,
+      knockoutMatches,
+      state.knockout.format
+    );
+  }, [activeMatch, knockoutMatches, state.knockout.format]);
+
+  const isActiveCompleted = activeMatch?.status === 'completed';
+  const isActiveLocked = !activePlayoffGuard.allowed;
+
   // Score adjustments
   const handleScoreChange = (team: 'A' | 'B', delta: number) => {
-    if (!activeMatch) return;
+    if (!activeMatch || isActiveLocked || isActiveCompleted) return;
     const isKo = (activeMatch as any).isKnockout;
     const currentScore = team === 'A' ? (activeMatch.scoreA ?? 0) : (activeMatch.scoreB ?? 0);
     const newScore = Math.max(0, currentScore + delta);
@@ -174,7 +190,8 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
   // Set status
   const handleSetStatus = (status: Match['status']) => {
-    if (!activeMatch) return;
+    if (!activeMatch || isActiveLocked) return;
+    if (isActiveCompleted && status === 'live') return;
     const isKo = (activeMatch as any).isKnockout;
 
     if (status === 'completed') {
@@ -184,7 +201,16 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     }
 
     if (isKo) {
-      updateKnockoutMatch(activeMatch.id, { status: status as any });
+      const winnerId =
+        status === 'completed' && activeMatch.teamA && activeMatch.teamB
+          ? (activeMatch.scoreA ?? 0) >= (activeMatch.scoreB ?? 0)
+            ? activeMatch.teamA
+            : activeMatch.teamB
+          : undefined;
+      updateKnockoutMatch(activeMatch.id, {
+        status: status as any,
+        ...(winnerId ? { winner: winnerId } : {}),
+      });
     } else {
       updateMatch(activeMatch.id, { status });
     }
@@ -482,11 +508,12 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
                   {/* Status Toggle Buttons */}
                   <div className="flex items-center gap-2">
-                    {activeMatch.status !== 'live' && (
+                    {activeMatch.status !== 'live' && activeMatch.status !== 'completed' && (
                       <button
                         type="button"
                         onClick={() => handleSetStatus('live')}
-                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/20 transition-all"
+                        disabled={isActiveLocked}
+                        className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-rose-500 hover:bg-rose-600 text-white font-bold text-xs shadow-lg shadow-rose-500/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                       >
                         <Play className="w-3.5 h-3.5 fill-current" />
                         <span>Go Live</span>
@@ -531,6 +558,22 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                   </div>
                 </div>
 
+                {isActiveLocked && activePlayoffGuard.reason && (
+                  <div
+                    role="alert"
+                    className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-400/35 text-amber-200 text-xs font-semibold flex items-center gap-2"
+                  >
+                    <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>{activePlayoffGuard.reason}</span>
+                  </div>
+                )}
+
+                {isActiveCompleted && (
+                  <div className="p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/25 text-emerald-200 text-xs font-semibold flex items-center justify-between gap-2">
+                    <span>Match completed and locked. Click Reset (twice) only if you intend to clear and re-score this match.</span>
+                  </div>
+                )}
+
                 {/* BIG SCOREBOARD CONTROLS */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
                   {/* TEAM A CARD */}
@@ -573,7 +616,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => handleScoreChange('A', -1)}
-                          disabled={(activeMatch.scoreA ?? 0) <= 0}
+                          disabled={(activeMatch.scoreA ?? 0) <= 0 || isActiveCompleted || isActiveLocked}
                           className="col-span-1 py-4 rounded-2xl bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-slate-300 font-bold text-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Decrease point"
                         >
@@ -583,7 +626,8 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => handleScoreChange('A', 1)}
-                          className="col-span-3 py-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 active:scale-95 text-slate-950 font-black text-xl flex items-center justify-center gap-2 shadow-xl shadow-cyan-400/20 transition-all"
+                          disabled={isActiveCompleted || isActiveLocked}
+                          className="col-span-3 py-4 rounded-2xl bg-cyan-400 hover:bg-cyan-300 active:scale-95 text-slate-950 font-black text-xl flex items-center justify-center gap-2 shadow-xl shadow-cyan-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Plus className="w-7 h-7" />
                           <span>+1 POINT</span>
@@ -632,7 +676,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => handleScoreChange('B', -1)}
-                          disabled={(activeMatch.scoreB ?? 0) <= 0}
+                          disabled={(activeMatch.scoreB ?? 0) <= 0 || isActiveCompleted || isActiveLocked}
                           className="col-span-1 py-4 rounded-2xl bg-white/5 hover:bg-white/10 active:bg-white/20 border border-white/10 text-slate-300 font-bold text-lg flex items-center justify-center transition-all disabled:opacity-30 disabled:cursor-not-allowed"
                           title="Decrease point"
                         >
@@ -642,7 +686,8 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                         <button
                           type="button"
                           onClick={() => handleScoreChange('B', 1)}
-                          className="col-span-3 py-4 rounded-2xl bg-lime-400 hover:bg-lime-300 active:scale-95 text-slate-950 font-black text-xl flex items-center justify-center gap-2 shadow-xl shadow-lime-400/20 transition-all"
+                          disabled={isActiveCompleted || isActiveLocked}
+                          className="col-span-3 py-4 rounded-2xl bg-lime-400 hover:bg-lime-300 active:scale-95 text-slate-950 font-black text-xl flex items-center justify-center gap-2 shadow-xl shadow-lime-400/20 transition-all disabled:opacity-40 disabled:cursor-not-allowed"
                         >
                           <Plus className="w-7 h-7" />
                           <span>+1 POINT</span>

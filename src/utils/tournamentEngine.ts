@@ -4,6 +4,7 @@ import {
   Team,
   Match,
   KnockoutMatch,
+  PlayoffFormat,
   StandingsRecord,
   Registration,
   PaymentStatus,
@@ -15,6 +16,7 @@ import {
   FormFieldType,
   FormPaymentConfig,
 } from '../types/tournament';
+import { DEFAULT_PLAYOFF_SETTINGS, progressIPLPlayoffs } from './playoffEngine';
 
 export const STORAGE_KEY = 'smash-premier-league-v8';
 
@@ -251,13 +253,16 @@ export const DEFAULT_STATE: TournamentState = {
       maxPointCap: 30,
       changeEndsAtInterval: true,
     },
+    playoffSettings: { ...DEFAULT_PLAYOFF_SETTINGS },
   },
   registrationSettings: DEFAULT_REGISTRATION_SETTINGS,
   players: [],
   teams: [],
   matches: [],
   knockout: {
-    format: 'top4',
+    format: 'ipl_top4',
+    published: true,
+    showOnPublicHomepage: true,
     matches: [],
   },
   registrations: [],
@@ -463,8 +468,15 @@ export function generateRoundRobinFixtures(
 }
 
 // Knockout Bracket Progression Engine
-export function progressKnockoutMatches(matches: KnockoutMatch[], format: 'top2' | 'top4' | 'top8'): KnockoutMatch[] {
+export function progressKnockoutMatches(matches: KnockoutMatch[], format: PlayoffFormat): KnockoutMatch[] {
   if (!matches || matches.length === 0) return matches;
+  if (
+    format === 'ipl_top4' ||
+    matches.some((m) => m.playoffRound || m.isPlayoff || m.participantASource)
+  ) {
+    return progressIPLPlayoffs(matches).matches;
+  }
+
   const updated = matches.map((m) => ({ ...m }));
 
   const elims = updated.filter((m) => m.stage === 'ELIM').sort((a, b) => a.slot - b.slot);

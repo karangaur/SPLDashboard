@@ -21,6 +21,7 @@ import { Match, Team, Player, BadmintonScoringRules, YouTubeLiveConfig } from '.
 import { RealtimeConnectionStatus } from '../../context/TournamentContext';
 import { DEFAULT_BADMINTON_RULES, evaluateSetStatus } from '../../utils/badmintonEngine';
 import { resolveYouTubeLiveCtaState } from '../../utils/youtube';
+import { getPlayoffMatchDisplayLabel, inferPlayoffRound } from '../../utils/playoffEngine';
 
 interface LiveMatchHeroProps {
   matches: Match[];
@@ -144,6 +145,17 @@ const getKnockoutStageMeta = (match?: Match | null) => {
       label: `Round ${match?.round || 1}`,
       shortTag: `R${match?.round || 1}`,
       priority: 0,
+    };
+  }
+  const pr = inferPlayoffRound(match, match.playoffRound ? 'ipl_top4' : undefined);
+  if (pr) {
+    const info = getPlayoffMatchDisplayLabel(match, 'ipl_top4');
+    return {
+      isKnockout: true,
+      label: info.title,
+      shortTag: info.shortCode,
+      priority: pr === 'F' ? 4 : pr === 'Q2' ? 3 : pr === 'Q1' ? 2 : 1,
+      playoffRound: pr,
     };
   }
   if (match.stage === 'F') {
@@ -732,9 +744,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
   const activeMatchOrdinal = useMemo(() => {
     if (!activeMatch) return '';
     if (activeMatch.matchType === 'knockout') {
-      if (activeMatch.stage === 'F') return 'GRAND FINAL';
-      if (activeMatch.stage === 'SF') return `SEMI-FINAL ${activeMatch.slot || 1}`;
-      return `QUARTER-FINAL ${activeMatch.slot || 1}`;
+      return getKnockoutStageMeta(activeMatch).label.toUpperCase();
     }
     const leagueOnly = matches.filter((m) => m.matchType !== 'knockout');
     const idx = leagueOnly.findIndex((m) => m.id === activeMatch.id);
@@ -988,7 +998,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                       className="spl-championship-sheen absolute inset-y-0 w-10 bg-gradient-to-r from-transparent via-white/30 to-transparent skew-x-[-20deg] pointer-events-none"
                     />
                     <Zap className="w-3 h-3 text-blue-300 shrink-0 relative z-10" />
-                    <span className="relative z-10">SEMI-FINAL</span>
+                    <span className="relative z-10">{stageMeta.label.toUpperCase()}</span>
                   </span>
                 ) : (
                   <span
@@ -1127,7 +1137,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
             </div>
           )}
 
-          {/* Animated Semi-Final Championship Heading Strip */}
+          {/* Animated Playoff / Semi-Final Championship Heading Strip */}
           {isSemiFinal && (
             <div className="relative overflow-hidden rounded-2xl border border-violet-400/30 bg-gradient-to-r from-blue-950/70 via-purple-950/70 to-indigo-950/70 px-3.5 py-2.5 sm:px-5 sm:py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
               <div
@@ -1136,11 +1146,15 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
               />
               <div className="relative z-10 min-w-0">
                 <h3 className="text-sm sm:text-xl lg:text-2xl font-black font-display uppercase tracking-wide bg-gradient-to-r from-blue-200 via-white to-purple-200 bg-clip-text text-transparent leading-tight">
-                  SEMI-FINAL – BATTLE FOR THE FINAL
+                  {stageMeta.playoffRound === 'Q1'
+                    ? 'QUALIFIER 1 – TOP 2 SHOWDOWN'
+                    : stageMeta.playoffRound === 'Q2'
+                    ? 'QUALIFIER 2 – BATTLE FOR THE FINAL'
+                    : 'SEMI-FINAL – BATTLE FOR THE FINAL'}
                 </h3>
               </div>
               <p className="relative z-10 text-[11px] sm:text-xs font-semibold text-violet-200/90 shrink-0">
-                {stageMeta.label} · {isCompleted ? 'Championship Result' : 'Winner Advances to Grand Final'}
+                {stageMeta.label} · {isCompleted ? 'Official Playoff Result' : 'Winner Advances to Grand Final'}
               </p>
             </div>
           )}
@@ -1774,10 +1788,8 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="text-sm sm:text-lg font-black font-display uppercase tracking-wide text-amber-200 break-words">
-                          {isSemiFinal
-                            ? `SEMI-FINAL WINNER – ${winnerTeam?.name || 'Winner'}`
-                            : isQuarterFinal
-                            ? `QUARTER-FINAL WINNER – ${winnerTeam?.name || 'Winner'}`
+                          {stageMeta.isKnockout
+                            ? `${stageMeta.label.toUpperCase()} WINNER – ${winnerTeam?.name || 'Winner'}`
                             : `MATCH WINNER – ${winnerTeam?.name || 'Winner'}`}
                         </span>
                         <span className="text-xs font-mono font-bold text-white/90 tabular-nums shrink-0">

@@ -121,7 +121,7 @@ export interface DbMatch {
   round: number;
   court: number;
   match_type: 'group' | 'knockout';
-  stage?: 'ELIM' | 'SF' | 'F' | null;
+  stage?: 'ELIM' | 'QF' | 'SF' | 'F' | 'Q1' | 'Q2' | null;
   slot?: number | null;
   team_a_id?: string | null;
   team_b_id?: string | null;
@@ -132,6 +132,55 @@ export interface DbMatch {
   time?: string | null;
   sets_json?: { scoreA: number; scoreB: number }[] | null;
   mvp_player_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbPlayoffBracket {
+  id: string;
+  season_slug: string;
+  format: 'ipl_top4' | 'top2' | 'top4' | 'top8';
+  status: 'draft' | 'active' | 'completed' | 'archived';
+  published: boolean;
+  show_on_public_homepage: boolean;
+  qualified_teams_json: any[];
+  disqualified_team_ids_json: string[];
+  manual_tie_break_order_json: string[];
+  settings_json: Record<string, any>;
+  audit_logs_json: any[];
+  champion_team_id?: string | null;
+  runner_up_team_id?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DbPlayoffMatch {
+  id: string;
+  bracket_id: string;
+  season_slug: string;
+  match_type: 'Q1' | 'ELIM' | 'Q2' | 'F';
+  match_label: string;
+  slot: number;
+  round_order: number;
+  team_a_id?: string | null;
+  team_b_id?: string | null;
+  participant_a_source?: string | null;
+  participant_b_source?: string | null;
+  winner_id?: string | null;
+  loser_id?: string | null;
+  score_a?: number | null;
+  score_b?: number | null;
+  sets_json?: { scoreA: number; scoreB: number; winner?: 'A' | 'B'; isCompleted?: boolean }[] | null;
+  court: number;
+  court_name?: string | null;
+  scheduled_date?: string | null;
+  scheduled_time?: string | null;
+  time_label?: string | null;
+  umpire_name?: string | null;
+  mvp_player_id?: string | null;
+  status: 'upcoming' | 'live' | 'paused' | 'completed' | 'postponed';
+  completed_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -250,6 +299,16 @@ export interface Database {
         Row: DbTournamentStanding;
         Insert: Partial<DbTournamentStanding> & { team_id: string };
         Update: Partial<DbTournamentStanding>;
+      };
+      playoff_brackets: {
+        Row: DbPlayoffBracket;
+        Insert: Partial<DbPlayoffBracket> & { season_slug: string };
+        Update: Partial<DbPlayoffBracket>;
+      };
+      playoff_matches: {
+        Row: DbPlayoffMatch;
+        Insert: Partial<DbPlayoffMatch> & { bracket_id: string; match_type: 'Q1' | 'ELIM' | 'Q2' | 'F'; match_label: string };
+        Update: Partial<DbPlayoffMatch>;
       };
       admin_users: {
         Row: DbAdminUser;

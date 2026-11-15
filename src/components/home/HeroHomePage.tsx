@@ -31,9 +31,15 @@ import { FixturesShowcaseSection } from './FixturesShowcaseSection';
 import { TeamsShowcaseSection } from './TeamsShowcaseSection';
 import { YouTubeLivePlayerModal } from './YouTubeLivePlayerModal';
 import { SPLLogo, SPLLogoEmblemSvg } from '../common/SPLLogo';
+import { IPLPlayoffBracket } from '../knockout/IPLPlayoffBracket';
 import { Match, Player } from '../../types/tournament';
 import { AuthService } from '../../services/authService';
 import { resolveYouTubeLiveCtaState } from '../../utils/youtube';
+import {
+  getPlayoffMatchDisplayLabel,
+  inferPlayoffRound,
+  normalizePlayoffSettings,
+} from '../../utils/playoffEngine';
 
 interface HeroHomePageProps {
   onOpenPublicRegister: () => void;
@@ -105,16 +111,13 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   const getTeam = (teamId?: string) => state.teams.find((t) => t.id === teamId);
   const getPlayer = (playerId?: string) => state.players.find((p) => p.id === playerId);
 
-  const formatKnockoutStageLabel = (stage?: string, slot?: number) => {
-    if (stage === 'F') return 'Grand Final';
-    if (stage === 'SF') return `Semi-Final ${slot || 1}`;
-    if (stage === 'ELIM' || stage === 'QF') return `Quarter-Final ${slot || 1}`;
-    return 'Knockout Match';
+  const formatKnockoutStageLabel = (ko: { stage?: 'ELIM' | 'QF' | 'SF' | 'F'; slot?: number; playoffRound?: any; matchLabel?: string }) => {
+    return getPlayoffMatchDisplayLabel(ko, state.knockout?.format).title;
   };
 
   // Normalize knockout matches into unified public Match broadcast shape (strictly deduplicated by ID)
   const normalizedKnockoutMatches: Match[] = React.useMemo(() => {
-    const stageOrder: Record<string, number> = { F: 3, SF: 2, ELIM: 1, QF: 1 };
+    const stageOrder: Record<string, number> = { F: 4, Q2: 3, Q1: 2, SF: 2, ELIM: 1, QF: 1 };
     const seenIds = new Set<string>();
     const uniqueKo = (state.knockout?.matches || []).filter((ko) => {
       if (!ko?.id || seenIds.has(ko.id)) return false;
@@ -123,8 +126,10 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     });
     return uniqueKo
       .sort((a, b) => {
-        const pa = stageOrder[a.stage] ?? 0;
-        const pb = stageOrder[b.stage] ?? 0;
+        const ra = inferPlayoffRound(a, state.knockout?.format) || a.stage;
+        const rb = inferPlayoffRound(b, state.knockout?.format) || b.stage;
+        const pa = stageOrder[ra] ?? 0;
+        const pb = stageOrder[rb] ?? 0;
         if (pb !== pa) return pb - pa;
         return (a.slot || 1) - (b.slot || 1);
       })
@@ -134,10 +139,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           ko.courtName ||
           state.settings.courtNames?.[cNum - 1]?.trim() ||
           `Court ${cNum}`;
-        const stageLabel = formatKnockoutStageLabel(ko.stage, ko.slot);
+        const labelInfo = getPlayoffMatchDisplayLabel(ko, state.knockout?.format);
+        const stageLabel = labelInfo.title;
         return {
           id: ko.id,
-          round: ko.stage === 'F' ? 999 : ko.stage === 'SF' ? 998 : 997,
+          round: labelInfo.playoffRound === 'F' ? 999 : labelInfo.playoffRound === 'Q2' ? 998 : 997,
           court: cNum,
           courtName: cName,
           teamA: ko.teamA || '',
@@ -146,17 +152,22 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           scoreB: ko.scoreB,
           status: ko.status,
           winner: ko.winner,
-          time: ko.time || `${stageLabel} · ${cName}`,
+          time: ko.scheduledTime
+            ? `${ko.scheduledDate ? `${ko.scheduledDate} ` : ''}${ko.scheduledTime}`
+            : ko.time || `${stageLabel} · ${cName}`,
+          date: ko.scheduledDate,
+          startTime: ko.scheduledTime,
           sets: ko.sets,
           mvpPlayerId: ko.mvpPlayerId,
           version: ko.version,
           matchType: 'knockout' as const,
           stage: ko.stage,
+          playoffRound: labelInfo.playoffRound,
           slot: ko.slot,
           stageLabel,
         };
       });
-  }, [state.knockout?.matches, state.settings.courtNames]);
+  }, [state.knockout?.matches, state.knockout?.format, state.settings.courtNames]);
 
   // Unified broadcast + schedule list (strictly deduplicated by match ID)
   const allPublicMatches = useMemo(() => {
@@ -198,10 +209,23 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
   // Dynamic Tournament Stage & Next Match Telemetry derived strictly from Supabase-synced state
   const currentTournamentStage = useMemo(() => {
     const koMatches = state.knockout?.matches || [];
+    const format = state.knockout?.format;
     const finals = koMatches.filter((m) => m.stage === 'F');
     if (finals.some((m) => m.status === 'live' || m.status === 'paused')) return 'Grand Final Live';
     if (finals.length > 0 && finals.every((m) => m.status === 'completed')) return 'Grand Final Complete';
     if (finals.some((m) => Boolean(m.teamA && m.teamB))) return 'Grand Final';
+
+    if (format === 'ipl_top4') {
+      const q2 = koMatches.filter((m) => inferPlayoffRound(m, format) === 'Q2');
+      if (q2.some((m) => m.status === 'live' || m.status === 'paused')) return 'Qualifier 2 Live';
+      if (q2.some((m) => Boolean(m.teamA && m.teamB) || m.status === 'completed')) return 'Qualifier 2';
+
+      const q1 = koMatches.filter((m) => inferPlayoffRound(m, format) === 'Q1');
+      if (q1.some((m) => m.status === 'live' || m.status === 'paused')) return 'Qualifier 1 Live';
+      const elim = koMatches.filter((m) => inferPlayoffRound(m, format) === 'ELIM');
+      if (elim.some((m) => m.status === 'live' || m.status === 'paused')) return 'Eliminator Live';
+      if (koMatches.length > 0) return 'IPL Playoffs';
+    }
 
     const semis = koMatches.filter((m) => m.stage === 'SF');
     if (semis.some((m) => m.status === 'live' || m.status === 'paused')) return 'Semi-Finals Live';
@@ -216,7 +240,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       return 'League Stage';
     }
     return state.teams.length > 0 ? 'Fixtures Pending' : 'Registration Open';
-  }, [state.knockout?.matches, state.matches, state.teams.length]);
+  }, [state.knockout?.matches, state.knockout?.format, state.matches, state.teams.length]);
 
   const featuredFixture = useMemo(() => {
     return (
@@ -729,6 +753,114 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             </div>
           )}
         </section>
+
+        {/* 6B. IPL-STYLE PLAYOFFS — ROAD TO THE GRAND FINAL & CHAMPIONS SHOWCASE */}
+        {(() => {
+          const ps = normalizePlayoffSettings(state.settings.playoffSettings);
+          const showSection =
+            ps.enabled !== false &&
+            ps.showOnPublicHomepage !== false &&
+            state.knockout.published !== false &&
+            state.knockout.format === 'ipl_top4' &&
+            state.knockout.matches.length > 0;
+          if (!showSection) return null;
+
+          const gfMatch = state.knockout.matches.find((m) => inferPlayoffRound(m, 'ipl_top4') === 'F');
+          const gfCompleted = Boolean(gfMatch?.status === 'completed' && gfMatch.winner);
+          const championTeam = gfCompleted && gfMatch?.winner ? getTeam(gfMatch.winner) : undefined;
+          const runnerUpTeam =
+            gfCompleted && gfMatch?.winner && gfMatch.teamA && gfMatch.teamB
+              ? getTeam(gfMatch.winner === gfMatch.teamA ? gfMatch.teamB : gfMatch.teamA)
+              : undefined;
+          const getPairNames = (teamId?: string) => {
+            const t = getTeam(teamId);
+            if (!t) return '';
+            return (t.players || [])
+              .map((pid) => getPlayer(pid)?.name)
+              .filter((n): n is string => Boolean(n))
+              .join(' & ');
+          };
+
+          return (
+            <section
+              id="playoffs-bracket"
+              aria-label="Road to the Grand Final Playoff Bracket"
+              className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24 space-y-6"
+            >
+              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
+                    <Trophy className="w-4 h-4" />
+                    <span>IPL-Style Top 4 Championship Playoffs</span>
+                  </div>
+                  <h2 className="text-3xl sm:text-4xl font-black text-white font-display uppercase tracking-tight mt-1">
+                    🏆 Road to the{' '}
+                    <span className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
+                      Grand Final
+                    </span>
+                  </h2>
+                  <p className="text-sm text-slate-400 mt-1">
+                    Qualifier 1 (#1 vs #2), Eliminator (#3 vs #4), Qualifier 2, and the Championship Grand Final.
+                  </p>
+                </div>
+              </div>
+
+              {championTeam && gfMatch && (
+                <div className="rounded-3xl border border-amber-400/55 bg-gradient-to-br from-[#1b1204] via-[#120c04] to-[#080603] p-6 sm:p-8 shadow-[0_0_45px_-12px_rgba(245,158,11,0.45)] flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                  <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4 text-center sm:text-left min-w-0">
+                    <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-gradient-to-br from-amber-400/30 to-orange-500/20 border border-amber-300/60 flex items-center justify-center text-4xl shrink-0">
+                      {championTeam.badge || '🏆'}
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <span className="text-[11px] font-black uppercase tracking-[0.22em] text-amber-300 block">
+                        🏆 SMASH PREMIER LEAGUE CHAMPIONS · {seasonLabel}
+                      </span>
+                      <h3 className="text-2xl sm:text-4xl font-display font-black text-white uppercase tracking-tight">
+                        {championTeam.name}
+                      </h3>
+                      <p className="text-sm text-amber-100/90 font-semibold">
+                        {getPairNames(championTeam.id) || 'Official Championship Pair'}
+                      </p>
+                      {runnerUpTeam && (
+                        <p className="text-xs text-slate-400">
+                          Runner-Up: <strong className="text-slate-200">{runnerUpTeam.name}</strong>
+                          {getPairNames(runnerUpTeam.id) ? ` (${getPairNames(runnerUpTeam.id)})` : ''}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="px-5 py-3.5 rounded-2xl bg-black/45 border border-amber-400/35 text-center lg:text-right shrink-0 font-mono">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-amber-300 block">
+                      Grand Final Score
+                    </span>
+                    <span className="text-xl sm:text-2xl font-black text-white tabular-nums mt-0.5 block">
+                      {getTeam(gfMatch.teamA)?.name?.slice(0, 14) || 'Finalist A'} {gfMatch.scoreA ?? 0} –{' '}
+                      {gfMatch.scoreB ?? 0} {getTeam(gfMatch.teamB)?.name?.slice(0, 14) || 'Finalist B'}
+                    </span>
+                    {gfMatch.sets && gfMatch.sets.length > 1 && (
+                      <span className="text-[10px] text-amber-200/80 block mt-1 tabular-nums">
+                        {gfMatch.sets.map((s, i) => `S${i + 1}: ${s.scoreA}-${s.scoreB}`).join(' · ')}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="rounded-3xl border border-amber-400/25 bg-[#090c17]/95 p-4 sm:p-6 shadow-2xl">
+                <IPLPlayoffBracket
+                  mode="public"
+                  knockout={state.knockout}
+                  teams={state.teams}
+                  players={state.players}
+                  courtNames={state.settings.courtNames}
+                  seasonLabel={seasonLabel}
+                  onSelectMatch={handleOpenMatchModal}
+                />
+              </div>
+            </section>
+          );
+        })()}
 
         {/* 7. TOURNAMENT VENUE & MAHARAJGANJ COMMUNITY SECTION */}
         <section id="tournament-info" className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24">

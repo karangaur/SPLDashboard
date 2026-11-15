@@ -6,6 +6,79 @@ export interface BadmintonScoringRules {
   changeEndsAtInterval: boolean; // interval at 11 pts (or half point target)
 }
 
+export type PlayoffFormat = 'ipl_top4' | 'top2' | 'top4' | 'top8';
+
+export type PlayoffRoundType = 'Q1' | 'ELIM' | 'Q2' | 'F';
+
+export type PlayoffTiebreakerCriterion =
+  | 'points'
+  | 'win_diff'
+  | 'set_diff'
+  | 'point_diff'
+  | 'head_to_head'
+  | 'admin_override';
+
+export interface PlayoffSettings {
+  enabled: boolean;
+  format: PlayoffFormat;
+  qualifyingTeamsCount: number; // Default: 4 for IPL-Style Top 4
+  autoQualifyFromStandings: boolean;
+  allowManualOverride: boolean;
+  requireLeagueCompletion: boolean;
+  requireAdminConfirmation: boolean;
+  showOnPublicHomepage: boolean;
+  allowMatchScheduleEditing: boolean;
+  courtAssignmentMode: 'auto' | 'manual';
+  tieBreakerOrder: PlayoffTiebreakerCriterion[];
+}
+
+export interface PlayoffQualifiedSeed {
+  rank: number;
+  teamId: string;
+  teamName: string;
+  playerNames: string[];
+  points: number;
+  played: number;
+  won: number;
+  lost: number;
+  matchWinDiff: number;
+  setDiff: number;
+  pointDiff: number;
+  isManualOverride?: boolean;
+  status: 'qualified' | 'reserve' | 'eliminated' | 'disqualified';
+}
+
+export interface PlayoffAuditEntry {
+  id: string;
+  action:
+    | 'playoffs_generated'
+    | 'qualification_overridden'
+    | 'tie_break_resolved'
+    | 'team_disqualified'
+    | 'team_restored'
+    | 'match_scheduled'
+    | 'court_assigned'
+    | 'umpire_assigned'
+    | 'match_completed'
+    | 'result_corrected'
+    | 'bracket_published'
+    | 'bracket_unpublished'
+    | 'playoffs_reset'
+    | 'playoffs_deleted'
+    | 'standings_recalculated';
+  message: string;
+  actor: string;
+  at: number;
+  matchId?: string;
+  details?: Record<string, any>;
+}
+
+export interface PlayoffConflictWarning {
+  matchId: string;
+  type: 'court_time_conflict' | 'dependency_schedule_conflict';
+  message: string;
+}
+
 export interface TournamentSettings {
   name: string;
   date: string;
@@ -19,6 +92,7 @@ export interface TournamentSettings {
   season?: string;
   announcement?: string;
   scoringRules?: BadmintonScoringRules;
+  playoffSettings?: PlayoffSettings;
 }
 
 export interface Player {
@@ -76,6 +150,7 @@ export interface Match {
   version?: number;
   matchType?: 'group' | 'knockout';
   stage?: 'ELIM' | 'QF' | 'SF' | 'F';
+  playoffRound?: PlayoffRoundType;
   slot?: number;
   stageLabel?: string;
 }
@@ -83,16 +158,27 @@ export interface Match {
 export interface KnockoutMatch {
   id: string;
   stage: 'ELIM' | 'QF' | 'SF' | 'F';
+  playoffRound?: PlayoffRoundType;
+  matchLabel?: string;
   slot: number;
   court?: number;
   courtName?: string;
   time?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  assignedUmpire?: string;
+  participantASource?: string; // e.g. 'RANK_1', 'RANK_3', 'Q1_LOSER', 'Q1_WINNER'
+  participantBSource?: string; // e.g. 'RANK_2', 'RANK_4', 'ELIM_WINNER', 'Q2_WINNER'
   teamA?: string;
   teamB?: string;
   scoreA?: number;
   scoreB?: number;
   status: 'upcoming' | 'live' | 'paused' | 'completed';
   winner?: string;
+  loserId?: string;
+  completedAt?: number;
+  bracketId?: string;
+  isPlayoff?: boolean;
   manual?: boolean;
   sets?: MatchSet[];
   mvpPlayerId?: string;
@@ -100,7 +186,19 @@ export interface KnockoutMatch {
 }
 
 export interface KnockoutData {
-  format: 'top2' | 'top4' | 'top8';
+  format: PlayoffFormat;
+  bracketId?: string;
+  published?: boolean;
+  showOnPublicHomepage?: boolean;
+  status?: 'draft' | 'active' | 'completed';
+  qualifiedTeams?: PlayoffQualifiedSeed[];
+  disqualifiedTeamIds?: string[];
+  manualTieBreakOrder?: string[];
+  championTeamId?: string;
+  runnerUpTeamId?: string;
+  completedAt?: number;
+  updatedAt?: number;
+  auditLogs?: PlayoffAuditEntry[];
   matches: KnockoutMatch[];
 }
 

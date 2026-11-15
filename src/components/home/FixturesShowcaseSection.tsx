@@ -16,6 +16,7 @@ import {
   Player,
   Team,
 } from '../../types/tournament';
+import { IPLPlayoffBracket } from '../knockout/IPLPlayoffBracket';
 
 export interface FixturesShowcaseSectionProps {
   allPublicMatches: Match[];
@@ -38,6 +39,9 @@ function isCrownBracketMatch(m: Match): boolean {
   if (m.stage === 'F' || m.stage === 'SF' || m.stage === 'QF' || m.stage === 'ELIM') return true;
   const lbl = (m.stageLabel || '').toLowerCase();
   return (
+    lbl.includes('qualifier 1') ||
+    lbl.includes('qualifier 2') ||
+    lbl.includes('eliminator') ||
     lbl.includes('semi-final') ||
     lbl.includes('semi final') ||
     lbl.includes('grand final') ||
@@ -655,13 +659,29 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
             <div className="flex flex-wrap items-center justify-between gap-2 pb-4 border-b border-white/10">
               <div className="flex items-center gap-2 text-xs sm:text-sm font-display font-black uppercase tracking-[0.2em] text-amber-300">
                 <Crown className="w-4 h-4 text-amber-400 shrink-0" />
-                <span>Road to the SPL 3.0 Crown</span>
+                <span>
+                  {knockout?.format === 'ipl_top4'
+                    ? 'Road to the Grand Final · IPL-Style Playoffs'
+                    : 'Road to the SPL 3.0 Crown'}
+                </span>
               </div>
               <span className="text-[11px] font-mono text-slate-400">
-                Official Knockout Bracket · Tap any fixture to inspect scorecard
+                Official Playoff Bracket · Tap any fixture to inspect scorecard
               </span>
             </div>
 
+            {knockout?.format === 'ipl_top4' && knockout.matches.length > 0 ? (
+              <div className="pt-5">
+                <IPLPlayoffBracket
+                  mode="public"
+                  knockout={knockout}
+                  teams={teams}
+                  players={players}
+                  courtNames={courtNames}
+                  onSelectMatch={onOpenMatchModal}
+                />
+              </div>
+            ) : (
             <div className="pt-5 grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6 items-start">
               {/* Quarter-Finals Column (only when Top 8 / ELIM configured) */}
               {bracketStages.qfs.length > 0 && (
@@ -939,6 +959,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                 </div>
               )}
             </div>
+            )}
           </div>
         ) : activeTab === 'knockout' ? (
           <div

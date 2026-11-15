@@ -18,9 +18,18 @@ import {
   Layers,
   Info,
   AlertTriangle,
+  Trophy,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react';
 import { useTournament, DatabaseDiagnosticResult } from '../../context/TournamentContext';
 import { ConfirmModal } from '../common/ConfirmModal';
+import { PlayoffFormat, PlayoffSettings, PlayoffTiebreakerCriterion } from '../../types/tournament';
+import {
+  DEFAULT_PLAYOFF_SETTINGS,
+  TIEBREAKER_LABELS,
+  normalizePlayoffSettings,
+} from '../../utils/playoffEngine';
 
 export const SettingsView: React.FC = () => {
   const {
@@ -121,6 +130,7 @@ export const SettingsView: React.FC = () => {
     }
 
     const pointTargetNum = parseInt(String(settingsForm.format || '21'), 10) || 21;
+    const sanitizedPlayoffSettings = normalizePlayoffSettings(settingsForm.playoffSettings);
     const sanitizedSettings = {
       ...settingsForm,
       name: trimmedName,
@@ -140,6 +150,7 @@ export const SettingsView: React.FC = () => {
             maxPointCap: 30,
             changeEndsAtInterval: true,
           },
+      playoffSettings: sanitizedPlayoffSettings,
     };
 
     const sanitizedPayment = {
@@ -463,6 +474,235 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* Playoff & Knockout Rules */}
+        {(() => {
+          const ps: PlayoffSettings = normalizePlayoffSettings(settingsForm.playoffSettings);
+          const updatePlayoffField = <K extends keyof PlayoffSettings>(key: K, value: PlayoffSettings[K]) => {
+            markDirty();
+            setSettingsForm((prev) => ({
+              ...prev,
+              playoffSettings: normalizePlayoffSettings({
+                ...(prev.playoffSettings || DEFAULT_PLAYOFF_SETTINGS),
+                [key]: value,
+              }),
+            }));
+          };
+
+          const moveTieBreaker = (idx: number, dir: -1 | 1) => {
+            const targetIdx = idx + dir;
+            if (targetIdx < 0 || targetIdx >= ps.tieBreakerOrder.length) return;
+            const nextOrder = [...ps.tieBreakerOrder];
+            const [item] = nextOrder.splice(idx, 1);
+            nextOrder.splice(targetIdx, 0, item);
+            updatePlayoffField('tieBreakerOrder', nextOrder as PlayoffTiebreakerCriterion[]);
+          };
+
+          return (
+            <div className="rounded-3xl glass-panel p-6 sm:p-8 border border-amber-500/20 space-y-5">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-white/10">
+                <h3 className="font-bold text-white text-base flex items-center gap-2">
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span>Playoff &amp; Knockout Rules</span>
+                </h3>
+                <span className="text-[11px] font-mono text-amber-300/90">
+                  IPL-Style Qualifier 1 · Eliminator · Qualifier 2 · Grand Final
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Playoff Format
+                  </label>
+                  <select
+                    value={ps.format}
+                    onChange={(e) => {
+                      const nextFmt = e.target.value as PlayoffFormat;
+                      markDirty();
+                      setSettingsForm((prev) => ({
+                        ...prev,
+                        playoffSettings: normalizePlayoffSettings({
+                          ...(prev.playoffSettings || DEFAULT_PLAYOFF_SETTINGS),
+                          format: nextFmt,
+                          qualifyingTeamsCount:
+                            nextFmt === 'ipl_top4' || nextFmt === 'top4'
+                              ? 4
+                              : nextFmt === 'top2'
+                              ? 2
+                              : 8,
+                        }),
+                      }));
+                    }}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="ipl_top4">IPL-Style Top 4 (Recommended)</option>
+                    <option value="top4">Top 4 Semi Finals + Final</option>
+                    <option value="top8">Top 8 Quarter Finals + Semis + Final</option>
+                    <option value="top2">Top 2 Grand Final Only</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Qualifying Teams Count
+                  </label>
+                  <input
+                    type="number"
+                    min={2}
+                    max={8}
+                    value={ps.format === 'ipl_top4' ? 4 : ps.qualifyingTeamsCount}
+                    disabled={ps.format === 'ipl_top4'}
+                    onChange={(e) => updatePlayoffField('qualifyingTeamsCount', parseInt(e.target.value, 10) || 4)}
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white font-mono focus:outline-none focus:border-amber-400 disabled:opacity-60"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1">
+                    Court Assignment Mode
+                  </label>
+                  <select
+                    value={ps.courtAssignmentMode}
+                    onChange={(e) =>
+                      updatePlayoffField('courtAssignmentMode', e.target.value as 'auto' | 'manual')
+                    }
+                    className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
+                  >
+                    <option value="auto">Automatic Court Rotation</option>
+                    <option value="manual">Manual Admin Assignment</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col justify-end">
+                  <label className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-slate-900/90 border border-white/10 cursor-pointer">
+                    <span className="text-xs font-semibold text-slate-200">Enable Playoffs Module</span>
+                    <input
+                      type="checkbox"
+                      checked={ps.enabled}
+                      onChange={(e) => updatePlayoffField('enabled', e.target.checked)}
+                      className="h-4 w-4 accent-amber-400 rounded cursor-pointer"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {[
+                  {
+                    key: 'autoQualifyFromStandings' as const,
+                    label: 'Auto-Qualify Top Teams from Standings',
+                    desc: 'Seed Top 4 directly from completed league fixtures',
+                  },
+                  {
+                    key: 'allowManualOverride' as const,
+                    label: 'Allow Manual Qualification Override',
+                    desc: 'Permit admin selection/reordering of qualifiers',
+                  },
+                  {
+                    key: 'requireLeagueCompletion' as const,
+                    label: 'Require League Completion First',
+                    desc: 'Block bracket generation while group matches are pending',
+                  },
+                  {
+                    key: 'requireAdminConfirmation' as const,
+                    label: 'Require Admin Confirmation Modal',
+                    desc: 'Confirm before generating or replacing playoff brackets',
+                  },
+                  {
+                    key: 'showOnPublicHomepage' as const,
+                    label: 'Show Playoff Bracket on Homepage',
+                    desc: 'Display Road to the Grand Final to public spectators',
+                  },
+                  {
+                    key: 'allowMatchScheduleEditing' as const,
+                    label: 'Allow Playoff Schedule Editing',
+                    desc: 'Edit dates, start times, courts & umpires after draw',
+                  },
+                ].map((opt) => (
+                  <label
+                    key={opt.key}
+                    className="flex items-start justify-between gap-3 p-3 rounded-2xl bg-white/[0.02] border border-white/10 hover:border-amber-400/30 transition-colors cursor-pointer"
+                  >
+                    <div className="min-w-0">
+                      <span className="block text-xs font-bold text-white">{opt.label}</span>
+                      <span className="block text-[11px] text-slate-400 mt-0.5 leading-snug">{opt.desc}</span>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(ps[opt.key])}
+                      onChange={(e) => updatePlayoffField(opt.key, e.target.checked)}
+                      className="mt-0.5 h-4 w-4 accent-amber-400 rounded shrink-0 cursor-pointer"
+                    />
+                  </label>
+                ))}
+              </div>
+
+              {/* Tie-Breaker Priority Order */}
+              <div className="space-y-2.5 pt-2 border-t border-white/10">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-amber-300 block">
+                      Standings Tie-Breaker Priority Order
+                    </span>
+                    <p className="text-[11px] text-slate-400">
+                      Evaluated top-to-bottom when league teams finish level on points. Never breaks ties randomly.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => updatePlayoffField('tieBreakerOrder', [...DEFAULT_PLAYOFF_SETTINGS.tieBreakerOrder])}
+                    className="px-2.5 py-1 rounded-lg text-[11px] font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-colors"
+                  >
+                    Reset Default Order
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {ps.tieBreakerOrder.map((criterion, idx) => {
+                    const meta = TIEBREAKER_LABELS[criterion];
+                    return (
+                      <div
+                        key={criterion}
+                        className="flex items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-900/70 border border-white/10"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="w-5 h-5 rounded-md bg-amber-400/15 text-amber-300 font-mono font-bold text-[11px] flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <span className="block text-xs font-bold text-white truncate">{meta.label}</span>
+                            <span className="block text-[10px] text-slate-400 truncate">{meta.description}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button
+                            type="button"
+                            disabled={idx === 0}
+                            onClick={() => moveTieBreaker(idx, -1)}
+                            aria-label={`Move ${meta.label} higher`}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
+                            disabled={idx === ps.tieBreakerOrder.length - 1}
+                            onClick={() => moveTieBreaker(idx, 1)}
+                            aria-label={`Move ${meta.label} lower`}
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 disabled:opacity-30 disabled:cursor-not-allowed"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Submit button & Persistence Feedback */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">

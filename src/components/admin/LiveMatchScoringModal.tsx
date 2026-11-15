@@ -23,6 +23,10 @@ import {
   evaluateSetStatus,
   evaluateMatchOverall,
 } from '../../utils/badmintonEngine';
+import {
+  canStartOrScorePlayoffMatch,
+  getPlayoffMatchDisplayLabel,
+} from '../../utils/playoffEngine';
 
 interface LiveMatchScoringModalProps {
   isOpen: boolean;
@@ -91,6 +95,15 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   const isCompleted = status === 'completed';
   const isUpcoming = status === 'upcoming';
 
+  const playoffDependencyGuard = isKnockout
+    ? canStartOrScorePlayoffMatch(
+        currentMatch as KnockoutMatch,
+        state.knockout.matches,
+        state.knockout.format
+      )
+    : { allowed: true };
+  const isScoringBlocked = !playoffDependencyGuard.allowed;
+
   // Evaluate badminton set status
   const currentSetStatus = evaluateSetStatus(scoreA, scoreB, rules);
   const matchOverall = evaluateMatchOverall(sets, scoreA, scoreB, rules);
@@ -102,6 +115,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
 
   // Atomic score mutation helper
   const handleScoreChange = (team: 'A' | 'B', delta: number) => {
+    if (isScoringBlocked || isCompleted) return;
     sportsAudio.playScorePing();
     const curA = currentMatch.scoreA ?? 0;
     const curB = currentMatch.scoreB ?? 0;
@@ -157,6 +171,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   };
 
   const handleStartMatch = () => {
+    if (isScoringBlocked) return;
     sportsAudio.playScorePing();
     const payload = {
       status: 'live' as const,
@@ -168,12 +183,14 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
   };
 
   const handlePauseMatch = () => {
+    if (isScoringBlocked) return;
     const payload = { status: 'paused' as const };
     if (isKnockout) updateKnockoutMatch(currentMatch.id, payload);
     else updateMatch(currentMatch.id, payload);
   };
 
   const handleCompleteMatch = (forcedWinner?: string) => {
+    if (isScoringBlocked) return;
     sportsAudio.playFanfare();
     const curA = currentMatch.scoreA ?? 0;
     const curB = currentMatch.scoreB ?? 0;
@@ -240,13 +257,10 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
       : state.settings.courtNames?.[courtNum - 1]?.trim() || `Court ${courtNum}`;
 
   const getStageDisplay = (m: Match | KnockoutMatch) => {
-    if ('round' in m && m.round) return `Round ${m.round}`;
-    if ('stage' in m) {
-      const ko = m as KnockoutMatch;
-      if (ko.stage === 'F') return 'Grand Final';
-      if (ko.stage === 'SF') return `Semi-Final ${ko.slot || 1}`;
-      if (ko.stage === 'ELIM' || ko.stage === 'QF') return `Quarter-Final ${ko.slot || 1}`;
+    if ('stage' in m && m.stage) {
+      return getPlayoffMatchDisplayLabel(m, state.knockout.format).title;
     }
+    if ('round' in m && m.round) return `Round ${m.round}`;
     return 'Match';
   };
 
@@ -545,7 +559,16 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
 
         {/* Scrollable Center Content: Teams, Scoreboard & Clickers */}
         <div className="p-3 sm:p-6 md:p-8 space-y-4 sm:space-y-6 overflow-y-auto overflow-x-hidden flex-1">
-          
+          {isScoringBlocked && playoffDependencyGuard.reason && (
+            <div
+              role="alert"
+              className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-400/40 text-amber-200 text-xs font-semibold flex items-center gap-2.5"
+            >
+              <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>{playoffDependencyGuard.reason}</span>
+            </div>
+          )}
+
           {/* ==================================================================== */}
           {/* SECTION 2 & 3: TEAMS DETAILS & DUAL LIVE SCOREBOARD                  */}
           {/* ==================================================================== */}
@@ -612,7 +635,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleScoreChange('A', 1)}
-                    disabled={isCompleted}
+                    disabled={isCompleted || isScoringBlocked}
                     className="w-full min-h-[48px] sm:min-h-[54px] rounded-xl sm:rounded-2xl bg-gradient-to-r from-amber-400 via-amber-300 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black text-base sm:text-xl shadow-lg shadow-amber-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Add 1 Point to Team A"
                     aria-label={`Add 1 point for ${teamA?.name || 'Team A'}`}
@@ -624,7 +647,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleScoreChange('A', -1)}
-                    disabled={scoreA === 0 || isCompleted}
+                    disabled={scoreA === 0 || isCompleted || isScoringBlocked}
                     className="w-full min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 font-bold text-xs sm:text-sm active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed border border-white/5"
                     title="Undo Last Point for Team A"
                     aria-label={`Undo point for ${teamA?.name || 'Team A'}`}
@@ -695,7 +718,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleScoreChange('B', 1)}
-                    disabled={isCompleted}
+                    disabled={isCompleted || isScoringBlocked}
                     className="w-full min-h-[48px] sm:min-h-[54px] rounded-xl sm:rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-300 to-blue-500 hover:from-cyan-300 hover:to-blue-400 text-slate-950 font-black text-base sm:text-xl shadow-lg shadow-cyan-500/20 active:scale-95 transition-all flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                     title="Add 1 Point to Team B"
                     aria-label={`Add 1 point for ${teamB?.name || 'Team B'}`}
@@ -707,7 +730,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                   <button
                     type="button"
                     onClick={() => handleScoreChange('B', -1)}
-                    disabled={scoreB === 0 || isCompleted}
+                    disabled={scoreB === 0 || isCompleted || isScoringBlocked}
                     className="w-full min-h-[44px] rounded-xl bg-white/10 hover:bg-white/15 text-slate-300 font-bold text-xs sm:text-sm active:scale-95 transition-all flex items-center justify-center gap-1 cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed border border-white/5"
                     title="Undo Last Point for Team B"
                     aria-label={`Undo point for ${teamB?.name || 'Team B'}`}
@@ -749,7 +772,8 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                 <button
                   type="button"
                   onClick={handleStartMatch}
-                  className="flex-1 min-w-[130px] min-h-[44px] px-4 py-2 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
+                  disabled={isScoringBlocked}
+                  className="flex-1 min-w-[130px] min-h-[44px] px-4 py-2 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Start Match</span>
@@ -773,7 +797,8 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                 <button
                   type="button"
                   onClick={handleStartMatch}
-                  className="flex-1 min-w-[120px] min-h-[44px] px-4 py-2 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all active:scale-95 flex items-center justify-center gap-1.5"
+                  disabled={isScoringBlocked}
+                  className="flex-1 min-w-[120px] min-h-[44px] px-4 py-2 rounded-xl font-bold text-xs bg-emerald-500 hover:bg-emerald-400 text-slate-950 transition-all active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Play className="w-4 h-4 fill-current" />
                   <span>Resume Match</span>
@@ -785,7 +810,8 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                 <button
                   type="button"
                   onClick={handleNextSet}
-                  className="flex-1 min-w-[140px] min-h-[44px] px-4 py-2 rounded-xl font-black text-xs bg-lime-400 text-slate-950 hover:bg-lime-300 shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5"
+                  disabled={isScoringBlocked}
+                  className="flex-1 min-w-[140px] min-h-[44px] px-4 py-2 rounded-xl font-black text-xs bg-lime-400 text-slate-950 hover:bg-lime-300 shadow-md active:scale-95 transition-all flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <Sparkles className="w-4 h-4" />
                   <span>Start Next Set →</span>
@@ -797,7 +823,8 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                 <button
                   type="button"
                   onClick={() => handleCompleteMatch()}
-                  className="flex-1 min-w-[140px] min-h-[44px] px-4 py-2 rounded-xl font-bold text-xs bg-emerald-400 text-slate-950 hover:bg-emerald-300 transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5"
+                  disabled={isScoringBlocked}
+                  className="flex-1 min-w-[140px] min-h-[44px] px-4 py-2 rounded-xl font-bold text-xs bg-emerald-400 text-slate-950 hover:bg-emerald-300 transition-all shadow-md active:scale-95 flex items-center justify-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
                   <CheckCircle2 className="w-4 h-4" />
                   <span>Finish & Declare</span>

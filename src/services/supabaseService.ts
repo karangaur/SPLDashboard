@@ -3,7 +3,9 @@ import {
   Player,
   Team,
   Match,
+  KnockoutData,
   KnockoutMatch,
+  PlayoffRoundType,
   Registration,
   RegistrationFormConfig,
   RegistrationTokenRecord,
@@ -22,6 +24,11 @@ import {
   normalizeYouTubeLiveConfig,
   extractYouTubeVideoId,
 } from '../utils/youtube';
+import {
+  DEFAULT_PLAYOFF_SETTINGS,
+  inferPlayoffRound,
+  normalizePlayoffSettings,
+} from '../utils/playoffEngine';
 import { AuthService } from './authService';
 import {
   parseMatchScheduleTime,
@@ -737,9 +744,30 @@ export class SupabaseService {
             : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1;
 
         if (m.match_type === 'knockout') {
+          const timeStr = String(m.time || '');
+          const dbStage = String(m.stage || 'SF');
+          let inferredPlayoffRound: PlayoffRoundType | undefined;
+          let normalizedStage: KnockoutMatch['stage'] = (m.stage as any) || 'SF';
+
+          if (dbStage === 'Q1' || (dbStage === 'SF' && m.slot === 1 && timeStr.toLowerCase().includes('qualifier 1'))) {
+            inferredPlayoffRound = 'Q1';
+            normalizedStage = 'SF';
+          } else if (dbStage === 'Q2' || (dbStage === 'SF' && (m.slot === 3 || timeStr.toLowerCase().includes('qualifier 2')))) {
+            inferredPlayoffRound = 'Q2';
+            normalizedStage = 'SF';
+          } else if ((dbStage === 'ELIM' || dbStage === 'QF') && timeStr.toLowerCase().includes('eliminator')) {
+            inferredPlayoffRound = 'ELIM';
+            normalizedStage = 'ELIM';
+          } else if (dbStage === 'F' && timeStr.toLowerCase().includes('grand final')) {
+            inferredPlayoffRound = 'F';
+            normalizedStage = 'F';
+          }
+
           koMatches.push({
             id: m.id,
-            stage: (m.stage as any) || 'SF',
+            stage: normalizedStage,
+            playoffRound: inferredPlayoffRound,
+            isPlayoff: Boolean(inferredPlayoffRound),
             slot: m.slot || 1,
             court: parsedCourt,
             time: m.time || undefined,
@@ -749,6 +777,12 @@ export class SupabaseService {
             scoreB: m.score_b != null ? m.score_b : undefined,
             status: normalizedStatus,
             winner: m.winner_id || undefined,
+            loserId:
+              normalizedStatus === 'completed' && m.winner_id && m.team_a_id && m.team_b_id
+                ? m.winner_id === m.team_a_id
+                  ? m.team_b_id
+                  : m.team_a_id
+                : undefined,
             sets: m.sets_json || undefined,
             mvpPlayerId: m.mvp_player_id || undefined,
           });
@@ -868,7 +902,12 @@ export class SupabaseService {
       if ('mvpPlayerId' in updates) payload.mvp_player_id = updates.mvpPlayerId || null;
       if ('stage' in updates && (updates as any).stage) {
         const st = String((updates as any).stage);
-        payload.stage = st === 'QF' ? 'ELIM' : st;
+        const pr = (updates as any).playoffRound;
+        if (pr === 'Q1' || st === 'Q1') payload.stage = 'SF';
+        else if (pr === 'Q2' || st === 'Q2') payload.stage = 'SF';
+        else if (pr === 'ELIM') payload.stage = 'ELIM';
+        else if (pr === 'F') payload.stage = 'F';
+        else payload.stage = st === 'QF' ? 'ELIM' : st;
       }
       if ('slot' in updates && (updates as any).slot != null) payload.slot = (updates as any).slot;
       if (isKnockout) {
@@ -1207,25 +1246,40 @@ export class SupabaseService {
   static async batchSaveKnockoutMatches(matches: KnockoutMatch[], season = 'season-4'): Promise<boolean> {
     if (!this.isAvailable() || matches.length === 0) return false;
     try {
-      const rows = matches.map((m) => ({
-        id: m.id,
-        tournament_season: season,
-        round: 99,
-        court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1,
-        match_type: 'knockout' as const,
-        stage: (m.stage === 'QF' ? 'ELIM' : m.stage) || 'SF',
-        slot: m.slot || 1,
-        team_a_id: m.teamA || null,
-        team_b_id: m.teamB || null,
-        score_a: m.scoreA != null ? m.scoreA : null,
-        score_b: m.scoreB != null ? m.scoreB : null,
-        status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
-        winner_id: m.winner || null,
-        time: m.time || null,
-        sets_json: m.sets || null,
-        mvp_player_id: m.mvpPlayerId || null,
-        updated_at: new Date().toISOString(),
-      }));
+      const rows = matches.map((m) => {
+        const pr = inferPlayoffRound(m);
+        const safeDbStage =
+          pr === 'Q1' || pr === 'Q2'
+            ? 'SF'
+            : pr === 'ELIM'
+            ? 'ELIM'
+            : pr === 'F'
+            ? 'F'
+            : m.stage === 'QF'
+            ? 'ELIM'
+            : m.stage || 'SF';
+        const safeSlot =
+          pr === 'Q1' ? 1 : pr === 'ELIM' ? 2 : pr === 'Q2' ? 3 : pr === 'F' ? 1 : m.slot || 1;
+        return {
+          id: m.id,
+          tournament_season: season,
+          round: 99,
+          court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1,
+          match_type: 'knockout' as const,
+          stage: safeDbStage,
+          slot: safeSlot,
+          team_a_id: m.teamA || null,
+          team_b_id: m.teamB || null,
+          score_a: m.scoreA != null ? m.scoreA : null,
+          score_b: m.scoreB != null ? m.scoreB : null,
+          status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
+          winner_id: m.winner || null,
+          time: m.time || null,
+          sets_json: m.sets || null,
+          mvp_player_id: m.mvpPlayerId || null,
+          updated_at: new Date().toISOString(),
+        };
+      });
       const { error } = await supabase.from('matches').upsert(rows as any);
       return !error;
     } catch {
@@ -1786,6 +1840,9 @@ export class SupabaseService {
       ...(config.maxSlots != null && !Number.isNaN(Number(config.maxSlots))
         ? { slotLimit: Number(config.maxSlots) }
         : {}),
+      ...(embedded.playoffSettings
+        ? { playoffSettings: normalizePlayoffSettings(embedded.playoffSettings) }
+        : {}),
     };
 
     const rawPay = (config.payment as any) || null;
@@ -1803,6 +1860,162 @@ export class SupabaseService {
       : undefined;
 
     return { settings, payment };
+  }
+
+  static extractPlayoffStateFromConfig(config: RegistrationFormConfig | null): {
+    format?: KnockoutData['format'];
+    bracketId?: string;
+    published?: boolean;
+    showOnPublicHomepage?: boolean;
+    status?: KnockoutData['status'];
+    qualifiedTeams?: KnockoutData['qualifiedTeams'];
+    disqualifiedTeamIds?: string[];
+    manualTieBreakOrder?: string[];
+    championTeamId?: string;
+    runnerUpTeamId?: string;
+    completedAt?: number;
+    updatedAt?: number;
+    auditLogs?: KnockoutData['auditLogs'];
+    matchMetaById?: Record<string, Partial<KnockoutMatch>>;
+  } | null {
+    const raw = (config?.appearance as any)?.playoffState;
+    if (!raw || typeof raw !== 'object') return null;
+    return raw;
+  }
+
+  static async savePlayoffState(
+    seasonSlug = 'season-4',
+    knockout: KnockoutData
+  ): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      const targetSlug = seasonSlug || 'season-4';
+      const nowIso = new Date().toISOString();
+      const existingRow = await this.fetchFormConfigRow(targetSlug);
+
+      const matchMetaById: Record<string, Partial<KnockoutMatch>> = {};
+      for (const m of knockout.matches || []) {
+        if (!m?.id) continue;
+        matchMetaById[m.id] = {
+          playoffRound: inferPlayoffRound(m, knockout.format),
+          matchLabel: m.matchLabel,
+          courtName: m.courtName,
+          scheduledDate: m.scheduledDate,
+          scheduledTime: m.scheduledTime,
+          assignedUmpire: m.assignedUmpire,
+          participantASource: m.participantASource,
+          participantBSource: m.participantBSource,
+          loserId: m.loserId,
+          completedAt: m.completedAt,
+          bracketId: m.bracketId || knockout.bracketId,
+          isPlayoff: Boolean(m.isPlayoff || m.playoffRound),
+          manual: m.manual,
+        };
+      }
+
+      const playoffStateSnapshot = {
+        format: knockout.format || DEFAULT_PLAYOFF_SETTINGS.format,
+        bracketId: knockout.bracketId,
+        published: knockout.published !== false,
+        showOnPublicHomepage: knockout.showOnPublicHomepage !== false,
+        status: knockout.status || 'active',
+        qualifiedTeams: Array.isArray(knockout.qualifiedTeams) ? knockout.qualifiedTeams : [],
+        disqualifiedTeamIds: Array.isArray(knockout.disqualifiedTeamIds) ? knockout.disqualifiedTeamIds : [],
+        manualTieBreakOrder: Array.isArray(knockout.manualTieBreakOrder) ? knockout.manualTieBreakOrder : [],
+        championTeamId: knockout.championTeamId,
+        runnerUpTeamId: knockout.runnerUpTeamId,
+        completedAt: knockout.completedAt,
+        updatedAt: knockout.updatedAt || Date.now(),
+        auditLogs: Array.isArray(knockout.auditLogs) ? knockout.auditLogs.slice(-50) : [],
+        matchMetaById,
+      };
+
+      if (existingRow) {
+        const existingApp = (existingRow.appearance_json as any) || {};
+        await (supabase.from('registration_form_config') as any)
+          .update({
+            appearance_json: {
+              ...existingApp,
+              playoffState: playoffStateSnapshot,
+            },
+            updated_at: nowIso,
+          })
+          .eq('id', existingRow.id);
+      }
+
+      // Also sync cleanly to normalized playoff_brackets + playoff_matches if migration was applied
+      try {
+        if (knockout.matches && knockout.matches.length > 0) {
+          const bracketId = knockout.bracketId || crypto.randomUUID();
+          await (supabase.from('playoff_brackets') as any).upsert(
+            {
+              id: bracketId,
+              season_slug: targetSlug,
+              format: knockout.format || 'ipl_top4',
+              status: knockout.status || 'active',
+              published: knockout.published !== false,
+              show_on_public_homepage: knockout.showOnPublicHomepage !== false,
+              qualified_teams_json: playoffStateSnapshot.qualifiedTeams,
+              disqualified_team_ids_json: playoffStateSnapshot.disqualifiedTeamIds,
+              manual_tie_break_order_json: playoffStateSnapshot.manualTieBreakOrder,
+              audit_logs_json: playoffStateSnapshot.auditLogs,
+              champion_team_id: knockout.championTeamId || null,
+              runner_up_team_id: knockout.runnerUpTeamId || null,
+              completed_at: knockout.completedAt ? new Date(knockout.completedAt).toISOString() : null,
+              updated_at: nowIso,
+            },
+            { onConflict: 'season_slug' }
+          );
+
+          const pmRows = knockout.matches
+            .filter((m) => Boolean(inferPlayoffRound(m, knockout.format)))
+            .map((m) => {
+              const pr = inferPlayoffRound(m, knockout.format)!;
+              const roundOrder = pr === 'Q1' ? 1 : pr === 'ELIM' ? 2 : pr === 'Q2' ? 3 : 4;
+              return {
+                id: m.id,
+                bracket_id: bracketId,
+                season_slug: targetSlug,
+                match_type: pr,
+                match_label: m.matchLabel || pr,
+                slot: m.slot || roundOrder,
+                round_order: roundOrder,
+                team_a_id: m.teamA || null,
+                team_b_id: m.teamB || null,
+                participant_a_source: m.participantASource || null,
+                participant_b_source: m.participantBSource || null,
+                winner_id: m.winner || null,
+                loser_id: m.loserId || null,
+                score_a: m.scoreA != null ? m.scoreA : null,
+                score_b: m.scoreB != null ? m.scoreB : null,
+                sets_json: m.sets || [],
+                court: typeof m.court === 'number' ? m.court : 1,
+                court_name: m.courtName || null,
+                scheduled_date: m.scheduledDate || null,
+                scheduled_time: m.scheduledTime || null,
+                time_label: m.time || null,
+                umpire_name: m.assignedUmpire || null,
+                mvp_player_id: m.mvpPlayerId || null,
+                status: m.status === 'paused' ? 'postponed' : m.status || 'upcoming',
+                completed_at: m.completedAt ? new Date(m.completedAt).toISOString() : null,
+                updated_at: nowIso,
+              };
+            });
+
+          if (pmRows.length > 0) {
+            await (supabase.from('playoff_matches') as any).upsert(pmRows, { onConflict: 'id' });
+          }
+        } else {
+          await (supabase.from('playoff_brackets') as any).delete().eq('season_slug', targetSlug);
+        }
+      } catch {
+        // Optional normalized playoff tables may not be migrated yet; matches + appearance_json carry full state
+      }
+
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   static async fetchFormConfigRow(seasonSlug = 'season-4'): Promise<DbRegistrationFormConfig | null> {
@@ -1884,6 +2097,7 @@ export class SupabaseService {
         ...(existingApp.heroLastPublishedAt ? { heroLastPublishedAt: existingApp.heroLastPublishedAt } : {}),
         ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
         ...(existingApp.youtubeLive ? { youtubeLive: existingApp.youtubeLive } : {}),
+        ...(existingApp.playoffState ? { playoffState: existingApp.playoffState } : {}),
         ...(existingTournamentSettings || incomingTournamentSettings
           ? {
               tournamentSettings: {
@@ -2557,6 +2771,20 @@ export class SupabaseService {
             if (!disposed) handlers.onFormConfigChange?.(payload);
           }
         )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'playoff_brackets' },
+          (payload: any) => {
+            if (!disposed) handlers.onPlayoffChange?.(payload);
+          }
+        )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'playoff_matches' },
+          (payload: any) => {
+            if (!disposed) handlers.onPlayoffChange?.(payload);
+          }
+        )
         .subscribe((status) => {
           if (!disposed) handlers.onStatusChange?.(status);
         });
@@ -3081,5 +3309,6 @@ export interface TournamentRealtimeHandlers {
   onRegistrationChange?: (payload: RealtimeChangeEvent) => void;
   onFormConfigChange?: (payload: RealtimeChangeEvent) => void;
   onStandingsChange?: (payload: RealtimeChangeEvent) => void;
+  onPlayoffChange?: (payload: RealtimeChangeEvent) => void;
   onStatusChange?: (status: string) => void;
 }
