@@ -139,8 +139,8 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
   }, [matches]);
 
   // Smart match auto-switching matching LiveMatchHero behavior:
-  // - Pins just-completed match when a live match finishes with a winner
-  // - Auto-switches when a new court goes live and current selection isn't live
+  // - Immediately switches to newly started LIVE match
+  // - Never stays stuck on a completed match when another match is LIVE
   useEffect(() => {
     const currentLiveIds = new Set(liveMatches.map((m) => m.id));
     const newlyLive = liveMatches.filter((m) => !prevLiveIdsRef.current.has(m.id));
@@ -148,13 +148,21 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
     prevLiveIdsRef.current = currentLiveIds;
 
     setSelectedMatchId((prevId) => {
+      if (newlyLive.length > 0) {
+        return newlyLive[0].id;
+      }
+
       const stillExists = prevId ? matches.find((m) => m.id === prevId) : undefined;
       if (prevId && !stillExists) {
         return liveMatches[0]?.id || null;
       }
 
+      if (liveMatches.length > 0 && (!stillExists || stillExists.status !== 'live')) {
+        return liveMatches[0].id;
+      }
+
       const focusedId = prevId || prevResolvedActiveIdRef.current;
-      if (focusedId && justLeftLiveIds.includes(focusedId)) {
+      if (focusedId && justLeftLiveIds.includes(focusedId) && liveMatches.length === 0) {
         const finishedFocused = matches.find(
           (m) => m.id === focusedId && m.status === 'completed' && Boolean(m.winner)
         );
@@ -163,15 +171,12 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
         }
       }
 
-      if (newlyLive.length > 0 && (!stillExists || stillExists.status !== 'live')) {
-        return newlyLive[0].id;
-      }
       return prevId;
     });
   }, [matches, liveMatches]);
 
   const prioritizedMatches = useMemo(() => {
-    const paused = matches.filter((m) => m.status === 'paused');
+    const paused = matches.filter((m) => m.status === 'paused' || m.status === 'postponed');
     const completed = matches.filter((m) => m.status === 'completed');
     const upcoming = matches.filter((m) => m.status === 'upcoming' && Boolean(m.teamA && m.teamB));
 
@@ -537,7 +542,7 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
                       className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
                         activeMatch.status === 'live'
                           ? 'bg-red-500/20 text-red-300 border border-red-500/40'
-                          : activeMatch.status === 'paused'
+                          : activeMatch.status === 'paused' || activeMatch.status === 'postponed'
                           ? 'bg-amber-500/20 text-amber-200 border border-amber-400/40'
                           : activeMatch.status === 'completed'
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-400/40'
@@ -546,10 +551,10 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
                     >
                       {activeMatch.status === 'live'
                         ? 'LIVE'
-                        : activeMatch.status === 'paused'
-                        ? 'PAUSED'
+                        : activeMatch.status === 'paused' || activeMatch.status === 'postponed'
+                        ? 'PAUSE'
                         : activeMatch.status === 'completed'
-                        ? 'FINAL'
+                        ? 'COMPLETED'
                         : 'UPCOMING'}
                     </span>
                   </div>

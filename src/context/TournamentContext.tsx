@@ -713,6 +713,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                       return {
                         ...dbK,
                         ...mMeta,
+                        status: dbK.status && dbK.status !== 'upcoming' ? dbK.status : (mMeta.status || dbK.status || 'upcoming'),
+                        scoreA: dbK.scoreA !== undefined ? dbK.scoreA : mMeta.scoreA,
+                        scoreB: dbK.scoreB !== undefined ? dbK.scoreB : mMeta.scoreB,
+                        winner: dbK.winner || mMeta.winner,
+                        teamA: dbK.teamA || mMeta.teamA,
+                        teamB: dbK.teamB || mMeta.teamB,
                         courtName: mMeta.courtName || dbK.courtName || resolveCourtName(dbK.court || 1, courtNames),
                       };
                     })
@@ -749,7 +755,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 ...prev,
                 players: players !== null ? players : prev.players,
                 teams: teams !== null ? teams : prev.teams,
-                matches: nextMatches,
+                matches: sortMatchesByScheduleOrder(nextMatches),
                 knockout: {
                   ...prev.knockout,
                   ...(playoffMeta
@@ -1545,7 +1551,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               const metaById = playoffMeta?.matchMetaById || {};
               const nextKoMatches =
                 playoffMeta && prev.knockout.matches.length > 0
-                  ? prev.knockout.matches.map((k) => ({ ...k, ...(metaById[k.id] || {}) }))
+                  ? prev.knockout.matches.map((k) => {
+                      const mMeta = metaById[k.id] || {};
+                      return {
+                        ...k,
+                        ...mMeta,
+                        status: k.status && k.status !== 'upcoming' ? k.status : (mMeta.status || k.status || 'upcoming'),
+                        scoreA: k.scoreA !== undefined ? k.scoreA : mMeta.scoreA,
+                        scoreB: k.scoreB !== undefined ? k.scoreB : mMeta.scoreB,
+                        winner: k.winner || mMeta.winner,
+                        teamA: k.teamA || mMeta.teamA,
+                        teamB: k.teamB || mMeta.teamB,
+                      };
+                    })
                   : prev.knockout.matches;
 
               return {

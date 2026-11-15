@@ -556,14 +556,20 @@ export const FixturesView: React.FC = () => {
                       className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
                         isLive
                           ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
-                          : match.status === 'paused'
+                          : match.status === 'paused' || match.status === 'postponed'
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                           : isCompleted
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
                           : 'bg-white/5 text-slate-400'
                       }`}
                     >
-                      {match.status}
+                      {isLive
+                        ? 'LIVE'
+                        : match.status === 'paused' || match.status === 'postponed'
+                        ? 'PAUSE'
+                        : isCompleted
+                        ? 'COMPLETED'
+                        : 'UPCOMING'}
                     </span>
                     <button
                       onClick={() => handleResetMatch(match.id)}

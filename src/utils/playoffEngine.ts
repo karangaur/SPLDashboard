@@ -237,18 +237,55 @@ export function extractCompletedMatchStats(
   };
 }
 
+export function normalizeMatchStatus(
+  status?: string | null
+): 'live' | 'paused' | 'completed' | 'upcoming' {
+  const s = String(status || '').trim().toLowerCase();
+  if (s === 'live') return 'live';
+  if (s === 'paused' || s === 'postponed' || s === 'pause') return 'paused';
+  if (s === 'completed' || s === 'complete' || s === 'finished') return 'completed';
+  return 'upcoming';
+}
+
+export function getMatchStatusDisplayLabel(
+  status?: string | null,
+  options?: { uppercase?: boolean; upcomingLabel?: string }
+): string {
+  const normalized = normalizeMatchStatus(status);
+  const upper = options?.uppercase !== false;
+  if (normalized === 'live') return upper ? 'LIVE' : 'Live';
+  if (normalized === 'paused') return upper ? 'PAUSE' : 'Pause';
+  if (normalized === 'completed') return upper ? 'COMPLETED' : 'Completed';
+  const fallback = options?.upcomingLabel || 'Upcoming';
+  return upper ? fallback.toUpperCase() : fallback;
+}
+
+export function getKnockoutProgressionOrder(m?: Partial<Match & KnockoutMatch> | null): number {
+  if (!m) return 99;
+  const pr = inferPlayoffRound(m, 'ipl_top4');
+  if (pr === 'Q1') return 1;
+  if (pr === 'ELIM') return 2;
+  if (pr === 'Q2') return 3;
+  if (pr === 'F') return 4;
+  if (m.stage === 'ELIM' || m.stage === 'QF') return 1;
+  if (m.stage === 'SF') return (m.slot || 1) >= 3 ? 3 : 2;
+  if (m.stage === 'F') return 4;
+  return 5;
+}
+
 export function buildDeduplicatedMatchesForStandings(
   matches: Match[] = [],
   knockoutMatches: KnockoutMatch[] = [],
   includeKnockoutInStandings = true
 ): CompletedMatchStats[] {
-  const rawById = new Map<string, Partial<Match & KnockoutMatch>>();
+  const rawById = new Map<string, { raw: Partial<Match & KnockoutMatch>; seq: number }>();
+  let seqCounter = 0;
 
   for (let i = 0; i < matches.length; i++) {
     const m = matches[i];
     if (!m) continue;
     const key = m.id || `match-idx-${i}-${m.teamA}-${m.teamB}`;
-    rawById.set(key, m);
+    rawById.set(key, { raw: m, seq: seqCounter++ });
   }
 
   // Always overlay knockoutMatches by ID so that updated/reset knockout matches supersede any copy in matches
@@ -256,15 +293,56 @@ export function buildDeduplicatedMatchesForStandings(
     const km = knockoutMatches[i];
     if (!km) continue;
     const key = km.id || `ko-idx-${i}-${km.stage}-${km.slot}`;
+    const existing = rawById.get(key);
     rawById.set(key, {
-      ...rawById.get(key),
-      ...km,
-      matchType: 'knockout',
+      raw: {
+        ...(existing?.raw || {}),
+        ...km,
+        matchType: 'knockout',
+      },
+      seq: existing ? existing.seq : seqCounter++,
     });
   }
 
+  // Sort deterministically in chronological tournament progression order:
+  // 1. League matches first (ordered by round, matchNumber/courtSlot/slot, court, sequence)
+  // 2. Knockout matches second (ordered by progression stage Q1 -> ELIM/QF -> Q2/SF -> F, slot, sequence)
+  const orderedEntries = Array.from(rawById.values()).sort((entryA, entryB) => {
+    const a = entryA.raw;
+    const b = entryB.raw;
+    const aKo = isKnockoutOrPlayoffMatch(a);
+    const bKo = isKnockoutOrPlayoffMatch(b);
+    if (aKo !== bKo) return aKo ? 1 : -1;
+
+    if (!aKo) {
+      const roundA = Number(a.round ?? 1);
+      const roundB = Number(b.round ?? 1);
+      if (roundA !== roundB) return roundA - roundB;
+
+      const slotA = Number(a.matchNumber ?? a.courtSlot ?? a.slot ?? 0);
+      const slotB = Number(b.matchNumber ?? b.courtSlot ?? b.slot ?? 0);
+      if (slotA !== slotB) return slotA - slotB;
+
+      const courtA = Number(a.court ?? 1);
+      const courtB = Number(b.court ?? 1);
+      if (courtA !== courtB) return courtA - courtB;
+
+      return entryA.seq - entryB.seq;
+    }
+
+    const stageA = getKnockoutProgressionOrder(a);
+    const stageB = getKnockoutProgressionOrder(b);
+    if (stageA !== stageB) return stageA - stageB;
+
+    const koSlotA = Number(a.slot ?? 1);
+    const koSlotB = Number(b.slot ?? 1);
+    if (koSlotA !== koSlotB) return koSlotA - koSlotB;
+
+    return entryA.seq - entryB.seq;
+  });
+
   const results: CompletedMatchStats[] = [];
-  for (const raw of rawById.values()) {
+  for (const { raw } of orderedEntries) {
     if (!includeKnockoutInStandings && isKnockoutOrPlayoffMatch(raw)) {
       continue;
     }

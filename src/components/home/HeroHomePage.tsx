@@ -36,8 +36,10 @@ import { Match, Player } from '../../types/tournament';
 import { AuthService } from '../../services/authService';
 import { resolveYouTubeLiveCtaState } from '../../utils/youtube';
 import {
+  getKnockoutProgressionOrder,
   getPlayoffMatchDisplayLabel,
   inferPlayoffRound,
+  normalizeMatchStatus,
   normalizePlayoffSettings,
 } from '../../utils/playoffEngine';
 
@@ -115,9 +117,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     return getPlayoffMatchDisplayLabel(ko, state.knockout?.format).title;
   };
 
-  // Normalize knockout matches into unified public Match broadcast shape (strictly deduplicated by ID)
+  // Normalize knockout matches into unified public Match broadcast shape (strictly deduplicated by ID and ordered in tournament progression order: Q1 -> ELIM/QF -> Q2/SF -> F)
   const normalizedKnockoutMatches: Match[] = React.useMemo(() => {
-    const stageOrder: Record<string, number> = { F: 4, Q2: 3, Q1: 2, SF: 2, ELIM: 1, QF: 1 };
     const seenIds = new Set<string>();
     const uniqueKo = (state.knockout?.matches || []).filter((ko) => {
       if (!ko?.id || seenIds.has(ko.id)) return false;
@@ -126,11 +127,9 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     });
     return uniqueKo
       .sort((a, b) => {
-        const ra = inferPlayoffRound(a, state.knockout?.format) || a.stage;
-        const rb = inferPlayoffRound(b, state.knockout?.format) || b.stage;
-        const pa = stageOrder[ra] ?? 0;
-        const pb = stageOrder[rb] ?? 0;
-        if (pb !== pa) return pb - pa;
+        const pa = getKnockoutProgressionOrder(a);
+        const pb = getKnockoutProgressionOrder(b);
+        if (pa !== pb) return pa - pb;
         return (a.slot || 1) - (b.slot || 1);
       })
       .map((ko) => {
@@ -141,16 +140,17 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           `Court ${cNum}`;
         const labelInfo = getPlayoffMatchDisplayLabel(ko, state.knockout?.format);
         const stageLabel = labelInfo.title;
+        const stageSeq = getKnockoutProgressionOrder(ko);
         return {
           id: ko.id,
-          round: labelInfo.playoffRound === 'F' ? 999 : labelInfo.playoffRound === 'Q2' ? 998 : 997,
+          round: 990 + stageSeq,
           court: cNum,
           courtName: cName,
           teamA: ko.teamA || '',
           teamB: ko.teamB || '',
           scoreA: ko.scoreA,
           scoreB: ko.scoreB,
-          status: ko.status,
+          status: normalizeMatchStatus(ko.status),
           winner: ko.winner,
           time: ko.scheduledTime
             ? `${ko.scheduledDate ? `${ko.scheduledDate} ` : ''}${ko.scheduledTime}`
@@ -169,15 +169,30 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       });
   }, [state.knockout?.matches, state.knockout?.format, state.settings.courtNames]);
 
-  // Unified broadcast + schedule list (strictly deduplicated by match ID)
+  // Unified broadcast + schedule list ordered in chronological tournament progression:
+  // League Match 1 -> League Match 2 -> Remaining League Matches -> Knockout Match 1 (Q1/QF) -> Knockout Match 2 (ELIM/SF) -> Q2/SF -> Grand Final
   const allPublicMatches = useMemo(() => {
     const seenIds = new Set<string>(normalizedKnockoutMatches.map((m) => m.id));
-    const uniqueLeague = state.matches.filter((m) => {
-      if (!m?.id || seenIds.has(m.id)) return false;
-      seenIds.add(m.id);
-      return true;
-    });
-    return [...normalizedKnockoutMatches, ...uniqueLeague];
+    const uniqueLeague = state.matches
+      .filter((m) => {
+        if (!m?.id || seenIds.has(m.id)) return false;
+        seenIds.add(m.id);
+        return true;
+      })
+      .map((m) => ({
+        ...m,
+        status: normalizeMatchStatus(m.status),
+      }))
+      .sort((a, b) => {
+        const roundA = Number(a.round ?? 1);
+        const roundB = Number(b.round ?? 1);
+        if (roundA !== roundB) return roundA - roundB;
+        const slotA = Number(a.matchNumber ?? a.courtSlot ?? a.slot ?? 0);
+        const slotB = Number(b.matchNumber ?? b.courtSlot ?? b.slot ?? 0);
+        if (slotA !== slotB) return slotA - slotB;
+        return Number(a.court ?? 1) - Number(b.court ?? 1);
+      });
+    return [...uniqueLeague, ...normalizedKnockoutMatches];
   }, [normalizedKnockoutMatches, state.matches]);
 
   // Keep opened Match Detail Modal live-synchronized when scores/status update
@@ -719,8 +734,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
                           <td className="px-5 py-4 text-center">
                             {row.form && row.form.length > 0 ? (
-                              <div className="flex items-center justify-center gap-1">
-                                {row.form.slice(-5).map((f, i) => (
+                              <div className="flex items-center justify-center gap-1 flex-wrap">
+                                {row.form.map((f, i) => (
                                   <span
                                     key={i}
                                     className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-black ${
@@ -1047,11 +1062,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               <div className="py-1 border-t border-b border-white/10 text-center">
                 <span className="text-xs font-bold text-slate-400 uppercase">
                   {detailMatch.status === 'live'
-                    ? '🔴 Live in Progress'
-                    : detailMatch.status === 'paused'
-                    ? '⏸ Match Paused / Tactical Timeout'
+                    ? '🔴 Live'
+                    : detailMatch.status === 'paused' || detailMatch.status === 'postponed'
+                    ? '⏸ Pause'
                     : detailMatch.status === 'completed'
-                    ? '🏆 Final Match Result'
+                    ? '✅ Completed'
                     : 'Scheduled Match'}
                 </span>
                 {detailMatch.sets && detailMatch.sets.length > 0 && (

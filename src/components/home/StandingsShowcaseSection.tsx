@@ -1024,8 +1024,8 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
                                       Form:
                                     </span>
                                     {record.form && record.form.length > 0 ? (
-                                      <div className="flex items-center gap-1">
-                                        {record.form.slice(-5).map((f, fIdx) => (
+                                      <div className="flex items-center gap-1 flex-wrap">
+                                        {record.form.map((f, fIdx) => (
                                           <span
                                             key={fIdx}
                                             className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-black ${
@@ -1165,7 +1165,7 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
                           </th>
                           <th
                             scope="col"
-                            title="Last 5 Completed Matches"
+                            title="Completed Match History (W / L)"
                             className="py-3.5 pl-2 pr-5 text-center hidden lg:table-cell w-36"
                           >
                             FORM
@@ -1374,8 +1374,8 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
                                 {/* FORM */}
                                 <td className="py-3.5 pl-2 pr-5 text-center hidden lg:table-cell">
                                   {record.form && record.form.length > 0 ? (
-                                    <div className="flex items-center justify-center gap-1">
-                                      {record.form.slice(-5).map((f, fIdx) => (
+                                    <div className="flex items-center justify-center gap-1 flex-wrap">
+                                      {record.form.map((f, fIdx) => (
                                         <span
                                           key={fIdx}
                                           className={`w-5 h-5 rounded flex items-center justify-center text-[10px] font-mono font-black ${

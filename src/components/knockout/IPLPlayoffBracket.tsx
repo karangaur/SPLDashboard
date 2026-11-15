@@ -148,7 +148,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
     const teamB = getTeam(km.teamB);
     const isCompleted = km.status === 'completed';
     const isLive = km.status === 'live';
-    const isPaused = km.status === 'paused';
+    const isPaused = km.status === 'paused' || km.status === 'postponed';
     const hasStarted = isLive || isPaused || isCompleted;
 
     const winnerId =
@@ -247,7 +247,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
               </span>
             ) : isPaused ? (
               <span className="px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-[10px] font-black uppercase text-amber-300">
-                PAUSED
+                PAUSE
               </span>
             ) : isCompleted ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/35 text-[10px] font-black uppercase text-emerald-300">

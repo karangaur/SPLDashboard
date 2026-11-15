@@ -1262,9 +1262,9 @@ const KnockoutMatchCard: React.FC<KnockoutMatchCardProps> = ({
               LIVE
             </span>
           )}
-          {match.status === 'paused' && (
+          {(match.status === 'paused' || match.status === 'postponed') && (
             <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-500/20 text-amber-300 border border-amber-500/40">
-              PAUSED
+              PAUSE
             </span>
           )}
           {match.status === 'completed' && (

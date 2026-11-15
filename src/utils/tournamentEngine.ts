@@ -21,8 +21,13 @@ import {
   buildDeduplicatedMatchesForStandings,
   DEFAULT_PLAYOFF_SETTINGS,
   DEFAULT_TIEBREAKER_ORDER,
+  getKnockoutProgressionOrder,
+  getMatchStatusDisplayLabel,
+  normalizeMatchStatus,
   progressIPLPlayoffs,
 } from './playoffEngine';
+
+export { getKnockoutProgressionOrder, getMatchStatusDisplayLabel, normalizeMatchStatus };
 
 export const STORAGE_KEY = 'smash-premier-league-v8';
 
@@ -392,7 +397,7 @@ export function calculateStandings(
   const enrichedList = Array.from(records.values()).map((r) => ({
     ...r,
     diff: r.pointsFor - r.pointsAgainst,
-    form: r.form.slice(-5), // last 5 results
+    form: [...r.form],
   }));
 
   enrichedList.sort((x, y) => {

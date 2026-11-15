@@ -188,7 +188,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
         case 'live':
           return m.status === 'live';
         case 'upcoming':
-          return m.status === 'upcoming' || m.status === 'paused';
+          return m.status === 'upcoming' || m.status === 'paused' || m.status === 'postponed';
         case 'completed':
           return m.status === 'completed';
         case 'all':
@@ -198,7 +198,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
     });
 
     const statusWeight = (s: Match['status']) =>
-      s === 'live' ? 0 : s === 'paused' ? 1 : s === 'upcoming' ? 2 : 3;
+      s === 'live' ? 0 : s === 'paused' || s === 'postponed' ? 1 : s === 'upcoming' ? 2 : 3;
 
     return [...filtered].sort((a, b) => {
       const sw = statusWeight(a.status) - statusWeight(b.status);
@@ -425,9 +425,9 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                   const sA = m.scoreA ?? 0;
                   const sB = m.scoreB ?? 0;
                   const hasStartedScore =
-                    m.status === 'live' || m.status === 'paused' || m.status === 'completed';
+                    m.status === 'live' || m.status === 'paused' || m.status === 'postponed' || m.status === 'completed';
                   const isLive = m.status === 'live';
-                  const isPaused = m.status === 'paused';
+                  const isPaused = m.status === 'paused' || m.status === 'postponed';
                   const isDone = m.status === 'completed';
                   const winnerId = getConfirmedWinnerId(m);
                   const isWinnerA = Boolean(winnerId && winnerId === m.teamA);
@@ -497,12 +497,12 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                             ) : isPaused ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-display font-black uppercase tracking-wider text-amber-300">
                                 <Clock className="w-3.5 h-3.5" />
-                                <span>PAUSED</span>
+                                <span>PAUSE</span>
                               </span>
                             ) : isDone ? (
                               <span className="inline-flex items-center gap-1 text-[11px] font-display font-black uppercase tracking-wider text-emerald-400">
                                 <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>FINAL</span>
+                                <span>COMPLETED</span>
                               </span>
                             ) : (
                               <span className="inline-flex items-center gap-1 text-[11px] font-display font-bold uppercase tracking-wider text-sky-300">
@@ -560,7 +560,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                                   {sB}
                                 </div>
                                 <span className="block text-[9px] font-display font-bold uppercase tracking-widest text-slate-400">
-                                  {isLive ? 'Points' : 'Final'}
+                                  {isLive ? 'Points' : isPaused ? 'Pause' : 'Completed'}
                                 </span>
                               </div>
                             ) : (
@@ -696,6 +696,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                       const winId = getConfirmedWinnerId(m);
                       const winTeam = winId ? getTeam(winId) : undefined;
                       const isLive = m.status === 'live';
+                      const isPaused = m.status === 'paused' || m.status === 'postponed';
                       const isDone = m.status === 'completed';
                       const courtDimmed = selectedCourt !== 'all' && m.court !== selectedCourt;
                       return (
@@ -714,10 +715,12 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
                                 LIVE
                               </span>
+                            ) : isPaused ? (
+                              <span className="text-amber-300 font-bold">PAUSE</span>
                             ) : isDone ? (
                               <span className="text-emerald-400 font-bold">COMPLETED</span>
                             ) : (
-                              <span>{m.status.toUpperCase()}</span>
+                              <span>UPCOMING</span>
                             )}
                           </div>
                           <div className="flex items-center justify-between text-xs font-bold">
@@ -763,7 +766,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                       const winId = getConfirmedWinnerId(m);
                       const winTeam = winId ? getTeam(winId) : undefined;
                       const isLive = m.status === 'live';
-                      const isPaused = m.status === 'paused';
+                      const isPaused = m.status === 'paused' || m.status === 'postponed';
                       const isDone = m.status === 'completed';
                       const courtDimmed = selectedCourt !== 'all' && m.court !== selectedCourt;
                       return (
@@ -787,7 +790,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                                 <span>LIVE</span>
                               </span>
                             ) : isPaused ? (
-                              <span className="text-amber-300 font-bold uppercase shrink-0">PAUSED</span>
+                              <span className="text-amber-300 font-bold uppercase shrink-0">PAUSE</span>
                             ) : isDone ? (
                               <span className="inline-flex items-center gap-1 text-emerald-400 font-bold uppercase shrink-0">
                                 <CheckCircle2 className="w-3 h-3" />
@@ -867,7 +870,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                     const winId = getConfirmedWinnerId(m);
                     const champ = winId ? getTeam(winId) : undefined;
                     const isLive = m.status === 'live';
-                    const isPaused = m.status === 'paused';
+                    const isPaused = m.status === 'paused' || m.status === 'postponed';
                     const isDone = m.status === 'completed';
                     const courtDimmed = selectedCourt !== 'all' && m.court !== selectedCourt;
                     return (
@@ -892,7 +895,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                               <span>LIVE</span>
                             </span>
                           ) : isPaused ? (
-                            <span className="text-amber-300 shrink-0">PAUSED</span>
+                            <span className="text-amber-300 shrink-0">PAUSE</span>
                           ) : isDone ? (
                             <span className="inline-flex items-center gap-1 text-emerald-400 shrink-0">
                               <CheckCircle2 className="w-3 h-3" />

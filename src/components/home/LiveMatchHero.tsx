@@ -206,7 +206,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
     return m.courtName || courtNames?.[cNum - 1]?.trim() || `Court ${cNum}`;
   };
 
-  // Prioritize live matches across courts (finals & knockouts surfaced cleanly, then by court number)
+  // Prioritize live matches across courts (finals & knockouts surfaced cleanly, then by progression order & court)
   const liveMatches = useMemo(() => {
     return matches
       .filter((m) => m.status === 'live')
@@ -214,11 +214,20 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
         const pa = getKnockoutStageMeta(a).priority;
         const pb = getKnockoutStageMeta(b).priority;
         if (pb !== pa) return pb - pa;
+        const roundDiff = Number(a.round ?? 1) - Number(b.round ?? 1);
+        if (roundDiff !== 0) return roundDiff;
+        const slotDiff =
+          Number(a.matchNumber ?? a.courtSlot ?? a.slot ?? 0) -
+          Number(b.matchNumber ?? b.courtSlot ?? b.slot ?? 0);
+        if (slotDiff !== 0) return slotDiff;
         return (a.court || 1) - (b.court || 1);
       });
   }, [matches]);
 
-  const pausedMatches = useMemo(() => matches.filter((m) => m.status === 'paused'), [matches]);
+  const pausedMatches = useMemo(
+    () => matches.filter((m) => m.status === 'paused' || m.status === 'postponed'),
+    [matches]
+  );
   const readyUpcomingMatches = useMemo(
     () => matches.filter((m) => m.status === 'upcoming' && Boolean(m.teamA && m.teamB)),
     [matches]
@@ -227,6 +236,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
   // Active match selection
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const manualSelectionRef = useRef<string | null>(null);
   const prevLiveIdsRef = useRef<Set<string>>(new Set());
   const prevResolvedActiveIdRef = useRef<string | null>(null);
 
@@ -374,6 +384,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
         delete next[matchId];
         return next;
       });
+      setSelectedMatchId((curr) => (curr === matchId ? null : curr));
     }, 3600);
     celebrationTimersRef.current.set(matchId, timer);
   };
@@ -475,22 +486,43 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
     }
   }, [matches]);
 
-  // Automatically surface newly started LIVE matches, while keeping just-completed matches visible for celebration
+  // Automatically surface newly started LIVE matches and transition cleanly across league & knockout stages
   useEffect(() => {
     const currentLiveIds = new Set(liveMatches.map((m) => m.id));
     const newlyLive = liveMatches.filter((m) => !prevLiveIdsRef.current.has(m.id));
     const justLeftLiveIds = Array.from(prevLiveIdsRef.current).filter((id) => !currentLiveIds.has(id));
     prevLiveIdsRef.current = currentLiveIds;
 
+    if (newlyLive.length > 0 || justLeftLiveIds.length > 0) {
+      manualSelectionRef.current = null;
+    }
+
     setSelectedMatchId((prevId) => {
+      // 1. Whenever a new match starts (goes LIVE), immediately switch the broadcast to that live match
+      if (newlyLive.length > 0) {
+        return newlyLive[0].id;
+      }
+
       const stillExists = prevId ? matches.find((m) => m.id === prevId) : undefined;
       if (prevId && !stillExists) {
+        manualSelectionRef.current = null;
         return liveMatches[0]?.id || null;
       }
 
-      // If the currently viewed live match just completed with an official winner, keep it pinned so celebration displays
+      // 2. If any match is currently LIVE and the user has not manually pinned another tab,
+      // ensure the broadcast displays the active LIVE match
+      if (
+        liveMatches.length > 0 &&
+        !manualSelectionRef.current &&
+        (!stillExists || stillExists.status !== 'live')
+      ) {
+        return liveMatches[0].id;
+      }
+
+      // 3. When no match is currently LIVE, if the focused live match just completed with an official winner,
+      // keep it pinned briefly while its winner celebration (or Grand Final ceremony) plays
       const focusedId = prevId || prevResolvedActiveIdRef.current;
-      if (focusedId && justLeftLiveIds.includes(focusedId)) {
+      if (focusedId && justLeftLiveIds.includes(focusedId) && liveMatches.length === 0) {
         const finishedFocused = matches.find(
           (m) => m.id === focusedId && m.status === 'completed' && Boolean(m.winner)
         );
@@ -499,21 +531,57 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
         }
       }
 
-      if (newlyLive.length > 0 && (!stillExists || stillExists.status !== 'live')) {
-        return newlyLive[0].id;
+      // 4. Release stale completed match pin once celebration ends when another match is paused, upcoming, or more recent
+      if (
+        stillExists &&
+        stillExists.status === 'completed' &&
+        !manualSelectionRef.current &&
+        !celebrationTimersRef.current.has(stillExists.id) &&
+        !isGrandFinalMatchRecord(stillExists)
+      ) {
+        return null;
       }
+
       return prevId;
     });
   }, [matches, liveMatches]);
 
-  const activeMatch =
-    (selectedMatchId && matches.find((m) => m.id === selectedMatchId)) ||
-    liveMatches[0] ||
-    pausedMatches[0] ||
-    readyUpcomingMatches[0] ||
-    completedMatches[completedMatches.length - 1] ||
-    matches[0] ||
-    null;
+  const activeMatch = useMemo(() => {
+    // 1. Explicit manual tab selection by the viewer
+    if (manualSelectionRef.current) {
+      const manualMatch = matches.find((m) => m.id === manualSelectionRef.current);
+      if (manualMatch) return manualMatch;
+    }
+    // 2. Active LIVE match always takes priority in automatic broadcast mode
+    if (liveMatches.length > 0) {
+      return (selectedMatchId && liveMatches.find((m) => m.id === selectedMatchId)) || liveMatches[0];
+    }
+    // 3. Brief post-match celebration or Grand Final ceremony when no match is live
+    if (
+      selectedMatchId &&
+      (Boolean(activeCelebrations[selectedMatchId]) || gfCeremony?.matchId === selectedMatchId)
+    ) {
+      const celebratingMatch = matches.find((m) => m.id === selectedMatchId);
+      if (celebratingMatch) return celebratingMatch;
+    }
+    // 4. Fallback when no match is live: Paused match -> Next ready upcoming match -> Most recently completed match
+    return (
+      pausedMatches[0] ||
+      readyUpcomingMatches[0] ||
+      completedMatches[completedMatches.length - 1] ||
+      matches[0] ||
+      null
+    );
+  }, [
+    matches,
+    liveMatches,
+    pausedMatches,
+    readyUpcomingMatches,
+    completedMatches,
+    selectedMatchId,
+    activeCelebrations,
+    gfCeremony?.matchId,
+  ]);
 
   useEffect(() => {
     prevResolvedActiveIdRef.current = activeMatch?.id || null;
@@ -572,7 +640,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
   const scoreB = activeMatch?.scoreB ?? 0;
   const sets = activeMatch?.sets || [];
   const isLive = activeMatch?.status === 'live';
-  const isPaused = activeMatch?.status === 'paused';
+  const isPaused = activeMatch?.status === 'paused' || activeMatch?.status === 'postponed';
   const isCompleted = activeMatch?.status === 'completed';
 
   const stageMeta = getKnockoutStageMeta(activeMatch);
@@ -955,7 +1023,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                 ) : isPaused ? (
                   <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-xs font-black uppercase tracking-wider">
                     <Clock className="w-3.5 h-3.5 text-amber-400" />
-                    <span>PAUSED · {courtDisplayName.toUpperCase()}</span>
+                    <span>PAUSE · {courtDisplayName.toUpperCase()}</span>
                   </div>
                 ) : isCompleted ? (
                   <div
@@ -966,7 +1034,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     }`}
                   >
                     <CheckCircle2 className={`w-3.5 h-3.5 ${isGrandFinal ? 'text-amber-300' : 'text-emerald-400'}`} />
-                    <span>{isGrandFinal ? 'CHAMPION CROWNED' : 'FINAL RESULT'} · {courtDisplayName.toUpperCase()}</span>
+                    <span>{isGrandFinal ? 'COMPLETED · CHAMPION CROWNED' : 'COMPLETED'} · {courtDisplayName.toUpperCase()}</span>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-slate-500/20 border border-slate-500/40 text-slate-300 text-xs font-black uppercase tracking-wider">
@@ -1187,7 +1255,10 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     type="button"
                     role="tab"
                     aria-selected={isSelected}
-                    onClick={() => setSelectedMatchId(m.id)}
+                    onClick={() => {
+                      manualSelectionRef.current = m.id;
+                      setSelectedMatchId(m.id);
+                    }}
                       className={`snap-start px-3 py-2 min-h-[44px] rounded-xl text-xs font-bold transition-all whitespace-nowrap flex items-center gap-2 shrink-0 cursor-pointer ${
                       isSelected
                         ? mIsGf
@@ -1426,11 +1497,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                       : isLive
                       ? `SET 0${sets.filter((s) => s.isCompleted).length + 1}`
                       : isPaused
-                      ? 'PAUSED'
+                      ? 'PAUSE'
                       : isCompleted
-                      ? isGrandFinal
-                        ? 'CHAMPIONSHIP RESULT'
-                        : 'FINAL RESULT'
+                      ? 'COMPLETED'
                       : 'UPCOMING'}
                   </span>
                   <span

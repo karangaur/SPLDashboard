@@ -743,7 +743,7 @@ const TeamDetailModal: React.FC<TeamDetailModalProps> = ({
                       </div>
 
                       <div className="text-right shrink-0">
-                        {m.status === 'completed' || m.status === 'live' || m.status === 'paused' ? (
+                        {m.status === 'completed' || m.status === 'live' || m.status === 'paused' || m.status === 'postponed' ? (
                           <>
                             <span className="block text-base font-mono font-black text-white tabular-nums">
                               {teamScore ?? 0} – {oppScore ?? 0}
@@ -752,6 +752,8 @@ const TeamDetailModal: React.FC<TeamDetailModalProps> = ({
                               className={`block text-[10px] font-display font-black uppercase tracking-wider ${
                                 m.status === 'live'
                                   ? 'text-red-400'
+                                  : m.status === 'paused' || m.status === 'postponed'
+                                  ? 'text-amber-300'
                                   : wonMatch
                                   ? 'text-emerald-400'
                                   : lostMatch
@@ -759,7 +761,15 @@ const TeamDetailModal: React.FC<TeamDetailModalProps> = ({
                                   : 'text-amber-300'
                               }`}
                             >
-                              {m.status === 'live' ? 'LIVE' : wonMatch ? 'WIN' : lostMatch ? 'LOSS' : m.status.toUpperCase()}
+                              {m.status === 'live'
+                                ? 'LIVE'
+                                : m.status === 'paused' || m.status === 'postponed'
+                                ? 'PAUSE'
+                                : wonMatch
+                                ? 'WIN'
+                                : lostMatch
+                                ? 'LOSS'
+                                : 'COMPLETED'}
                             </span>
                           </>
                         ) : (
