@@ -42,6 +42,7 @@ import {
   progressIPLPlayoffs,
   createPlayoffAuditEntry,
   inferPlayoffRound,
+  extractCompletedMatchStats,
 } from '../utils/playoffEngine';
 import {
   DEFAULT_HERO_CONFIG,
@@ -1260,26 +1261,51 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   ? nextKnockoutMatches.filter((k) => k.id !== updated.id)
                   : nextKnockoutMatches;
 
+              const progressedKo = progressKnockoutMatches(cleanedKnockoutMatches, prev.knockout.format);
+              const isIplKo =
+                prev.knockout.format === 'ipl_top4' ||
+                progressedKo.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
+              const iplProgression = isIplKo && progressedKo.length > 0 ? progressIPLPlayoffs(progressedKo) : null;
+
               return {
                 ...prev,
                 matches: cleanedMatches,
                 knockout: {
                   ...prev.knockout,
-                  matches: progressKnockoutMatches(cleanedKnockoutMatches, prev.knockout.format),
+                  matches: iplProgression ? iplProgression.matches : progressedKo,
+                  championTeamId: iplProgression ? iplProgression.championTeamId : prev.knockout.championTeamId,
+                  runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : prev.knockout.runnerUpTeamId,
+                  status: iplProgression
+                    ? iplProgression.isCompleted
+                      ? 'completed'
+                      : progressedKo.length > 0
+                      ? 'active'
+                      : 'draft'
+                    : prev.knockout.status,
                 },
               };
             });
           } else if (payload.eventType === 'DELETE' && payload.old) {
             const deletedId = payload.old.id;
             localMatchGuardRef.current.delete(deletedId);
-            setState((prev) => ({
-              ...prev,
-              matches: prev.matches.filter((m) => m.id !== deletedId),
-              knockout: {
-                ...prev.knockout,
-                matches: prev.knockout.matches.filter((k) => k.id !== deletedId),
-              },
-            }));
+            setState((prev) => {
+              const remainingKo = prev.knockout.matches.filter((k) => k.id !== deletedId);
+              const progressedKo = progressKnockoutMatches(remainingKo, prev.knockout.format);
+              const isIplKo =
+                prev.knockout.format === 'ipl_top4' ||
+                progressedKo.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
+              const iplProgression = isIplKo && progressedKo.length > 0 ? progressIPLPlayoffs(progressedKo) : null;
+              return {
+                ...prev,
+                matches: prev.matches.filter((m) => m.id !== deletedId),
+                knockout: {
+                  ...prev.knockout,
+                  matches: iplProgression ? iplProgression.matches : progressedKo,
+                  championTeamId: iplProgression ? iplProgression.championTeamId : undefined,
+                  runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : undefined,
+                },
+              };
+            });
           }
         },
 
@@ -1736,6 +1762,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               }
 
               matches = progressKnockoutMatches(matches, prev.knockout.format);
+              const isIplKo =
+                prev.knockout.format === 'ipl_top4' ||
+                matches.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
+              const iplProgression = isIplKo && matches.length > 0 ? progressIPLPlayoffs(matches) : null;
 
               if (scoreChanged) {
                 sportsAudio.playScorePing();
@@ -1746,7 +1776,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
               return {
                 ...prev,
-                knockout: { ...prev.knockout, matches },
+                knockout: {
+                  ...prev.knockout,
+                  matches: iplProgression ? iplProgression.matches : matches,
+                  championTeamId: iplProgression ? iplProgression.championTeamId : prev.knockout.championTeamId,
+                  runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : prev.knockout.runnerUpTeamId,
+                  status: iplProgression
+                    ? iplProgression.isCompleted
+                      ? 'completed'
+                      : matches.length > 0
+                      ? 'active'
+                      : 'draft'
+                    : prev.knockout.status,
+                },
               };
             });
           }
@@ -2149,33 +2191,71 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Derived Standings (pure computation — no network side-effects inside useMemo)
   const standings = useMemo(() => {
-    return calculateStandings(state.teams, state.matches, state.knockout.matches);
-  }, [state.teams, state.matches, state.knockout.matches]);
+    const playoffSettings = normalizePlayoffSettings(state.settings.playoffSettings);
+    return calculateStandings(state.teams, state.matches, state.knockout.matches, {
+      includeKnockoutInStandings: playoffSettings.includeKnockoutInStandings ?? true,
+      tieBreakerOrder: playoffSettings.tieBreakerOrder,
+      manualTieBreakOrder: state.knockout.manualTieBreakOrder,
+    });
+  }, [
+    state.teams,
+    state.matches,
+    state.knockout.matches,
+    state.settings.playoffSettings,
+    state.knockout.manualTieBreakOrder,
+  ]);
 
-  // Debounced persistence of standings strictly when completed match results or teams change
+  // Debounced persistence of standings strictly when completed match results, knockout results, or teams change
   const completedStandingsSignature = useMemo(() => {
+    const playoffSettings = normalizePlayoffSettings(state.settings.playoffSettings);
     const completedGroup = state.matches
       .filter((m) => m.status === 'completed')
-      .map((m) => `${m.id}:${m.winner || ''}:${m.scoreA ?? 0}-${m.scoreB ?? 0}`)
+      .map(
+        (m) =>
+          `${m.id}:${m.teamA}-${m.teamB}:${m.winner || ''}:${m.scoreA ?? 0}-${m.scoreB ?? 0}:${JSON.stringify(
+            m.sets || []
+          )}`
+      )
       .join('|');
     const completedKo = state.knockout.matches
       .filter((k) => k.status === 'completed')
-      .map((k) => `${k.id}:${k.winner || ''}:${k.scoreA ?? 0}-${k.scoreB ?? 0}`)
+      .map(
+        (k) =>
+          `${k.id}:${k.teamA || ''}-${k.teamB || ''}:${k.winner || ''}:${k.scoreA ?? 0}-${k.scoreB ?? 0}:${JSON.stringify(
+            k.sets || []
+          )}`
+      )
       .join('|');
-    return `${state.teams.map((t) => t.id).join(',')}::${completedGroup}::${completedKo}`;
-  }, [state.teams, state.matches, state.knockout.matches]);
+    return `${state.teams.map((t) => `${t.id}:${t.name}`).join(',')}::${
+      playoffSettings.includeKnockoutInStandings ?? true
+    }::${playoffSettings.tieBreakerOrder.join(',')}::${(state.knockout.manualTieBreakOrder || []).join(
+      ','
+    )}::${completedGroup}::${completedKo}`;
+  }, [
+    state.teams,
+    state.matches,
+    state.knockout.matches,
+    state.settings.playoffSettings,
+    state.knockout.manualTieBreakOrder,
+  ]);
 
   useEffect(() => {
     if (!SupabaseService.isAvailable() || stateRef.current.teams.length === 0) return;
     const timer = setTimeout(() => {
       const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const playoffSettings = normalizePlayoffSettings(stateRef.current.settings.playoffSettings);
       const currentStandings = calculateStandings(
         stateRef.current.teams,
         stateRef.current.matches,
-        stateRef.current.knockout.matches
+        stateRef.current.knockout.matches,
+        {
+          includeKnockoutInStandings: playoffSettings.includeKnockoutInStandings ?? true,
+          tieBreakerOrder: playoffSettings.tieBreakerOrder,
+          manualTieBreakOrder: stateRef.current.knockout.manualTieBreakOrder,
+        }
       );
       SupabaseService.syncStandings(seasonSlug, currentStandings).catch(() => {});
-    }, 600);
+    }, 300);
     return () => clearTimeout(timer);
   }, [completedStandingsSignature, state.registrationSettings.seasonSlug]);
 
@@ -3193,9 +3273,32 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
       if (updates.status !== undefined && updates.status !== 'completed' && !('winner' in updates)) {
         updated.winner = undefined;
-      } else if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
-        if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
-        else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
+      } else if (updated.status === 'completed') {
+        if (
+          ('scoreA' in updates || 'scoreB' in updates) &&
+          !('sets' in updates) &&
+          (!updated.sets || updated.sets.length <= 1) &&
+          updated.scoreA != null &&
+          updated.scoreB != null
+        ) {
+          updated.sets = [{ scoreA: updated.scoreA, scoreB: updated.scoreB }];
+        }
+        if ('winner' in updates && (updates.winner === updated.teamA || updates.winner === updated.teamB)) {
+          updated.winner = updates.winner;
+        } else if (
+          updated.scoreA != null &&
+          updated.scoreB != null &&
+          updated.scoreA !== updated.scoreB &&
+          (!updated.sets || updated.sets.length <= 1)
+        ) {
+          updated.winner = updated.scoreA > updated.scoreB ? updated.teamA : updated.teamB;
+        } else {
+          const stats = extractCompletedMatchStats({
+            ...updated,
+            winner: 'winner' in updates ? updates.winner : updated.winner,
+          });
+          if (stats) updated.winner = stats.winnerId;
+        }
       }
       updatedMatchObj = updated;
       return updated;
@@ -3223,6 +3326,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           ...updates,
+          scoreA: updatedMatchObj.scoreA ?? null,
+          scoreB: updatedMatchObj.scoreB ?? null,
+          winner: updatedMatchObj.winner ?? null,
+          sets: updatedMatchObj.sets ?? [],
           courtName: updatedMatchObj.courtName,
           fullMatch: updatedMatchObj,
           syncedToSupabase,
@@ -3466,6 +3573,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   const deleteMatch = async (matchId: string): Promise<boolean> => {
     try {
+      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      localMatchGuardRef.current.delete(matchId);
       if (SupabaseService.isAvailable()) {
         await SupabaseService.deleteMatch(matchId);
       }
@@ -3474,14 +3583,42 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         headers: { ...AuthService.getAuthHeader() },
       }).catch(() => {});
 
-      setState((prev) => ({
-        ...prev,
-        matches: prev.matches.filter((m) => m.id !== matchId),
-        knockout: {
+      setState((prev) => {
+        const nextMatches = prev.matches.filter((m) => m.id !== matchId);
+        const remainingKo = prev.knockout.matches.filter((m) => m.id !== matchId);
+        const wasKoMatch = remainingKo.length !== prev.knockout.matches.length;
+        const progressedKo = wasKoMatch
+          ? progressKnockoutMatches(remainingKo, prev.knockout.format)
+          : remainingKo;
+        const isIplKo =
+          prev.knockout.format === 'ipl_top4' ||
+          progressedKo.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
+        const iplProgression = isIplKo && progressedKo.length > 0 ? progressIPLPlayoffs(progressedKo) : null;
+        const nextKnockout: KnockoutData = {
           ...prev.knockout,
-          matches: prev.knockout.matches.filter((m) => m.id !== matchId),
-        },
-      }));
+          matches: iplProgression ? iplProgression.matches : progressedKo,
+          championTeamId: iplProgression ? iplProgression.championTeamId : undefined,
+          runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : undefined,
+          status: iplProgression
+            ? iplProgression.isCompleted
+              ? 'completed'
+              : progressedKo.length > 0
+              ? 'active'
+              : 'draft'
+            : progressedKo.length > 0
+            ? prev.knockout.status
+            : 'draft',
+          updatedAt: Date.now(),
+        };
+        if (wasKoMatch && SupabaseService.isAvailable()) {
+          SupabaseService.savePlayoffState(seasonSlug, nextKnockout).catch(() => {});
+        }
+        return {
+          ...prev,
+          matches: nextMatches,
+          knockout: nextKnockout,
+        };
+      });
       return true;
     } catch (err) {
       console.error('Error deleting match:', err);
@@ -3711,8 +3848,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const auditEntry = createPlayoffAuditEntry(
         options?.overrideTop4Ids ? 'qualification_overridden' : 'playoffs_generated',
         options?.overrideTop4Ids
-          ? `Generated IPL Top-4 Playoffs with custom qualification seeding (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`
-          : `Generated IPL Top-4 Playoffs from league standings (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`,
+          ? `Generated SPL Top-4 Playoffs with custom qualification seeding (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`
+          : `Generated SPL Top-4 Playoffs from league standings (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`,
         actorName
       );
 
@@ -3917,12 +4054,38 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         current.winner = undefined;
         current.loserId = undefined;
         current.completedAt = undefined;
-      } else if (current.scoreA != null && current.scoreB != null && current.status === 'completed') {
-        if (current.scoreA > current.scoreB) current.winner = current.teamA;
-        else if (current.scoreB > current.scoreA) current.winner = current.teamB;
-        if (current.winner) {
+      } else if (current.status === 'completed') {
+        if (
+          ('scoreA' in updates || 'scoreB' in updates) &&
+          !('sets' in updates) &&
+          (!current.sets || current.sets.length <= 1) &&
+          current.scoreA != null &&
+          current.scoreB != null
+        ) {
+          current.sets = [{ scoreA: current.scoreA, scoreB: current.scoreB }];
+        }
+        if ('winner' in updates && (updates.winner === current.teamA || updates.winner === current.teamB)) {
+          current.winner = updates.winner;
+        } else if (
+          current.scoreA != null &&
+          current.scoreB != null &&
+          current.scoreA !== current.scoreB &&
+          (!current.sets || current.sets.length <= 1)
+        ) {
+          current.winner = current.scoreA > current.scoreB ? current.teamA : current.teamB;
+        } else {
+          const stats = extractCompletedMatchStats({
+            ...current,
+            winner: 'winner' in updates ? updates.winner : current.winner,
+          });
+          if (stats) current.winner = stats.winnerId;
+        }
+        if (current.winner && (current.winner === current.teamA || current.winner === current.teamB)) {
           current.loserId = current.winner === current.teamA ? current.teamB : current.teamA;
           current.completedAt = current.completedAt || now;
+        } else {
+          current.winner = undefined;
+          current.loserId = undefined;
         }
       }
       updatedKoMatch = current;
@@ -4080,6 +4243,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...updates,
+        scoreA: updatedKoMatch?.scoreA ?? null,
+        scoreB: updatedKoMatch?.scoreB ?? null,
+        winner: updatedKoMatch?.winner ?? null,
+        loserId: updatedKoMatch?.loserId ?? null,
+        sets: updatedKoMatch?.sets ?? [],
         courtName: updatedKoMatch?.courtName,
         isKnockout: true,
         fullMatch: updatedKoMatch,
@@ -4092,14 +4260,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          teamA: downstream.teamA,
-          teamB: downstream.teamB,
+          teamA: downstream.teamA ?? null,
+          teamB: downstream.teamB ?? null,
           status: downstream.status,
-          winner: downstream.winner,
-          loserId: downstream.loserId,
-          scoreA: downstream.scoreA,
-          scoreB: downstream.scoreB,
-          sets: downstream.sets,
+          winner: downstream.winner ?? null,
+          loserId: downstream.loserId ?? null,
+          scoreA: downstream.scoreA ?? null,
+          scoreB: downstream.scoreB ?? null,
+          sets: downstream.sets ?? [],
           isKnockout: true,
           fullMatch: downstream,
           syncedToSupabase,

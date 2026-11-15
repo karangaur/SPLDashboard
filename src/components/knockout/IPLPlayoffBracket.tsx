@@ -507,7 +507,7 @@ export const IPLPlayoffBracket: React.FC<IPLPlayoffBracketProps> = ({
         </div>
       )}
 
-      {/* Connected 3-Stage IPL Playoff Flow */}
+      {/* Connected 3-Stage SPL Playoff Flow */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 lg:gap-4 items-center">
         {/* Stage 1 (Col 1–4): Qualifier 1 + Eliminator */}
         <div className="lg:col-span-4 space-y-4 min-w-0">

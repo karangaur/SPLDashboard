@@ -10,10 +10,14 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
+import { normalizePlayoffSettings } from '../../utils/playoffEngine';
 
 export const StandingsView: React.FC = () => {
-  const { state, standings } = useTournament();
+  const { state, standings, updateSettings } = useTournament();
   const [copied, setCopied] = useState(false);
+
+  const playoffSettings = normalizePlayoffSettings(state.settings.playoffSettings);
+  const includeKnockoutInStandings = playoffSettings.includeKnockoutInStandings !== false;
 
   const formatStandingText = () => {
     const lines = [
@@ -72,7 +76,24 @@ export const StandingsView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2.5">
+          <label className="inline-flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-xs font-semibold text-slate-200 cursor-pointer transition-colors">
+            <input
+              type="checkbox"
+              checked={includeKnockoutInStandings}
+              onChange={(e) => {
+                updateSettings({
+                  playoffSettings: normalizePlayoffSettings({
+                    ...playoffSettings,
+                    includeKnockoutInStandings: e.target.checked,
+                  }),
+                });
+              }}
+              className="h-3.5 w-3.5 accent-amber-400 rounded cursor-pointer"
+            />
+            <span>Include Knockout Results in League Standings</span>
+          </label>
+
           <button
             onClick={handleCopy}
             className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10"
@@ -353,7 +374,7 @@ export const StandingsView: React.FC = () => {
           <span className="text-5xl">🏆</span>
           <h3 className="text-lg font-bold text-white">No Standings Available</h3>
           <p className="text-xs text-slate-400 max-w-sm mx-auto">
-            Once teams are registered and matches are played, the live points table and run rate will automatically calculate here.
+            Once teams are registered and matches are played, the live points table and point differential will automatically calculate here.
           </p>
         </div>
       )}

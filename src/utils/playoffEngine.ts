@@ -34,6 +34,7 @@ export const DEFAULT_PLAYOFF_SETTINGS: PlayoffSettings = {
   allowMatchScheduleEditing: true,
   courtAssignmentMode: 'auto',
   tieBreakerOrder: [...DEFAULT_TIEBREAKER_ORDER],
+  includeKnockoutInStandings: true,
 };
 
 export function normalizePlayoffSettings(raw?: Partial<PlayoffSettings> | null): PlayoffSettings {
@@ -82,17 +83,21 @@ export function normalizePlayoffSettings(raw?: Partial<PlayoffSettings> | null):
         : DEFAULT_PLAYOFF_SETTINGS.allowMatchScheduleEditing,
     courtAssignmentMode: raw?.courtAssignmentMode === 'manual' ? 'manual' : 'auto',
     tieBreakerOrder: mergedOrder,
+    includeKnockoutInStandings:
+      raw?.includeKnockoutInStandings !== undefined
+        ? Boolean(raw.includeKnockoutInStandings)
+        : DEFAULT_PLAYOFF_SETTINGS.includeKnockoutInStandings ?? true,
   };
 }
 
 export const TIEBREAKER_LABELS: Record<PlayoffTiebreakerCriterion, { label: string; description: string }> = {
   points: {
     label: 'Total League Points',
-    description: '2 points per league match win',
+    description: '2 points per match win',
   },
   win_diff: {
     label: 'Match-Win Difference',
-    description: 'Net wins minus losses in league stage',
+    description: 'Net wins minus losses across completed matches',
   },
   set_diff: {
     label: 'Game / Set Difference',
@@ -104,13 +109,173 @@ export const TIEBREAKER_LABELS: Record<PlayoffTiebreakerCriterion, { label: stri
   },
   head_to_head: {
     label: 'Head-to-Head Result',
-    description: 'Direct league fixture winner between tied teams',
+    description: 'Direct fixture winner between tied teams',
   },
   admin_override: {
     label: 'Admin Tie Resolution',
     description: 'Manual seed order set by tournament committee',
   },
 };
+
+export interface CompletedMatchStats {
+  id: string;
+  teamA: string;
+  teamB: string;
+  winnerId: string;
+  loserId: string;
+  pointsA: number;
+  pointsB: number;
+  setsA: number;
+  setsB: number;
+  isKnockout: boolean;
+}
+
+export function isKnockoutOrPlayoffMatch(m?: Partial<Match & KnockoutMatch> | null): boolean {
+  if (!m) return false;
+  return Boolean(
+    m.matchType === 'knockout' ||
+      m.stage ||
+      m.playoffRound ||
+      m.isPlayoff ||
+      m.participantASource ||
+      m.participantBSource
+  );
+}
+
+/**
+ * Extracts validated, deterministic statistics from a completed league or knockout match.
+ * Returns null if the match is not completed, lacks valid distinct teams, or has no valid result.
+ */
+export function extractCompletedMatchStats(
+  m?: Partial<Match & KnockoutMatch> | null
+): CompletedMatchStats | null {
+  if (!m || m.status !== 'completed') return null;
+  if (!m.teamA || !m.teamB || m.teamA === m.teamB) return null;
+  if (m.teamA === 'TBD' || m.teamB === 'TBD' || m.teamA === '__BYE__' || m.teamB === '__BYE__') {
+    return null;
+  }
+
+  const isKnockout = isKnockoutOrPlayoffMatch(m);
+  let setsA = 0;
+  let setsB = 0;
+  let totalPtsA = 0;
+  let totalPtsB = 0;
+
+  if (Array.isArray(m.sets) && m.sets.length > 1) {
+    for (const s of m.sets) {
+      const sa = Number(s?.scoreA ?? 0);
+      const sb = Number(s?.scoreB ?? 0);
+      if (sa === 0 && sb === 0 && !s?.winner) continue;
+      totalPtsA += sa;
+      totalPtsB += sb;
+      if (s?.winner === 'A' || sa > sb) setsA += 1;
+      else if (s?.winner === 'B' || sb > sa) setsB += 1;
+    }
+    if (totalPtsA === 0 && totalPtsB === 0 && (m.scoreA != null || m.scoreB != null)) {
+      totalPtsA = Number(m.scoreA ?? 0);
+      totalPtsB = Number(m.scoreB ?? 0);
+      if (totalPtsA > totalPtsB) setsA = 1;
+      else if (totalPtsB > totalPtsA) setsB = 1;
+    }
+  } else {
+    const hasTopLevelScore =
+      m.scoreA != null && m.scoreB != null && (Number(m.scoreA) > 0 || Number(m.scoreB) > 0);
+    const sa = hasTopLevelScore
+      ? Number(m.scoreA ?? 0)
+      : m.sets?.[0]?.scoreA != null
+      ? Number(m.sets[0].scoreA)
+      : Number(m.scoreA ?? 0);
+    const sb = hasTopLevelScore
+      ? Number(m.scoreB ?? 0)
+      : m.sets?.[0]?.scoreB != null
+      ? Number(m.sets[0].scoreB)
+      : Number(m.scoreB ?? 0);
+    totalPtsA = Number.isFinite(sa) ? sa : 0;
+    totalPtsB = Number.isFinite(sb) ? sb : 0;
+    if (totalPtsA > totalPtsB) setsA = 1;
+    else if (totalPtsB > totalPtsA) setsB = 1;
+  }
+
+  const explicitWinner =
+    m.winner === m.teamA || m.winner === m.teamB ? m.winner : undefined;
+  const scoreWinner =
+    setsA > setsB
+      ? m.teamA
+      : setsB > setsA
+      ? m.teamB
+      : totalPtsA > totalPtsB
+      ? m.teamA
+      : totalPtsB > totalPtsA
+      ? m.teamB
+      : undefined;
+
+  const winnerId = explicitWinner ?? scoreWinner;
+  if (!winnerId) return null;
+
+  // Ensure sets reflect at least 1 set won for the declared winner if tied on sets (e.g. walkover)
+  if (setsA === 0 && setsB === 0) {
+    if (winnerId === m.teamA) setsA = 1;
+    else setsB = 1;
+  }
+
+  const loserId = winnerId === m.teamA ? m.teamB : m.teamA;
+  const matchId =
+    m.id ||
+    `${isKnockout ? 'ko' : 'lg'}:${m.stage || ''}:${m.playoffRound || ''}:${m.round ?? 0}:${m.slot ?? 0}:${m.teamA}:${m.teamB}`;
+
+  return {
+    id: matchId,
+    teamA: m.teamA,
+    teamB: m.teamB,
+    winnerId,
+    loserId,
+    pointsA: totalPtsA,
+    pointsB: totalPtsB,
+    setsA,
+    setsB,
+    isKnockout,
+  };
+}
+
+export function buildDeduplicatedMatchesForStandings(
+  matches: Match[] = [],
+  knockoutMatches: KnockoutMatch[] = [],
+  includeKnockoutInStandings = true
+): CompletedMatchStats[] {
+  const rawById = new Map<string, Partial<Match & KnockoutMatch>>();
+
+  for (let i = 0; i < matches.length; i++) {
+    const m = matches[i];
+    if (!m) continue;
+    const key = m.id || `match-idx-${i}-${m.teamA}-${m.teamB}`;
+    rawById.set(key, m);
+  }
+
+  // Always overlay knockoutMatches by ID so that updated/reset knockout matches supersede any copy in matches
+  for (let i = 0; i < knockoutMatches.length; i++) {
+    const km = knockoutMatches[i];
+    if (!km) continue;
+    const key = km.id || `ko-idx-${i}-${km.stage}-${km.slot}`;
+    rawById.set(key, {
+      ...rawById.get(key),
+      ...km,
+      matchType: 'knockout',
+    });
+  }
+
+  const results: CompletedMatchStats[] = [];
+  for (const raw of rawById.values()) {
+    if (!includeKnockoutInStandings && isKnockoutOrPlayoffMatch(raw)) {
+      continue;
+    }
+    const stats = extractCompletedMatchStats(raw);
+    if (stats) {
+      results.push(stats);
+    }
+  }
+
+  return results;
+}
 
 export function inferPlayoffRound(
   match?: Partial<KnockoutMatch | Match> | null,
@@ -242,6 +407,8 @@ export function calculatePlayoffLeagueStandings(params: {
   teams: Team[];
   players: Player[];
   matches: Match[];
+  knockoutMatches?: KnockoutMatch[];
+  includeKnockoutInStandings?: boolean;
   tieBreakerOrder?: PlayoffTiebreakerCriterion[];
   disqualifiedTeamIds?: string[];
   manualTieBreakOrder?: string[];
@@ -255,6 +422,8 @@ export function calculatePlayoffLeagueStandings(params: {
     teams,
     players,
     matches,
+    knockoutMatches = [],
+    includeKnockoutInStandings = false,
     tieBreakerOrder = DEFAULT_TIEBREAKER_ORDER,
     disqualifiedTeamIds = [],
     manualTieBreakOrder = [],
@@ -297,53 +466,22 @@ export function calculatePlayoffLeagueStandings(params: {
     });
   }
 
-  // Strictly process completed LEAGUE matches only (exclude partial/upcoming/live and knockout matches)
-  const completedLeagueMatches = matches.filter((m) => {
-    if (!m || m.status !== 'completed') return false;
-    if (m.matchType === 'knockout' || Boolean(m.stage)) return false;
-    if (!m.teamA || !m.teamB || m.teamA === m.teamB) return false;
-    const hasWinner = m.winner === m.teamA || m.winner === m.teamB;
-    const hasValidScores = m.scoreA != null && m.scoreB != null && m.scoreA !== m.scoreB;
-    return hasWinner || hasValidScores;
-  });
+  const completedMatches = buildDeduplicatedMatchesForStandings(
+    matches,
+    knockoutMatches,
+    includeKnockoutInStandings
+  );
 
-  for (const m of completedLeagueMatches) {
+  for (const m of completedMatches) {
     const rowA = rowMap.get(m.teamA);
     const rowB = rowMap.get(m.teamB);
     if (!rowA || !rowB) continue;
 
-    // Determine sets won/lost if multi-set data exists
-    let setsA = 0;
-    let setsB = 0;
-    let totalPtsA = 0;
-    let totalPtsB = 0;
-
-    if (Array.isArray(m.sets) && m.sets.length > 0) {
-      for (const s of m.sets) {
-        const sa = Number(s?.scoreA ?? 0);
-        const sb = Number(s?.scoreB ?? 0);
-        totalPtsA += sa;
-        totalPtsB += sb;
-        if (s?.winner === 'A' || sa > sb) setsA += 1;
-        else if (s?.winner === 'B' || sb > sa) setsB += 1;
-      }
-    } else {
-      const sa = Number(m.scoreA ?? 0);
-      const sb = Number(m.scoreB ?? 0);
-      totalPtsA = sa;
-      totalPtsB = sb;
-      if (sa > sb) setsA = 1;
-      else if (sb > sa) setsB = 1;
-    }
-
-    const winnerId =
-      m.winner === m.teamA || m.winner === m.teamB
-        ? m.winner
-        : totalPtsA >= totalPtsB
-        ? m.teamA
-        : m.teamB;
-
-    const aWon = winnerId === m.teamA;
+    const totalPtsA = m.pointsA;
+    const totalPtsB = m.pointsB;
+    const setsA = m.setsA;
+    const setsB = m.setsB;
+    const aWon = m.winnerId === m.teamA;
 
     rowA.played += 1;
     rowB.played += 1;
@@ -547,7 +685,7 @@ export function evaluatePlayoffGenerationEligibility(params: {
   if (rankedActiveCount < requiredTeams) {
     blockingReasons.push(
       `At least ${requiredTeams} active eligible teams are required to generate ${
-        playoffSettings.format === 'ipl_top4' ? 'IPL-Style Top 4' : playoffSettings.format.toUpperCase()
+        playoffSettings.format === 'ipl_top4' ? 'SPL Championship Top 4' : playoffSettings.format.toUpperCase()
       } playoffs (currently ${rankedActiveCount} eligible).`
     );
   }
@@ -603,7 +741,7 @@ export function generateIPLPlayoffBracket(params: {
 
   const uniqueTop4 = Array.from(new Set(top4TeamIds.filter(Boolean)));
   if (uniqueTop4.length !== 4) {
-    throw new Error('Exactly 4 distinct qualified teams are required to generate IPL-Style Top 4 playoffs.');
+    throw new Error('Exactly 4 distinct qualified teams are required to generate SPL Championship Top 4 playoffs.');
   }
 
   const safeCourts = Math.max(1, Number(courtsCount) || 1);

@@ -224,7 +224,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       if (q1.some((m) => m.status === 'live' || m.status === 'paused')) return 'Qualifier 1 Live';
       const elim = koMatches.filter((m) => inferPlayoffRound(m, format) === 'ELIM');
       if (elim.some((m) => m.status === 'live' || m.status === 'paused')) return 'Eliminator Live';
-      if (koMatches.length > 0) return 'IPL Playoffs';
+      if (koMatches.length > 0) return 'SPL Playoffs';
     }
 
     const semis = koMatches.filter((m) => m.stage === 'SF');
@@ -754,7 +754,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           )}
         </section>
 
-        {/* 6B. IPL-STYLE PLAYOFFS — ROAD TO THE GRAND FINAL & CHAMPIONS SHOWCASE */}
+        {/* 6B. SPL CHAMPIONSHIP PLAYOFFS — ROAD TO THE GRAND FINAL & CHAMPIONS SHOWCASE */}
         {(() => {
           const ps = normalizePlayoffSettings(state.settings.playoffSettings);
           const showSection =
@@ -791,7 +791,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <div>
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
                     <Trophy className="w-4 h-4" />
-                    <span>IPL-Style Top 4 Championship Playoffs</span>
+                    <span>SPL Championship Top 4 Playoffs</span>
                   </div>
                   <h2 className="text-3xl sm:text-4xl font-black text-white font-display uppercase tracking-tight mt-1">
                     🏆 Road to the{' '}

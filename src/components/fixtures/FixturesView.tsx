@@ -126,12 +126,17 @@ export const FixturesView: React.FC = () => {
       sportsAudio.playFanfare();
     }
 
+    const updatedSets =
+      match.sets && match.sets.length > 1
+        ? [...match.sets.slice(0, -1), { ...match.sets[match.sets.length - 1], scoreA: nextA, scoreB: nextB }]
+        : [{ scoreA: nextA, scoreB: nextB }];
+
     updateMatch(matchId, {
       scoreA: nextA,
       scoreB: nextB,
       status,
       winner,
-      sets: match.sets && match.sets.length > 0 ? match.sets : [{ scoreA: nextA, scoreB: nextB }],
+      sets: updatedSets,
     });
   };
 

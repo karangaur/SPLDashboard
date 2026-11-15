@@ -228,9 +228,22 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
     const isKo = (activeMatch as any).isKnockout;
     sportsAudio.playButtonClick();
     if (isKo) {
-      updateKnockoutMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined, sets: [] });
+      updateKnockoutMatch(activeMatch.id, {
+        scoreA: 0,
+        scoreB: 0,
+        status: 'upcoming',
+        winner: undefined,
+        loserId: undefined,
+        sets: [],
+      });
     } else {
-      updateMatch(activeMatch.id, { scoreA: 0, scoreB: 0, status: 'live', winner: undefined, sets: [] });
+      updateMatch(activeMatch.id, {
+        scoreA: 0,
+        scoreB: 0,
+        status: 'upcoming',
+        winner: undefined,
+        sets: [],
+      });
     }
   };
 

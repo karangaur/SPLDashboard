@@ -61,7 +61,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
                   onClick={() => onSelectTab('standings')}
                   className="hover:text-amber-400 transition-colors text-left"
                 >
-                  Points Table & Net Run Rate
+                  SPL League Standings &amp; Points Table
                 </button>
               </li>
               <li>

@@ -134,13 +134,6 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
     let nextStatus: Match['status'] = status === 'upcoming' ? 'live' : status;
     let nextWinner = currentMatch.winner;
 
-    // Check if match is configured as 1 set sprint or if this completes all sets
-    if (rules.setsToWin === 1 && setEvaluation.isFinished && setEvaluation.winner) {
-      nextStatus = 'completed';
-      nextWinner = setEvaluation.winner === 'A' ? currentMatch.teamA : currentMatch.teamB;
-      sportsAudio.playFanfare();
-    }
-
     const activeSetEntry: MatchSet = {
       scoreA: nextA,
       scoreB: nextB,
@@ -154,6 +147,28 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
         : !sets[sets.length - 1]?.isCompleted
         ? [...sets.slice(0, -1), activeSetEntry]
         : [...sets, activeSetEntry];
+
+    const completedSetsA = updatedSets.filter(
+      (s) => s.isCompleted && (s.winner === 'A' || s.scoreA > s.scoreB)
+    ).length;
+    const completedSetsB = updatedSets.filter(
+      (s) => s.isCompleted && (s.winner === 'B' || s.scoreB > s.scoreA)
+    ).length;
+
+    // Check if match is configured as 1 set sprint or if this completes required setsToWin
+    if (rules.setsToWin === 1 && setEvaluation.isFinished && setEvaluation.winner) {
+      nextStatus = 'completed';
+      nextWinner = setEvaluation.winner === 'A' ? currentMatch.teamA : currentMatch.teamB;
+      sportsAudio.playFanfare();
+    } else if (completedSetsA >= rules.setsToWin) {
+      nextStatus = 'completed';
+      nextWinner = currentMatch.teamA;
+      sportsAudio.playFanfare();
+    } else if (completedSetsB >= rules.setsToWin) {
+      nextStatus = 'completed';
+      nextWinner = currentMatch.teamB;
+      sportsAudio.playFanfare();
+    }
 
     const payload = {
       scoreA: nextA,
@@ -195,13 +210,39 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
     const curA = currentMatch.scoreA ?? 0;
     const curB = currentMatch.scoreB ?? 0;
 
-    const winnerId = forcedWinner || (curA > curB ? currentMatch.teamA : currentMatch.teamB);
+    const finalSets: MatchSet[] =
+      sets.length === 0
+        ? [{ scoreA: curA, scoreB: curB, winner: curA >= curB ? 'A' : 'B', isCompleted: true }]
+        : [
+            ...sets.slice(0, -1),
+            {
+              ...sets[sets.length - 1],
+              scoreA: curA,
+              scoreB: curB,
+              winner: curA >= curB ? 'A' : 'B',
+              isCompleted: true,
+            },
+          ];
+
+    const setsA = finalSets.filter((s) => s.winner === 'A' || s.scoreA > s.scoreB).length;
+    const setsB = finalSets.filter((s) => s.winner === 'B' || s.scoreB > s.scoreA).length;
+
+    const winnerId =
+      forcedWinner ||
+      (sets.length > 1 && setsA !== setsB
+        ? setsA > setsB
+          ? currentMatch.teamA
+          : currentMatch.teamB
+        : curA > curB
+        ? currentMatch.teamA
+        : currentMatch.teamB);
 
     const payload = {
       status: 'completed' as const,
       winner: winnerId,
       scoreA: curA,
       scoreB: curB,
+      sets: finalSets,
     };
 
     if (isKnockout) updateKnockoutMatch(currentMatch.id, payload);

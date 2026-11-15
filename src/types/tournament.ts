@@ -21,7 +21,7 @@ export type PlayoffTiebreakerCriterion =
 export interface PlayoffSettings {
   enabled: boolean;
   format: PlayoffFormat;
-  qualifyingTeamsCount: number; // Default: 4 for IPL-Style Top 4
+  qualifyingTeamsCount: number; // Default: 4 for SPL Championship Top 4
   autoQualifyFromStandings: boolean;
   allowManualOverride: boolean;
   requireLeagueCompletion: boolean;
@@ -30,6 +30,11 @@ export interface PlayoffSettings {
   allowMatchScheduleEditing: boolean;
   courtAssignmentMode: 'auto' | 'manual';
   tieBreakerOrder: PlayoffTiebreakerCriterion[];
+  /**
+   * When enabled (default: true), completed knockout & playoff matches
+   * contribute to Official League Standings (Played, Won, Lost, Points, PF, PA, PD, Form, Ranking).
+   */
+  includeKnockoutInStandings?: boolean;
 }
 
 export interface PlayoffQualifiedSeed {
@@ -173,7 +178,7 @@ export interface KnockoutMatch {
   teamB?: string;
   scoreA?: number;
   scoreB?: number;
-  status: 'upcoming' | 'live' | 'paused' | 'completed';
+  status: 'upcoming' | 'live' | 'paused' | 'completed' | 'postponed';
   winner?: string;
   loserId?: string;
   completedAt?: number;

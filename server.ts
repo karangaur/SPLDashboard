@@ -1355,11 +1355,25 @@ async function startServer() {
           ...cleanGroupBody,
           scoreA: newScoreA,
           scoreB: newScoreB,
+          winner:
+            cleanGroupBody.winner === null
+              ? undefined
+              : cleanGroupBody.winner !== undefined
+              ? cleanGroupBody.winner
+              : m.winner,
           version: currentVersion,
           lastUpdated: now,
         };
 
-        if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
+        if (updated.status !== 'completed' && !cleanGroupBody.winner) {
+          updated.winner = undefined;
+        } else if (
+          updated.scoreA != null &&
+          updated.scoreB != null &&
+          updated.status === 'completed' &&
+          !cleanGroupBody.winner &&
+          (!updated.sets || updated.sets.length <= 1)
+        ) {
           if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
           else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
         }
@@ -1434,15 +1448,41 @@ async function startServer() {
           const updated = {
             ...k,
             ...cleanBody,
+            teamA: cleanBody.teamA === null ? undefined : cleanBody.teamA !== undefined ? cleanBody.teamA : k.teamA,
+            teamB: cleanBody.teamB === null ? undefined : cleanBody.teamB !== undefined ? cleanBody.teamB : k.teamB,
             scoreA: newScoreA,
             scoreB: newScoreB,
+            winner:
+              cleanBody.winner === null
+                ? undefined
+                : cleanBody.winner !== undefined
+                ? cleanBody.winner
+                : k.winner,
+            loserId:
+              cleanBody.loserId === null
+                ? undefined
+                : cleanBody.loserId !== undefined
+                ? cleanBody.loserId
+                : k.loserId,
             version: currentVersion,
             lastUpdated: now,
           };
 
-          if (updated.scoreA != null && updated.scoreB != null && updated.status === 'completed') {
+          if (updated.status !== 'completed' && !cleanBody.winner) {
+            updated.winner = undefined;
+            updated.loserId = undefined;
+          } else if (
+            updated.scoreA != null &&
+            updated.scoreB != null &&
+            updated.status === 'completed' &&
+            !cleanBody.winner &&
+            (!updated.sets || updated.sets.length <= 1)
+          ) {
             if (updated.scoreA > updated.scoreB) updated.winner = updated.teamA;
             else if (updated.scoreB > updated.scoreA) updated.winner = updated.teamB;
+            if (updated.winner) {
+              updated.loserId = updated.winner === updated.teamA ? updated.teamB : updated.teamA;
+            }
           }
           matchObj = updated;
           return updated;

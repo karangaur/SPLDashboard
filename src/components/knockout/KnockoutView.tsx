@@ -54,6 +54,7 @@ export const KnockoutView: React.FC = () => {
     setPlayoffTieBreakOrder,
     toggleTeamPlayoffDisqualification,
     recalculatePlayoffStandings,
+    updateSettings,
     triggerCelebration,
   } = useTournament();
 
@@ -86,12 +87,16 @@ export const KnockoutView: React.FC = () => {
     window.setTimeout(() => setNotice(null), 4500);
   };
 
+  const includeKnockoutInStandings = playoffSettings.includeKnockoutInStandings !== false;
+
   const leagueStandingData = useMemo(
     () =>
       calculatePlayoffLeagueStandings({
         teams: state.teams,
         players: state.players,
         matches: state.matches,
+        knockoutMatches: state.knockout.matches,
+        includeKnockoutInStandings,
         tieBreakerOrder: playoffSettings.tieBreakerOrder,
         disqualifiedTeamIds: state.knockout.disqualifiedTeamIds || [],
         manualTieBreakOrder: state.knockout.manualTieBreakOrder || [],
@@ -100,6 +105,8 @@ export const KnockoutView: React.FC = () => {
       state.teams,
       state.players,
       state.matches,
+      state.knockout.matches,
+      includeKnockoutInStandings,
       playoffSettings.tieBreakerOrder,
       state.knockout.disqualifiedTeamIds,
       state.knockout.manualTieBreakOrder,
@@ -153,7 +160,7 @@ export const KnockoutView: React.FC = () => {
     triggerCelebration();
     showNotice(
       isIPLMode
-        ? 'IPL-Style Top 4 Playoff Bracket generated & synced to Supabase!'
+        ? 'SPL Championship Top 4 Playoff Bracket generated & synced to Supabase!'
         : 'Knockout bracket generated & synced!',
       'success'
     );
@@ -188,7 +195,7 @@ export const KnockoutView: React.FC = () => {
     }
     setShowOverrideModal(false);
     triggerCelebration();
-    showNotice('Top 4 qualified teams overridden & IPL Playoff bracket updated!', 'success');
+    showNotice('Top 4 qualified teams overridden & SPL Playoff bracket updated!', 'success');
   };
 
   const handleOpenEditSchedule = (match: KnockoutMatch) => {
@@ -285,7 +292,7 @@ export const KnockoutView: React.FC = () => {
 
   const formatBracketText = () => {
     const lines = [
-      `🏆 ${state.settings.name} — ${isIPLMode ? 'IPL-Style Playoff Bracket' : 'Knockout Stage Bracket'}`,
+      `🏆 ${state.settings.name} — ${isIPLMode ? 'SPL Championship Playoff Bracket' : 'Knockout Stage Bracket'}`,
       '',
     ];
 
@@ -381,7 +388,7 @@ export const KnockoutView: React.FC = () => {
             </h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            IPL-Style Top 4 Playoffs (Qualifier 1 → Eliminator → Qualifier 2 → Grand Final) &amp; knockout brackets.
+            SPL Championship Top 4 Playoffs (Qualifier 1 → Eliminator → Qualifier 2 → Grand Final) &amp; knockout brackets.
           </p>
         </div>
 
@@ -430,7 +437,7 @@ export const KnockoutView: React.FC = () => {
             </label>
             <div className="flex flex-wrap gap-2">
               {[
-                { id: 'ipl_top4' as const, label: 'IPL-Style Top 4 (Q1 · ELIM · Q2 · Final)' },
+                { id: 'ipl_top4' as const, label: 'SPL Championship Top 4 (Q1 · ELIM · Q2 · Final)' },
                 { id: 'top4' as const, label: 'Top 4 (Semi Finals + Final)' },
                 { id: 'top8' as const, label: 'Top 8 (Eliminators + Semis + Final)' },
                 { id: 'top2' as const, label: 'Top 2 (Grand Final Only)' },
@@ -466,10 +473,10 @@ export const KnockoutView: React.FC = () => {
               <span>
                 {state.knockout.matches.length > 0
                   ? isIPLMode
-                    ? 'Regenerate IPL Playoffs'
+                    ? 'Regenerate SPL Playoffs'
                     : 'Regenerate Bracket'
                   : isIPLMode
-                  ? 'Generate IPL-Style Playoffs'
+                  ? 'Generate SPL Playoffs'
                   : 'Seed & Generate Bracket'}
               </span>
             </button>
@@ -662,19 +669,38 @@ export const KnockoutView: React.FC = () => {
         </div>
       )}
 
-      {/* Qualification Dashboard & League-Only Standings Table */}
+      {/* Qualification Dashboard & Official Standings Table */}
       <div className="rounded-2xl glass-card p-4 sm:p-5 border border-white/10 space-y-3">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex items-center gap-2">
             <ClipboardList className="w-4 h-4 text-amber-400" />
             <span className="font-bold uppercase tracking-wider text-slate-200">
-              League Standings &amp; Top {requiredTeams} Qualification Seedings
+              SPL League Standings &amp; Top {requiredTeams} Qualification Seedings
             </span>
           </div>
-          <span className="font-mono text-slate-400">
-            League Matches: {eligibility.leagueCompletedMatches}/{eligibility.leagueTotalMatches} completed ·{' '}
-            {leagueStandingData.rankedActive.length} eligible
-          </span>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-[11px] font-semibold text-slate-200 cursor-pointer hover:border-amber-400/40 transition-colors">
+              <input
+                type="checkbox"
+                checked={includeKnockoutInStandings}
+                onChange={(e) => {
+                  const nextVal = e.target.checked;
+                  updateSettings({
+                    playoffSettings: normalizePlayoffSettings({
+                      ...playoffSettings,
+                      includeKnockoutInStandings: nextVal,
+                    }),
+                  });
+                }}
+                className="h-3.5 w-3.5 accent-amber-400 rounded cursor-pointer"
+              />
+              <span>Include Knockout Results in League Standings</span>
+            </label>
+            <span className="font-mono text-slate-400">
+              League Matches: {eligibility.leagueCompletedMatches}/{eligibility.leagueTotalMatches} completed ·{' '}
+              {leagueStandingData.rankedActive.length} eligible
+            </span>
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -906,7 +932,7 @@ export const KnockoutView: React.FC = () => {
           <h3 className="text-lg font-bold text-white">Championship Bracket Not Yet Formed</h3>
           <p className="text-xs text-slate-400 max-w-md mx-auto">
             {isIPLMode
-              ? 'Top 4 teams qualify into the IPL-Style Playoff system: Qualifier 1 (#1 vs #2), Eliminator (#3 vs #4), Qualifier 2, and Grand Final.'
+              ? 'Top 4 teams qualify into the SPL Championship Playoff system: Qualifier 1 (#1 vs #2), Eliminator (#3 vs #4), Qualifier 2, and Grand Final.'
               : 'Once league stages produce qualified teams, click below to generate the playoff bracket.'}
           </p>
           <button
@@ -919,7 +945,7 @@ export const KnockoutView: React.FC = () => {
                 : 'bg-white/10 text-slate-500 cursor-not-allowed'
             }`}
           >
-            {isIPLMode ? 'Generate IPL-Style Playoffs' : 'Generate Playoff Bracket'}
+            {isIPLMode ? 'Generate SPL Playoffs' : 'Generate Playoff Bracket'}
           </button>
         </div>
       )}
@@ -1080,11 +1106,11 @@ export const KnockoutView: React.FC = () => {
       {/* Confirm Generate / Replace Bracket */}
       <ConfirmModal
         isOpen={showGenerateConfirm}
-        title={state.knockout.matches.length > 0 ? 'Regenerate Playoff Bracket' : 'Generate IPL-Style Playoffs'}
+        title={state.knockout.matches.length > 0 ? 'Regenerate Playoff Bracket' : 'Generate SPL Championship Playoffs'}
         message={
           state.knockout.matches.length > 0
             ? 'An active playoff bracket already exists. Regenerating will re-seed teams from current league standings and reset existing playoff scores while preserving all league fixtures.'
-            : 'Confirm generating the IPL-Style Top 4 Playoff Bracket (Qualifier 1, Eliminator, Qualifier 2, Grand Final) from current Top 4 league standings?'
+            : 'Confirm generating the SPL Championship Top 4 Playoff Bracket (Qualifier 1, Eliminator, Qualifier 2, Grand Final) from current Top 4 league standings?'
         }
         confirmLabel={state.knockout.matches.length > 0 ? 'Regenerate Playoffs' : 'Generate Playoffs'}
         variant={state.knockout.matches.length > 0 ? 'warning' : 'primary'}

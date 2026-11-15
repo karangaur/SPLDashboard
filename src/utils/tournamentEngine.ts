@@ -15,8 +15,14 @@ import {
   RegistrationTokenRecord,
   FormFieldType,
   FormPaymentConfig,
+  PlayoffTiebreakerCriterion,
 } from '../types/tournament';
-import { DEFAULT_PLAYOFF_SETTINGS, progressIPLPlayoffs } from './playoffEngine';
+import {
+  buildDeduplicatedMatchesForStandings,
+  DEFAULT_PLAYOFF_SETTINGS,
+  DEFAULT_TIEBREAKER_ORDER,
+  progressIPLPlayoffs,
+} from './playoffEngine';
 
 export const STORAGE_KEY = 'smash-premier-league-v8';
 
@@ -286,15 +292,38 @@ export const DEFAULT_STATE: TournamentState = {
   teamFormationMode: 'random',
 };
 
+export interface CalculateStandingsOptions {
+  includeKnockoutInStandings?: boolean;
+  tieBreakerOrder?: PlayoffTiebreakerCriterion[];
+  manualTieBreakOrder?: string[];
+}
+
 // Standings calculation
 export function calculateStandings(
   teams: Team[],
   matches: Match[],
-  knockoutMatches: KnockoutMatch[] = []
+  knockoutMatches: KnockoutMatch[] = [],
+  options?: CalculateStandingsOptions
 ): StandingsRecord[] {
-  const records = new Map<string, StandingsRecord>();
+  const includeKnockoutInStandings =
+    options?.includeKnockoutInStandings !== undefined
+      ? Boolean(options.includeKnockoutInStandings)
+      : true;
+  const tieBreakerOrder = options?.tieBreakerOrder || DEFAULT_TIEBREAKER_ORDER;
+  const manualRankMap = new Map<string, number>();
+  (options?.manualTieBreakOrder || []).forEach((tid, idx) => manualRankMap.set(tid, idx));
+
+  const records = new Map<
+    string,
+    StandingsRecord & {
+      setsWon: number;
+      setsLost: number;
+      headToHead: Record<string, { won: number; lost: number; netPoints: number }>;
+    }
+  >();
 
   for (const team of teams) {
+    if (!team?.id) continue;
     records.set(team.id, {
       team,
       played: 0,
@@ -305,64 +334,106 @@ export function calculateStandings(
       pointsAgainst: 0,
       diff: 0,
       form: [],
+      setsWon: 0,
+      setsLost: 0,
+      headToHead: {},
     });
   }
 
-  // Combine league matches and completed knockout matches
-  const allMatches: { teamA: string; teamB: string; scoreA?: number; scoreB?: number; status: string }[] = [
-    ...matches,
-    ...knockoutMatches
-      .filter((k) => k.status === 'completed' && k.teamA && k.teamB && k.scoreA != null && k.scoreB != null)
-      .map((k) => ({
-        teamA: k.teamA!,
-        teamB: k.teamB!,
-        scoreA: k.scoreA,
-        scoreB: k.scoreB,
-        status: 'completed',
-      })),
-  ];
+  const completedMatches = buildDeduplicatedMatchesForStandings(
+    matches,
+    knockoutMatches,
+    includeKnockoutInStandings
+  );
 
-  for (const m of allMatches) {
-    if (m.status !== 'completed' || m.scoreA == null || m.scoreB == null) continue;
+  for (const m of completedMatches) {
     const a = records.get(m.teamA);
     const b = records.get(m.teamB);
     if (!a || !b) continue;
 
-    a.played++;
-    b.played++;
-    a.pointsFor += m.scoreA;
-    a.pointsAgainst += m.scoreB;
-    b.pointsFor += m.scoreB;
-    b.pointsAgainst += m.scoreA;
+    const aWon = m.winnerId === m.teamA;
 
-    if (m.scoreA > m.scoreB) {
-      a.won++;
+    a.played += 1;
+    b.played += 1;
+    a.pointsFor += m.pointsA;
+    a.pointsAgainst += m.pointsB;
+    b.pointsFor += m.pointsB;
+    b.pointsAgainst += m.pointsA;
+
+    a.setsWon += m.setsA;
+    a.setsLost += m.setsB;
+    b.setsWon += m.setsB;
+    b.setsLost += m.setsA;
+
+    if (aWon) {
+      a.won += 1;
       a.points += 2;
       a.form.push('W');
-      b.lost++;
+      b.lost += 1;
       b.form.push('L');
-    } else if (m.scoreB > m.scoreA) {
-      b.won++;
+    } else {
+      b.won += 1;
       b.points += 2;
       b.form.push('W');
-      a.lost++;
+      a.lost += 1;
       a.form.push('L');
     }
+
+    if (!a.headToHead[m.teamB]) a.headToHead[m.teamB] = { won: 0, lost: 0, netPoints: 0 };
+    if (!b.headToHead[m.teamA]) b.headToHead[m.teamA] = { won: 0, lost: 0, netPoints: 0 };
+    a.headToHead[m.teamB].won += aWon ? 1 : 0;
+    a.headToHead[m.teamB].lost += aWon ? 0 : 1;
+    a.headToHead[m.teamB].netPoints += m.pointsA - m.pointsB;
+    b.headToHead[m.teamA].won += aWon ? 0 : 1;
+    b.headToHead[m.teamA].lost += aWon ? 1 : 0;
+    b.headToHead[m.teamA].netPoints += m.pointsB - m.pointsA;
   }
 
-  const list = Array.from(records.values()).map((r) => ({
+  const enrichedList = Array.from(records.values()).map((r) => ({
     ...r,
     diff: r.pointsFor - r.pointsAgainst,
     form: r.form.slice(-5), // last 5 results
   }));
 
-  // Sort by Points (desc), then Won (desc), then Point Diff (desc), then Points For (desc)
-  return list.sort((x, y) => {
+  enrichedList.sort((x, y) => {
+    for (const criterion of tieBreakerOrder) {
+      if (criterion === 'points') {
+        if (y.points !== x.points) return y.points - x.points;
+      } else if (criterion === 'win_diff') {
+        const winDiffX = x.won - x.lost;
+        const winDiffY = y.won - y.lost;
+        if (winDiffY !== winDiffX) return winDiffY - winDiffX;
+        if (y.won !== x.won) return y.won - x.won;
+      } else if (criterion === 'set_diff') {
+        const setDiffX = x.setsWon - x.setsLost;
+        const setDiffY = y.setsWon - y.setsLost;
+        if (setDiffY !== setDiffX) return setDiffY - setDiffX;
+      } else if (criterion === 'point_diff') {
+        if (y.diff !== x.diff) return y.diff - x.diff;
+        if (y.pointsFor !== x.pointsFor) return y.pointsFor - x.pointsFor;
+      } else if (criterion === 'head_to_head') {
+        const h2h = x.headToHead[y.team.id];
+        if (h2h) {
+          const diffWins = h2h.won - h2h.lost;
+          if (diffWins !== 0) return -diffWins;
+          if (h2h.netPoints !== 0) return -h2h.netPoints;
+        }
+      } else if (criterion === 'admin_override') {
+        const idxX = manualRankMap.get(x.team.id);
+        const idxY = manualRankMap.get(y.team.id);
+        if (idxX !== undefined && idxY !== undefined && idxX !== idxY) return idxX - idxY;
+        if (idxX !== undefined && idxY === undefined) return -1;
+        if (idxY !== undefined && idxX === undefined) return 1;
+      }
+    }
     if (y.points !== x.points) return y.points - x.points;
     if (y.won !== x.won) return y.won - x.won;
     if (y.diff !== x.diff) return y.diff - x.diff;
-    return y.pointsFor - x.pointsFor;
+    if (y.pointsFor !== x.pointsFor) return y.pointsFor - x.pointsFor;
+    return x.team.name.localeCompare(y.team.name);
   });
+
+  return enrichedList.map(({ setsWon: _sw, setsLost: _sl, headToHead: _h2h, ...record }) => record);
 }
 
 // Intelligent Multi-Court Round Robin Generator

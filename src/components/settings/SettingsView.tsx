@@ -506,7 +506,7 @@ export const SettingsView: React.FC = () => {
                   <span>Playoff &amp; Knockout Rules</span>
                 </h3>
                 <span className="text-[11px] font-mono text-amber-300/90">
-                  IPL-Style Qualifier 1 · Eliminator · Qualifier 2 · Grand Final
+                  SPL Championship Playoffs · Qualifier 1 · Eliminator · Qualifier 2 · Grand Final
                 </span>
               </div>
 
@@ -536,7 +536,7 @@ export const SettingsView: React.FC = () => {
                     }}
                     className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2 text-sm text-white focus:outline-none focus:border-amber-400"
                   >
-                    <option value="ipl_top4">IPL-Style Top 4 (Recommended)</option>
+                    <option value="ipl_top4">SPL Championship Top 4 (Recommended)</option>
                     <option value="top4">Top 4 Semi Finals + Final</option>
                     <option value="top8">Top 8 Quarter Finals + Semis + Final</option>
                     <option value="top2">Top 2 Grand Final Only</option>
@@ -590,6 +590,11 @@ export const SettingsView: React.FC = () => {
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                 {[
                   {
+                    key: 'includeKnockoutInStandings' as const,
+                    label: 'Include Knockout Results in League Standings',
+                    desc: 'Count completed knockout & playoff matches in Official League Standings (P, W, L, PTS, PF, PA, PD)',
+                  },
+                  {
                     key: 'autoQualifyFromStandings' as const,
                     label: 'Auto-Qualify Top Teams from Standings',
                     desc: 'Seed Top 4 directly from completed league fixtures',
@@ -630,7 +635,7 @@ export const SettingsView: React.FC = () => {
                     </div>
                     <input
                       type="checkbox"
-                      checked={Boolean(ps[opt.key])}
+                      checked={opt.key === 'includeKnockoutInStandings' ? ps.includeKnockoutInStandings !== false : Boolean(ps[opt.key])}
                       onChange={(e) => updatePlayoffField(opt.key, e.target.checked)}
                       className="mt-0.5 h-4 w-4 accent-amber-400 rounded shrink-0 cursor-pointer"
                     />
@@ -839,8 +844,8 @@ export const SettingsView: React.FC = () => {
               { name: 'registration_form_versions', desc: 'Form version audits' },
               { name: 'registration_tokens', desc: 'Shareable links' },
               { name: 'matches', desc: 'Round-robin & playoffs' },
-              { name: 'match_scores', desc: 'Live ball/set scores' },
-              { name: 'tournament_standings', desc: 'NRR & points table' },
+              { name: 'match_scores', desc: 'Live rally/set scores' },
+              { name: 'tournament_standings', desc: 'SPL standings & points table' },
               { name: 'admin_users', desc: 'RBAC administrators' },
               { name: 'audit_logs', desc: 'Security audit trail' },
             ].map((tbl) => (
