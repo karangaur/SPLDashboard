@@ -211,6 +211,34 @@ export interface KnockoutMatch {
   version?: number;
 }
 
+export interface CustomKnockoutMatchDraft {
+  id: string;
+  matchCode: string; // e.g. 'E1', 'E2', 'E3', 'SF1', 'SF2', 'FINAL'
+  stage: 'ELIM' | 'QF' | 'SF' | 'F';
+  playoffRound: PlayoffRoundType;
+  roundOrder: number; // 2 = Eliminator, 3 = Semi Final, 4 = Grand Final
+  slot: number;
+  matchLabel: string; // e.g. 'Eliminator 1', 'Semi Final 1', 'Grand Final'
+  participantASource: string; // e.g. 'RANK_1', 'TEAM:<id>', 'WINNER:E1', 'WINNER:SF1'
+  participantBSource: string;
+  nextMatchCode?: string; // e.g. 'SF1', 'SF2', 'FINAL'
+  nextMatchSlot?: 'A' | 'B';
+  court?: number;
+  courtName?: string;
+  scheduledDate?: string;
+  scheduledTime?: string;
+  assignedUmpire?: string;
+}
+
+export interface CustomKnockoutStageConfig {
+  qualifyingTeamsCount: number;
+  eliminatorsCount: number;
+  semiFinalsCount: number;
+  grandFinalCount: number;
+  matches: CustomKnockoutMatchDraft[];
+  updatedAt?: number;
+}
+
 export interface KnockoutBracketSnapshot {
   id: string;
   version?: number;
@@ -222,6 +250,7 @@ export interface KnockoutBracketSnapshot {
   qualificationMode?: QualificationMode;
   published?: boolean;
   qualifiedTeams?: PlayoffQualifiedSeed[];
+  customStageConfig?: CustomKnockoutStageConfig;
   matches: KnockoutMatch[];
 }
 
@@ -230,6 +259,7 @@ export interface KnockoutData {
   qualifyingTeamsCount?: number;
   qualificationMode?: QualificationMode;
   manualSelectedTeamIds?: string[];
+  customStageConfig?: CustomKnockoutStageConfig;
   bracketId?: string;
   published?: boolean;
   publishedAt?: number;

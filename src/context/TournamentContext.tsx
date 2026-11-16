@@ -6,6 +6,7 @@ import {
   Match,
   KnockoutData,
   KnockoutMatch,
+  CustomKnockoutStageConfig,
   PlayoffFormat,
   QualificationMode,
   KnockoutBracketSnapshot,
@@ -43,6 +44,8 @@ import {
   evaluatePlayoffGenerationEligibility,
   generateIPLPlayoffBracket,
   generateFlexibleKnockoutBracket,
+  validateCustomKnockoutStageConfig,
+  materializeCustomKnockoutMatches,
   canStartOrScorePlayoffMatch,
   progressIPLPlayoffs,
   progressKnockoutBracket,
@@ -186,6 +189,7 @@ interface TournamentContextType {
     qualifyingTeamsCount?: number;
     qualificationMode?: QualificationMode;
     manualSelectedTeamIds?: string[];
+    customStageConfig?: CustomKnockoutStageConfig;
   }) => void;
   generateKnockoutBracket: (options?: {
     format?: PlayoffFormat;
@@ -193,6 +197,7 @@ interface TournamentContextType {
     qualificationMode?: QualificationMode;
     manualTeamIds?: string[];
     overrideTop4Ids?: string[];
+    customStageConfig?: CustomKnockoutStageConfig;
     saveAsDraft?: boolean;
   }) => { success: boolean; error?: string };
   updateKnockoutMatch: (
@@ -206,7 +211,8 @@ interface TournamentContextType {
     dependentMatches?: KnockoutMatch[];
   };
   saveKnockoutDraft: (
-    draftMatches?: KnockoutMatch[]
+    draftMatches?: KnockoutMatch[],
+    customStageConfig?: CustomKnockoutStageConfig
   ) => { success: boolean; error?: string; warnings?: string[] };
   rollbackKnockoutVersion: (versionId: string) => { success: boolean; error?: string };
   resetSingleKnockoutMatch: (
@@ -813,6 +819,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                           playoffMeta.qualificationMode ?? prev.knockout.qualificationMode,
                         manualSelectedTeamIds:
                           playoffMeta.manualSelectedTeamIds ?? prev.knockout.manualSelectedTeamIds,
+                        customStageConfig:
+                          playoffMeta.customStageConfig ?? prev.knockout.customStageConfig,
                         bracketId: playoffMeta.bracketId ?? prev.knockout.bracketId,
                         published: playoffMeta.published ?? prev.knockout.published,
                         publishedAt: playoffMeta.publishedAt ?? prev.knockout.publishedAt,
@@ -1658,6 +1666,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                         playoffMeta.qualificationMode ?? prev.knockout.qualificationMode,
                       manualSelectedTeamIds:
                         playoffMeta.manualSelectedTeamIds ?? prev.knockout.manualSelectedTeamIds,
+                      customStageConfig:
+                        playoffMeta.customStageConfig ?? prev.knockout.customStageConfig,
                       bracketId: playoffMeta.bracketId ?? prev.knockout.bracketId,
                       published: playoffMeta.published ?? prev.knockout.published,
                       publishedAt: playoffMeta.publishedAt ?? prev.knockout.publishedAt,
@@ -3862,12 +3872,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     qualifyingTeamsCount?: number;
     qualificationMode?: QualificationMode;
     manualSelectedTeamIds?: string[];
+    customStageConfig?: CustomKnockoutStageConfig;
   }) => {
     const currentState = stateRef.current;
     const nextFormat = params.format ?? currentState.knockout.format;
     const nextCount = resolveFormatQualifyingCount(
       nextFormat,
-      params.qualifyingTeamsCount ?? currentState.knockout.qualifyingTeamsCount
+      params.qualifyingTeamsCount ??
+        params.customStageConfig?.qualifyingTeamsCount ??
+        currentState.knockout.qualifyingTeamsCount
     );
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
@@ -3878,6 +3891,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         params.manualSelectedTeamIds !== undefined
           ? params.manualSelectedTeamIds
           : currentState.knockout.manualSelectedTeamIds,
+      customStageConfig:
+        params.customStageConfig !== undefined
+          ? params.customStageConfig
+          : currentState.knockout.customStageConfig,
       updatedAt: Date.now(),
     };
     setState((prev) => ({
@@ -3898,15 +3915,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     qualificationMode?: QualificationMode;
     manualTeamIds?: string[];
     overrideTop4Ids?: string[];
+    customStageConfig?: CustomKnockoutStageConfig;
     saveAsDraft?: boolean;
   }): { success: boolean; error?: string } => {
     const currentState = stateRef.current;
     const playoffSettings = normalizePlayoffSettings(currentState.settings.playoffSettings);
     const activeFormat: PlayoffFormat =
       options?.format || currentState.knockout.format || playoffSettings.format || 'top4';
+    const effectiveCustomConfig =
+      options?.customStageConfig ??
+      (activeFormat === 'custom' ? currentState.knockout.customStageConfig : undefined);
     const required = resolveFormatQualifyingCount(
       activeFormat,
       options?.qualifyingTeamsCount ??
+        effectiveCustomConfig?.qualifyingTeamsCount ??
         currentState.knockout.qualifyingTeamsCount ??
         playoffSettings.qualifyingTeamsCount
     );
@@ -3987,7 +4009,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const courtsCount = Math.max(1, currentState.settings.courts || 1);
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
-    const bracketId = crypto.randomUUID();
+    const bracketId = currentState.knockout.bracketId || crypto.randomUUID();
     const shouldPublish = options?.saveAsDraft ? false : currentState.knockout.published ?? true;
 
     const qualifiedSeeds: PlayoffQualifiedSeed[] = selectedTeamIds.map((tid, idx) => {
@@ -4013,15 +4035,46 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     });
 
-    const bracketMatches = generateFlexibleKnockoutBracket({
-      format: activeFormat,
-      qualifiedTeamIds: selectedTeamIds,
-      courtsCount,
-      courtNames: currentState.settings.courtNames,
-      tournamentDate: currentState.settings.date,
-      bracketId,
-      showOnPublicHomepage: playoffSettings.showOnPublicHomepage,
-    });
+    let bracketMatches: KnockoutMatch[] = [];
+
+    if (activeFormat === 'custom' && effectiveCustomConfig) {
+      const customVal = validateCustomKnockoutStageConfig({
+        config: effectiveCustomConfig,
+        qualifiedSeeds,
+        teams: currentState.teams,
+        maxEligibleTeams:
+          activeQualificationMode === 'manual'
+            ? currentState.teams.length
+            : leagueStandings.rankedActive.length,
+      });
+      if (!customVal.valid) {
+        return {
+          success: false,
+          error: customVal.errors[0] || 'Custom knockout stage configuration is invalid.',
+        };
+      }
+
+      bracketMatches = materializeCustomKnockoutMatches({
+        config: effectiveCustomConfig,
+        qualifiedTeamIds: selectedTeamIds,
+        qualifiedSeeds,
+        existingMatches: options?.saveAsDraft ? currentState.knockout.matches : [],
+        courtsCount,
+        courtNames: currentState.settings.courtNames,
+        tournamentDate: currentState.settings.date,
+        bracketId,
+      });
+    } else {
+      bracketMatches = generateFlexibleKnockoutBracket({
+        format: activeFormat,
+        qualifiedTeamIds: selectedTeamIds,
+        courtsCount,
+        courtNames: currentState.settings.courtNames,
+        tournamentDate: currentState.settings.date,
+        bracketId,
+        showOnPublicHomepage: playoffSettings.showOnPublicHomepage,
+      });
+    }
 
     const formatTitle = getFormatDisplayTitle(activeFormat, required);
     const auditEntry = createPlayoffAuditEntry(
@@ -4043,6 +4096,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       qualifyingTeamsCount: required,
       qualificationMode: activeQualificationMode,
       qualifiedTeams: qualifiedSeeds,
+      customStageConfig: effectiveCustomConfig,
       matches: bracketMatches.map((m) => ({ ...m })),
     };
 
@@ -4055,6 +4109,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         activeQualificationMode === 'manual'
           ? selectedTeamIds
           : currentState.knockout.manualSelectedTeamIds,
+      customStageConfig: effectiveCustomConfig ?? currentState.knockout.customStageConfig,
       bracketId,
       published: shouldPublish,
       publishedAt: shouldPublish ? nowTs : currentState.knockout.publishedAt,
@@ -4471,9 +4526,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const saveKnockoutDraft = (
-    draftMatches?: KnockoutMatch[]
+    draftMatches?: KnockoutMatch[],
+    customStageConfig?: CustomKnockoutStageConfig
   ): { success: boolean; error?: string; warnings?: string[] } => {
     const currentState = stateRef.current;
+    const effectiveCustomConfig = customStageConfig ?? currentState.knockout.customStageConfig;
     const matchesToValidate = draftMatches || currentState.knockout.matches;
     const validation = validateKnockoutBracketConfig({
       matches: matchesToValidate,
@@ -4509,11 +4566,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       qualifyingTeamsCount: currentState.knockout.qualifyingTeamsCount,
       qualificationMode: currentState.knockout.qualificationMode,
       qualifiedTeams: currentState.knockout.qualifiedTeams,
+      customStageConfig: effectiveCustomConfig,
       matches: progressed.matches.map((m) => ({ ...m })),
     };
 
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
+      customStageConfig: effectiveCustomConfig,
       published: false,
       showOnPublicHomepage: false,
       status: progressed.isCompleted ? 'completed' : 'draft',
@@ -4561,6 +4620,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       qualifyingTeamsCount: snapshot.qualifyingTeamsCount,
       qualificationMode: snapshot.qualificationMode,
       qualifiedTeams: snapshot.qualifiedTeams,
+      customStageConfig: snapshot.customStageConfig ?? currentState.knockout.customStageConfig,
       matches: progressed.matches,
       championTeamId: progressed.championTeamId,
       runnerUpTeamId: progressed.runnerUpTeamId,

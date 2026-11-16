@@ -1,4 +1,6 @@
 import {
+  CustomKnockoutMatchDraft,
+  CustomKnockoutStageConfig,
   KnockoutData,
   KnockoutMatch,
   Match,
@@ -2364,11 +2366,879 @@ export function validateKnockoutBracketConfig(
     }
   }
 
+  // Ensure every non-final match advances its winner to a valid downstream match
+  for (const m of canonical) {
+    if (m.stage === 'F' || m.playoffRound === 'F' || m.matchCode === 'FINAL') continue;
+    const code = (m.matchCode || '').toUpperCase();
+    const label = getPlayoffMatchDisplayLabel(m).title;
+    const consumers = canonical.filter((cand) => {
+      if (cand.id === m.id) return false;
+      const sources = [cand.participantASource || '', cand.participantBSource || ''].map((s) =>
+        s.trim().toUpperCase()
+      );
+      if (code && sources.includes(`WINNER:${code}`)) return true;
+      if (m.id && sources.includes(`WINNER:${m.id.toUpperCase()}`)) return true;
+      if (code === 'Q1' && sources.includes('Q1_WINNER')) return true;
+      if (code === 'ELIM' && sources.includes('ELIM_WINNER')) return true;
+      if (code === 'Q2' && sources.includes('Q2_WINNER')) return true;
+      return false;
+    });
+    if (consumers.length === 0) {
+      errors.push(
+        `Unassigned winner destination: Winner of ${label} does not advance to any Semi Final or Grand Final slot.`
+      );
+    }
+  }
+
   return {
     valid: errors.length === 0,
     errors,
     warnings,
   };
+}
+
+export interface CustomRecommendedStructure {
+  qualifyingTeamsCount: number;
+  eliminatorsCount: number;
+  semiFinalsCount: number;
+  grandFinalCount: number;
+  directSemiFinalByes: number;
+  directFinalByes: number;
+  totalMatches: number;
+  summary: string;
+}
+
+export function getRecommendedCustomCounts(qualifyingTeamsCount: number): CustomRecommendedStructure {
+  const n = Math.max(2, Math.floor(Number(qualifyingTeamsCount) || 4));
+  if (n === 2) {
+    return {
+      qualifyingTeamsCount: 2,
+      eliminatorsCount: 0,
+      semiFinalsCount: 0,
+      grandFinalCount: 1,
+      directSemiFinalByes: 0,
+      directFinalByes: 2,
+      totalMatches: 1,
+      summary: '2 Teams: 0 Eliminators · 0 Semi Finals · 1 Grand Final (Rank #1 vs Rank #2)',
+    };
+  }
+  if (n === 3) {
+    return {
+      qualifyingTeamsCount: 3,
+      eliminatorsCount: 1,
+      semiFinalsCount: 0,
+      grandFinalCount: 1,
+      directSemiFinalByes: 0,
+      directFinalByes: 1,
+      totalMatches: 2,
+      summary: '3 Teams: 1 Eliminator (Rank #2 vs #3) · 0 Semi Finals · 1 Grand Final (Rank #1 Bye vs Winner E1)',
+    };
+  }
+  const eliminatorsCount = Math.max(0, n - 4);
+  const semiFinalsCount = 2;
+  const directSemiFinalByes = Math.max(0, 4 - eliminatorsCount);
+  return {
+    qualifyingTeamsCount: n,
+    eliminatorsCount,
+    semiFinalsCount,
+    grandFinalCount: 1,
+    directSemiFinalByes,
+    directFinalByes: 0,
+    totalMatches: eliminatorsCount + semiFinalsCount + 1,
+    summary:
+      directSemiFinalByes > 0
+        ? `${n} Teams: ${eliminatorsCount} Eliminator${eliminatorsCount === 1 ? '' : 's'} · 2 Semi Finals (${directSemiFinalByes} Direct Semi-Final Bye${directSemiFinalByes === 1 ? '' : 's'}) · 1 Grand Final`
+        : `${n} Teams: ${eliminatorsCount} Eliminators · 2 Semi Finals · 1 Grand Final (${n - 1} total matches)`,
+  };
+}
+
+/**
+ * Generates or resizes a CustomKnockoutStageConfig for (qualifyingTeamsCount, eliminatorsCount, semiFinalsCount).
+ * - Does NOT silently add or remove matches beyond the administrator's requested counts.
+ * - Pre-fills sensible seedings when useSmartDefaults is true or when creating new cards.
+ */
+export function buildCustomKnockoutStageConfig(params: {
+  qualifyingTeamsCount: number;
+  eliminatorsCount: number;
+  semiFinalsCount: number;
+  existingConfig?: CustomKnockoutStageConfig | null;
+  courtsCount?: number;
+  courtNames?: string[];
+  tournamentDate?: string;
+  useSmartDefaults?: boolean;
+}): CustomKnockoutStageConfig {
+  const n = Math.max(2, Math.floor(Number(params.qualifyingTeamsCount) || 6));
+  const eCount = Math.max(0, Math.floor(Number(params.eliminatorsCount) ?? Math.max(0, n - 4)));
+  const sCount = Math.max(0, Math.floor(Number(params.semiFinalsCount) ?? (n >= 4 ? 2 : 0)));
+  const safeCourts = Math.max(1, Number(params.courtsCount) || 2);
+  const getCourt = (idx: number) => (idx % safeCourts) + 1;
+  const getCourtName = (c: number) => params.courtNames?.[c - 1]?.trim() || `Court ${c}`;
+  const prevByCode = new Map<string, CustomKnockoutMatchDraft>();
+  if (!params.useSmartDefaults && params.existingConfig?.matches) {
+    for (const m of params.existingConfig.matches) {
+      prevByCode.set(m.matchCode.toUpperCase(), m);
+    }
+  }
+
+  // Canonical smart default templates for standard single-elimination structures
+  const defaultMap = new Map<
+    string,
+    { a: string; b: string; nextCode?: string; nextSlot?: 'A' | 'B' }
+  >();
+
+  if (n === 2 && eCount === 0 && sCount === 0) {
+    defaultMap.set('FINAL', { a: 'RANK_1', b: 'RANK_2' });
+  } else if (n === 3 && eCount === 1 && sCount === 0) {
+    defaultMap.set('E1', { a: 'RANK_2', b: 'RANK_3', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'RANK_1', b: 'WINNER:E1' });
+  } else if (n === 3 && eCount === 0 && sCount === 1) {
+    defaultMap.set('SF1', { a: 'RANK_2', b: 'RANK_3', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'RANK_1', b: 'WINNER:SF1' });
+  } else if (n === 4 && eCount === 0 && sCount === 2) {
+    defaultMap.set('SF1', { a: 'RANK_1', b: 'RANK_4', nextCode: 'FINAL', nextSlot: 'A' });
+    defaultMap.set('SF2', { a: 'RANK_2', b: 'RANK_3', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'WINNER:SF1', b: 'WINNER:SF2' });
+  } else if (n === 4 && eCount === 1 && sCount === 1) {
+    defaultMap.set('E1', { a: 'RANK_3', b: 'RANK_4', nextCode: 'SF1', nextSlot: 'B' });
+    defaultMap.set('SF1', { a: 'RANK_2', b: 'WINNER:E1', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'RANK_1', b: 'WINNER:SF1' });
+  } else if (n === 5 && eCount === 1 && sCount === 2) {
+    defaultMap.set('E1', { a: 'RANK_4', b: 'RANK_5', nextCode: 'SF1', nextSlot: 'B' });
+    defaultMap.set('SF1', { a: 'RANK_1', b: 'WINNER:E1', nextCode: 'FINAL', nextSlot: 'A' });
+    defaultMap.set('SF2', { a: 'RANK_2', b: 'RANK_3', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'WINNER:SF1', b: 'WINNER:SF2' });
+  } else if (n === 6 && eCount === 2 && sCount === 2) {
+    defaultMap.set('E1', { a: 'RANK_3', b: 'RANK_6', nextCode: 'SF2', nextSlot: 'B' });
+    defaultMap.set('E2', { a: 'RANK_4', b: 'RANK_5', nextCode: 'SF1', nextSlot: 'B' });
+    defaultMap.set('SF1', { a: 'RANK_1', b: 'WINNER:E2', nextCode: 'FINAL', nextSlot: 'A' });
+    defaultMap.set('SF2', { a: 'RANK_2', b: 'WINNER:E1', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'WINNER:SF1', b: 'WINNER:SF2' });
+  } else if (n === 7 && eCount === 3 && sCount === 2) {
+    defaultMap.set('E1', { a: 'RANK_4', b: 'RANK_5', nextCode: 'SF1', nextSlot: 'B' });
+    defaultMap.set('E2', { a: 'RANK_2', b: 'RANK_7', nextCode: 'SF2', nextSlot: 'A' });
+    defaultMap.set('E3', { a: 'RANK_3', b: 'RANK_6', nextCode: 'SF2', nextSlot: 'B' });
+    defaultMap.set('SF1', { a: 'RANK_1', b: 'WINNER:E1', nextCode: 'FINAL', nextSlot: 'A' });
+    defaultMap.set('SF2', { a: 'WINNER:E2', b: 'WINNER:E3', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'WINNER:SF1', b: 'WINNER:SF2' });
+  } else if (n === 8 && eCount === 4 && sCount === 2) {
+    defaultMap.set('E1', { a: 'RANK_1', b: 'RANK_8', nextCode: 'SF1', nextSlot: 'A' });
+    defaultMap.set('E2', { a: 'RANK_4', b: 'RANK_5', nextCode: 'SF1', nextSlot: 'B' });
+    defaultMap.set('E3', { a: 'RANK_2', b: 'RANK_7', nextCode: 'SF2', nextSlot: 'A' });
+    defaultMap.set('E4', { a: 'RANK_3', b: 'RANK_6', nextCode: 'SF2', nextSlot: 'B' });
+    defaultMap.set('SF1', { a: 'WINNER:E1', b: 'WINNER:E2', nextCode: 'FINAL', nextSlot: 'A' });
+    defaultMap.set('SF2', { a: 'WINNER:E3', b: 'WINNER:E4', nextCode: 'FINAL', nextSlot: 'B' });
+    defaultMap.set('FINAL', { a: 'WINNER:SF1', b: 'WINNER:SF2' });
+  } else {
+    // Generic fallback defaults for arbitrary (N, E, S)
+    const directSeedsToSemis = Math.max(0, 2 * sCount - eCount);
+    let nextRank = directSeedsToSemis + 1;
+    for (let i = 1; i <= eCount; i++) {
+      const code = `E${i}`;
+      const rA = nextRank <= n ? `RANK_${nextRank++}` : '';
+      const rB = nextRank <= n ? `RANK_${nextRank++}` : '';
+      let nextCode: string | undefined;
+      let nextSlot: 'A' | 'B' | undefined;
+      if (sCount > 0) {
+        const sfIdx = ((i - 1) % sCount) + 1;
+        nextCode = `SF${sfIdx}`;
+        nextSlot = i <= sCount ? 'B' : 'A';
+      } else {
+        nextCode = 'FINAL';
+        nextSlot = i === 1 ? 'B' : 'A';
+      }
+      defaultMap.set(code, { a: rA, b: rB, nextCode, nextSlot });
+    }
+    let byeRank = 1;
+    for (let j = 1; j <= sCount; j++) {
+      const sfCode = `SF${j}`;
+      const feeders: string[] = [];
+      for (let i = 1; i <= eCount; i++) {
+        const d = defaultMap.get(`E${i}`);
+        if (d?.nextCode === sfCode) feeders.push(`WINNER:E${i}`);
+      }
+      const a = feeders.length >= 2 ? feeders[0] : byeRank <= directSeedsToSemis ? `RANK_${byeRank++}` : feeders[0] || '';
+      const b = feeders.length >= 2 ? feeders[1] : feeders[0] && a !== feeders[0] ? feeders[0] : byeRank <= n ? `RANK_${byeRank++}` : '';
+      defaultMap.set(sfCode, {
+        a,
+        b,
+        nextCode: 'FINAL',
+        nextSlot: j === 1 ? 'A' : 'B',
+      });
+    }
+    defaultMap.set('FINAL', {
+      a: sCount >= 1 ? 'WINNER:SF1' : eCount >= 1 ? 'RANK_1' : 'RANK_1',
+      b: sCount >= 2 ? 'WINNER:SF2' : sCount === 1 ? 'RANK_1' : eCount >= 1 ? 'WINNER:E1' : 'RANK_2',
+    });
+  }
+
+  const matches: CustomKnockoutMatchDraft[] = [];
+  let courtCounter = 0;
+
+  // 1. Eliminator Matches (E1 .. EeCount)
+  for (let i = 1; i <= eCount; i++) {
+    const code = `E${i}`;
+    const prev = prevByCode.get(code);
+    const def = defaultMap.get(code);
+    const court = prev?.court || getCourt(courtCounter++);
+    matches.push({
+      id: prev?.id || crypto.randomUUID(),
+      matchCode: code,
+      stage: 'ELIM',
+      playoffRound: 'ELIM',
+      roundOrder: 2,
+      slot: i,
+      matchLabel: `Eliminator ${i}`,
+      participantASource: prev ? prev.participantASource : def?.a || '',
+      participantBSource: prev ? prev.participantBSource : def?.b || '',
+      nextMatchCode: prev ? prev.nextMatchCode : def?.nextCode,
+      nextMatchSlot: prev ? prev.nextMatchSlot : def?.nextSlot,
+      court,
+      courtName: prev?.courtName || getCourtName(court),
+      scheduledDate: prev?.scheduledDate || params.tournamentDate || undefined,
+      scheduledTime: prev?.scheduledTime,
+      assignedUmpire: prev?.assignedUmpire,
+    });
+  }
+
+  // 2. Semi Final Matches (SF1 .. SFsCount)
+  for (let j = 1; j <= sCount; j++) {
+    const code = `SF${j}`;
+    const prev = prevByCode.get(code);
+    const def = defaultMap.get(code);
+    const court = prev?.court || getCourt(courtCounter++);
+    matches.push({
+      id: prev?.id || crypto.randomUUID(),
+      matchCode: code,
+      stage: 'SF',
+      playoffRound: 'SF',
+      roundOrder: 3,
+      slot: j,
+      matchLabel: `Semi Final ${j}`,
+      participantASource: prev ? prev.participantASource : def?.a || '',
+      participantBSource: prev ? prev.participantBSource : def?.b || '',
+      nextMatchCode: prev ? prev.nextMatchCode : def?.nextCode || 'FINAL',
+      nextMatchSlot: prev ? prev.nextMatchSlot : def?.nextSlot || (j === 1 ? 'A' : 'B'),
+      court,
+      courtName: prev?.courtName || getCourtName(court),
+      scheduledDate: prev?.scheduledDate || params.tournamentDate || undefined,
+      scheduledTime: prev?.scheduledTime,
+      assignedUmpire: prev?.assignedUmpire,
+    });
+  }
+
+  // 3. Grand Final Match (FINAL)
+  const prevFinal = prevByCode.get('FINAL');
+  const defFinal = defaultMap.get('FINAL');
+  const finalCourt = prevFinal?.court || getCourt(0);
+  matches.push({
+    id: prevFinal?.id || crypto.randomUUID(),
+    matchCode: 'FINAL',
+    stage: 'F',
+    playoffRound: 'F',
+    roundOrder: 4,
+    slot: 1,
+    matchLabel: 'Grand Final',
+    participantASource: prevFinal ? prevFinal.participantASource : defFinal?.a || (sCount >= 1 ? 'WINNER:SF1' : 'RANK_1'),
+    participantBSource: prevFinal ? prevFinal.participantBSource : defFinal?.b || (sCount >= 2 ? 'WINNER:SF2' : 'RANK_2'),
+    court: finalCourt,
+    courtName: prevFinal?.courtName || getCourtName(finalCourt),
+    scheduledDate: prevFinal?.scheduledDate || params.tournamentDate || undefined,
+    scheduledTime: prevFinal?.scheduledTime,
+    assignedUmpire: prevFinal?.assignedUmpire,
+  });
+
+  return {
+    qualifyingTeamsCount: n,
+    eliminatorsCount: eCount,
+    semiFinalsCount: sCount,
+    grandFinalCount: 1,
+    matches,
+    updatedAt: Date.now(),
+  };
+}
+
+/**
+ * Updates an upstream match's winner destination (`nextMatchCode` & `nextMatchSlot`)
+ * AND automatically synchronizes the downstream match's `participantASource` / `participantBSource`
+ * so the two representations never drift apart.
+ */
+export function setCustomMatchWinnerDestination(
+  config: CustomKnockoutStageConfig,
+  upstreamMatchCode: string,
+  destinationToken: string // e.g. 'SF1:A', 'SF1:B', 'SF2:B', 'FINAL:A', or ''
+): CustomKnockoutStageConfig {
+  const code = upstreamMatchCode.trim().toUpperCase();
+  const winnerToken = `WINNER:${code}`;
+  let targetCode: string | undefined;
+  let targetSlot: 'A' | 'B' | undefined;
+
+  if (destinationToken && destinationToken.includes(':')) {
+    const [tc, ts] = destinationToken.split(':');
+    targetCode = tc.trim().toUpperCase();
+    targetSlot = ts.trim().toUpperCase() === 'B' ? 'B' : 'A';
+  }
+
+  const nextMatches = config.matches.map((m) => {
+    const mCode = m.matchCode.toUpperCase();
+    if (mCode === code) {
+      return {
+        ...m,
+        nextMatchCode: targetCode,
+        nextMatchSlot: targetSlot,
+      };
+    }
+
+    let nextA = m.participantASource;
+    let nextB = m.participantBSource;
+
+    // Clear previous references to `WINNER:${code}` if it was pointing elsewhere
+    if (nextA.trim().toUpperCase() === winnerToken && (mCode !== targetCode || targetSlot !== 'A')) {
+      nextA = '';
+    }
+    if (nextB.trim().toUpperCase() === winnerToken && (mCode !== targetCode || targetSlot !== 'B')) {
+      nextB = '';
+    }
+
+    // Set the new reference on the target match slot
+    if (mCode === targetCode) {
+      if (targetSlot === 'A') nextA = winnerToken;
+      else if (targetSlot === 'B') nextB = winnerToken;
+    }
+
+    return {
+      ...m,
+      participantASource: nextA,
+      participantBSource: nextB,
+    };
+  });
+
+  return {
+    ...config,
+    matches: nextMatches,
+    updatedAt: Date.now(),
+  };
+}
+
+/**
+ * Updates a match's participant source (`A` or `B`) in `CustomKnockoutStageConfig`
+ * and synchronizes upstream `nextMatchCode` / `nextMatchSlot` if `WINNER:` is selected or replaced.
+ */
+export function setCustomMatchParticipantSource(
+  config: CustomKnockoutStageConfig,
+  matchCode: string,
+  slot: 'A' | 'B',
+  newSource: string
+): CustomKnockoutStageConfig {
+  const targetCode = matchCode.trim().toUpperCase();
+  const targetMatch = config.matches.find((m) => m.matchCode.toUpperCase() === targetCode);
+  const oldSource = targetMatch
+    ? (slot === 'A' ? targetMatch.participantASource : targetMatch.participantBSource).trim().toUpperCase()
+    : '';
+  const cleanNew = newSource.trim();
+  const cleanNewUpper = cleanNew.toUpperCase();
+
+  const nextMatches = config.matches.map((m) => {
+    const mCode = m.matchCode.toUpperCase();
+    let updated = { ...m };
+
+    // If this match is the target match being edited
+    if (mCode === targetCode) {
+      if (slot === 'A') updated.participantASource = cleanNew;
+      else updated.participantBSource = cleanNew;
+    } else if (cleanNewUpper.startsWith('WINNER:')) {
+      // Ensure the same WINNER: token isn't duplicated in another downstream match slot
+      if (updated.participantASource.trim().toUpperCase() === cleanNewUpper) {
+        updated.participantASource = '';
+      }
+      if (updated.participantBSource.trim().toUpperCase() === cleanNewUpper) {
+        updated.participantBSource = '';
+      }
+    }
+
+    // Synchronize upstream match's nextMatchCode / nextMatchSlot
+    if (oldSource.startsWith('WINNER:') && oldSource !== cleanNewUpper) {
+      const oldUpCode = oldSource.slice('WINNER:'.length).trim();
+      if (mCode === oldUpCode && updated.nextMatchCode?.toUpperCase() === targetCode && updated.nextMatchSlot === slot) {
+        updated.nextMatchCode = undefined;
+        updated.nextMatchSlot = undefined;
+      }
+    }
+    if (cleanNewUpper.startsWith('WINNER:')) {
+      const newUpCode = cleanNewUpper.slice('WINNER:'.length).trim();
+      if (mCode === newUpCode) {
+        updated.nextMatchCode = targetCode;
+        updated.nextMatchSlot = slot;
+      }
+    }
+
+    return updated;
+  });
+
+  return {
+    ...config,
+    matches: nextMatches,
+    updatedAt: Date.now(),
+  };
+}
+
+export interface CustomKnockoutValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  matchErrors: Record<string, string[]>;
+  recommended: CustomRecommendedStructure;
+  directQualifiers: { source: string; label: string; destinationLabel: string }[];
+  unassignedSeeds: { rank: number; label: string }[];
+}
+
+/**
+ * PHASE 5 – SMART BRACKET VALIDATION ENGINE (14-Point Structural & Mathematical Validator)
+ */
+export function validateCustomKnockoutStageConfig(params: {
+  config: CustomKnockoutStageConfig;
+  qualifiedSeeds?: PlayoffQualifiedSeed[];
+  teams?: Team[];
+  maxEligibleTeams?: number;
+}): CustomKnockoutValidationResult {
+  const { config, qualifiedSeeds = [], teams = [], maxEligibleTeams } = params;
+  const n = Math.max(2, Number(config.qualifyingTeamsCount) || 2);
+  const eCount = Math.max(0, Number(config.eliminatorsCount) || 0);
+  const sCount = Math.max(0, Number(config.semiFinalsCount) || 0);
+  const totalMatches = config.matches.length;
+  const recommended = getRecommendedCustomCounts(n);
+
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const matchErrors: Record<string, string[]> = {};
+  const addMatchError = (code: string, msg: string) => {
+    if (!matchErrors[code]) matchErrors[code] = [];
+    if (!matchErrors[code].includes(msg)) matchErrors[code].push(msg);
+    if (!errors.includes(msg)) errors.push(msg);
+  };
+
+  // 1. Validate qualified team count
+  if (n < 2) {
+    errors.push('At least 2 qualified teams are required to build a knockout stage.');
+  }
+  if (maxEligibleTeams !== undefined && maxEligibleTeams > 0 && n > maxEligibleTeams) {
+    errors.push(
+      `Qualified team count (${n}) exceeds the number of eligible active teams (${maxEligibleTeams}).`
+    );
+  }
+
+  // 2. Validate Semi Final count terminology & single-elimination mathematics
+  if (sCount > 2) {
+    errors.push(
+      `Invalid Semi Final count (${sCount}): A single-elimination bracket has at most 2 Semi Final matches producing the 2 Grand Finalists. Do not label Quarter-Finals or Preliminary matches as Semi Finals—configure ${recommended.eliminatorsCount} Eliminator(s) and 2 Semi Finals instead.`
+    );
+  } else if (n >= 4 && sCount === 1) {
+    warnings.push(
+      `Single Semi Final configured for ${n} teams: Conventional brackets use 2 Semi Finals, or require 1 Direct Grand Final Bye.`
+    );
+  } else if (n >= 4 && sCount === 0) {
+    errors.push(
+      `Invalid configuration: ${n} qualified teams with 0 Semi Finals cannot feed a single Grand Final without Semi Final rounds. Recommended: ${recommended.eliminatorsCount} Eliminator(s) and ${recommended.semiFinalsCount} Semi Finals.`
+    );
+  }
+
+  // Check if Eliminator winners + direct qualifiers exceed Semi Final capacity
+  const remainingAfterElims = n - eCount; // Each Eliminator eliminates 1 team
+  const directByesCount = n - 2 * eCount;
+  if (sCount === 2 && eCount + Math.max(0, directByesCount) !== 4) {
+    if (eCount === 3 && n === 6) {
+      errors.push(
+        'Invalid configuration: 3 Eliminator matches with 6 qualified teams leaves only 3 Eliminator winners for 2 Semi Finals (4 slots required) with 0 byes. For 6 teams with no additional teams, use 2 Eliminators + 2 Semi Finals (Top 2 seeds receive Direct Semi-Final Byes).'
+      );
+    } else if (eCount >= 3 && directByesCount >= 3) {
+      errors.push(
+        'Invalid configuration: Three Eliminator winners and three direct qualifiers cannot all fit into two Semi Finals. Please adjust the progression.'
+      );
+    }
+  }
+
+  // Every match in single elimination eliminates 1 team -> N - 1 matches required
+  const expectedTotalMatches = n - 1;
+  if (totalMatches !== expectedTotalMatches) {
+    errors.push(
+      `Invalid match count: ${eCount} Eliminator(s) + ${sCount} Semi Final(s) + 1 Grand Final = ${totalMatches} matches, but ${n} qualified teams in single elimination require exactly ${expectedTotalMatches} matches (N − 1 = ${expectedTotalMatches}). Recommended: ${recommended.summary}.`
+    );
+  }
+
+  const byCode = new Map<string, CustomKnockoutMatchDraft>();
+  for (const m of config.matches) {
+    byCode.set(m.matchCode.toUpperCase(), m);
+  }
+
+  const finalMatches = config.matches.filter((m) => m.stage === 'F' || m.matchCode.toUpperCase() === 'FINAL');
+  if (finalMatches.length !== 1) {
+    errors.push('Grand Final requires exactly one Championship Final match.');
+  }
+
+  // Track direct appearances of each seed/team and winner consumers
+  const directSlotAppearances = new Map<string, string[]>(); // key: canonical teamId or RANK_k -> match labels
+  const winnerConsumers = new Map<string, string[]>(); // key: upstream matchCode -> downstream match labels
+  const directQualifiers: { source: string; label: string; destinationLabel: string }[] = [];
+
+  const resolveCanonicalTeamKey = (src: string): { key: string; display: string; rank?: number } | null => {
+    const clean = src.trim();
+    const upper = clean.toUpperCase();
+    if (upper.startsWith('RANK_')) {
+      const r = parseInt(upper.replace('RANK_', ''), 10);
+      const seedObj = qualifiedSeeds.find((s) => s.rank === r);
+      const teamName = seedObj?.teamName || teams.find((t) => t.id === seedObj?.teamId)?.name;
+      return {
+        key: seedObj?.teamId ? `TEAM:${seedObj.teamId}` : `RANK_${r}`,
+        display: teamName ? `Rank #${r} (${teamName})` : `Rank #${r}`,
+        rank: r,
+      };
+    }
+    if (upper.startsWith('TEAM:')) {
+      const tid = clean.slice(5);
+      const seedObj = qualifiedSeeds.find((s) => s.teamId === tid);
+      const teamName = teams.find((t) => t.id === tid)?.name || seedObj?.teamName || tid;
+      return {
+        key: `TEAM:${tid}`,
+        display: seedObj ? `Rank #${seedObj.rank} (${teamName})` : teamName,
+        rank: seedObj?.rank,
+      };
+    }
+    return null;
+  };
+
+  const assignedRanks = new Set<number>();
+
+  for (const m of config.matches) {
+    const code = m.matchCode.toUpperCase();
+    const srcA = (m.participantASource || '').trim();
+    const srcB = (m.participantBSource || '').trim();
+
+    // 4. Each match must have two valid participant sources
+    if (!srcA || !srcB) {
+      if (code === 'FINAL') {
+        addMatchError(code, 'Grand Final requires exactly two valid participant sources.');
+      } else {
+        addMatchError(
+          code,
+          `${m.matchLabel} (${code}) requires two valid participant sources (currently ${!srcA && !srcB ? 'both slots unassigned' : !srcA ? 'Slot A unassigned' : 'Slot B unassigned'}).`
+        );
+      }
+    } else if (srcA.toUpperCase() === srcB.toUpperCase()) {
+      addMatchError(code, `${m.matchLabel}: Participant A and Participant B cannot be the same source.`);
+    }
+
+    for (const [slotSide, rawSrc] of [
+      ['Slot A', srcA],
+      ['Slot B', srcB],
+    ] as const) {
+      if (!rawSrc) continue;
+      const upper = rawSrc.toUpperCase();
+
+      // 8. No eliminated team advances in custom single-elimination
+      if (upper.startsWith('LOSER:') || upper.endsWith('_LOSER')) {
+        addMatchError(
+          code,
+          `${m.matchLabel} (${slotSide}): Eliminated teams (${rawSrc}) cannot advance in a single-elimination bracket.`
+        );
+        continue;
+      }
+
+      if (upper.startsWith('WINNER:')) {
+        const upCode = upper.slice('WINNER:'.length).trim();
+        // 6. No match references itself
+        if (upCode === code) {
+          addMatchError(code, `${m.matchLabel} cannot reference its own winner.`);
+          continue;
+        }
+        const upMatch = byCode.get(upCode);
+        if (!upMatch) {
+          addMatchError(code, `${m.matchLabel} (${slotSide}) references non-existent match "${upCode}".`);
+          continue;
+        }
+        // 13. All scheduled matches depend only on earlier rounds
+        if (upMatch.roundOrder >= m.roundOrder && !(upMatch.stage === 'ELIM' && m.stage === 'ELIM' && upMatch.slot < m.slot)) {
+          addMatchError(
+            code,
+            `${m.matchLabel} cannot depend on ${upMatch.matchLabel} (${upCode}) from the same or later stage.`
+          );
+        }
+        const list = winnerConsumers.get(upCode) || [];
+        list.push(`${m.matchLabel} (${slotSide})`);
+        winnerConsumers.set(upCode, list);
+      } else {
+        const resolved = resolveCanonicalTeamKey(rawSrc);
+        if (resolved) {
+          if (resolved.rank !== undefined) {
+            if (resolved.rank < 1 || resolved.rank > n) {
+              addMatchError(
+                code,
+                `${m.matchLabel} (${slotSide}): ${resolved.display} is outside the Top ${n} qualified team pool.`
+              );
+            } else {
+              assignedRanks.add(resolved.rank);
+            }
+          }
+          const list = directSlotAppearances.get(resolved.key) || [];
+          list.push(`${m.matchLabel} (${slotSide})`);
+          directSlotAppearances.set(resolved.key, list);
+
+          if (m.stage === 'SF' || m.stage === 'F') {
+            directQualifiers.push({
+              source: rawSrc,
+              label: resolved.display,
+              destinationLabel: `${m.matchLabel} (${slotSide})`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  // 3. No team enters multiple independent opening bracket paths
+  for (const [key, appearances] of directSlotAppearances.entries()) {
+    if (appearances.length > 1) {
+      const sampleLabel =
+        key.startsWith('TEAM:')
+          ? teams.find((t) => t.id === key.slice(5))?.name || key.slice(5)
+          : key.replace('RANK_', 'Rank #');
+      errors.push(
+        `The selected team is already assigned to another opening match: ${sampleLabel} is placed in ${appearances.join(' and ')}.`
+      );
+    }
+  }
+
+  // Check if any qualified seed (Rank #1 .. #N) is omitted
+  const unassignedSeeds: { rank: number; label: string }[] = [];
+  for (let r = 1; r <= n; r++) {
+    const seedObj = qualifiedSeeds.find((s) => s.rank === r);
+    const seedTeamKey = seedObj?.teamId ? `TEAM:${seedObj.teamId}` : `RANK_${r}`;
+    const isAssigned =
+      assignedRanks.has(r) ||
+      directSlotAppearances.has(seedTeamKey) ||
+      directSlotAppearances.has(`RANK_${r}`);
+    if (!isAssigned) {
+      const label = seedObj?.teamName ? `Rank #${r} (${seedObj.teamName})` : `Rank #${r}`;
+      unassignedSeeds.push({ rank: r, label });
+    }
+  }
+  if (unassignedSeeds.length > 0) {
+    errors.push(
+      `Unassigned qualified team(s): ${unassignedSeeds.map((u) => u.label).join(', ')} must be assigned to an Eliminator or Direct Bye slot.`
+    );
+  }
+
+  // Check if three Eliminator winners + three direct qualifiers are trying to fit into two Semi Finals
+  if (sCount === 2 && eCount >= 3 && directQualifiers.filter((d) => d.destinationLabel.startsWith('Semi Final')).length >= 3) {
+    const msg =
+      'Invalid configuration: Three Eliminator winners and three direct qualifiers cannot all fit into two Semi Finals. Please adjust the progression.';
+    if (!errors.includes(msg)) errors.unshift(msg);
+  }
+
+  // 5 & 11. Every Eliminator and Semi Final winner advances to a valid downstream match (no unassigned winner, no duplicate winner consumption)
+  for (const m of config.matches) {
+    const code = m.matchCode.toUpperCase();
+    if (code === 'FINAL' || m.stage === 'F') continue;
+    const consumers = winnerConsumers.get(code) || [];
+    if (consumers.length === 0) {
+      addMatchError(
+        code,
+        `Unassigned winner destination: Winner of ${m.matchLabel} (${code}) is not assigned to any Semi Final or Grand Final slot.`
+      );
+    } else if (consumers.length > 1) {
+      addMatchError(
+        code,
+        `Duplicate winner progression: Winner of ${m.matchLabel} (${code}) cannot advance to multiple slots (${consumers.join(', ')}).`
+      );
+    }
+  }
+
+  // 7 & 9. Cycle detection and verification that every match path reaches GRAND FINAL
+  const findDownstreamCodes = (startCode: string): string[] => {
+    const out: string[] = [];
+    for (const m of config.matches) {
+      const c = m.matchCode.toUpperCase();
+      const sA = (m.participantASource || '').trim().toUpperCase();
+      const sB = (m.participantBSource || '').trim().toUpperCase();
+      if (sA === `WINNER:${startCode}` || sB === `WINNER:${startCode}`) {
+        out.push(c);
+      }
+    }
+    return out;
+  };
+
+  for (const m of config.matches) {
+    const startCode = m.matchCode.toUpperCase();
+    if (startCode === 'FINAL') continue;
+    const visited = new Set<string>();
+    const queue = [startCode];
+    let reachesFinal = false;
+    let hasCycle = false;
+
+    while (queue.length > 0) {
+      const curr = queue.shift()!;
+      if (curr === 'FINAL') {
+        reachesFinal = true;
+        break;
+      }
+      if (visited.has(curr)) {
+        hasCycle = true;
+        break;
+      }
+      visited.add(curr);
+      const nexts = findDownstreamCodes(curr);
+      for (const nx of nexts) {
+        if (nx === startCode) {
+          hasCycle = true;
+          break;
+        }
+        queue.push(nx);
+      }
+    }
+
+    if (hasCycle) {
+      addMatchError(startCode, `Circular progression detected involving ${m.matchLabel} (${startCode}).`);
+    } else if (!reachesFinal && (winnerConsumers.get(startCode)?.length || 0) > 0) {
+      addMatchError(
+        startCode,
+        `Progression path from ${m.matchLabel} (${startCode}) does not reach the Grand Final.`
+      );
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+    warnings,
+    matchErrors,
+    recommended,
+    directQualifiers,
+    unassignedSeeds,
+  };
+}
+
+/**
+ * Converts a validated CustomKnockoutStageConfig into live KnockoutMatch[] fixtures,
+ * preserving any already-completed or live match records when updating drafts.
+ */
+export function materializeCustomKnockoutMatches(params: {
+  config: CustomKnockoutStageConfig;
+  qualifiedTeamIds: string[];
+  qualifiedSeeds?: PlayoffQualifiedSeed[];
+  existingMatches?: KnockoutMatch[];
+  courtsCount?: number;
+  courtNames?: string[];
+  tournamentDate?: string;
+  bracketId?: string;
+}): KnockoutMatch[] {
+  const {
+    config,
+    qualifiedTeamIds,
+    qualifiedSeeds = [],
+    existingMatches = [],
+    courtsCount = 2,
+    courtNames,
+    tournamentDate,
+    bracketId = crypto.randomUUID(),
+  } = params;
+
+  const safeCourts = Math.max(1, Number(courtsCount) || 2);
+  const getCourt = (idx: number) => (idx % safeCourts) + 1;
+  const getCourtName = (c: number) => courtNames?.[c - 1]?.trim() || `Court ${c}`;
+  const existingByCode = new Map<string, KnockoutMatch>();
+  for (const em of existingMatches) {
+    if (em.matchCode) existingByCode.set(em.matchCode.toUpperCase(), em);
+  }
+
+  const resolveDirectTeam = (src?: string): { teamId?: string; seed?: number } => {
+    if (!src) return {};
+    const clean = src.trim();
+    const upper = clean.toUpperCase();
+    if (upper.startsWith('RANK_')) {
+      const rank = parseInt(upper.replace('RANK_', ''), 10);
+      const seedEntry = qualifiedSeeds.find((q) => q.rank === rank);
+      const teamId = seedEntry?.teamId || qualifiedTeamIds[rank - 1];
+      return { teamId, seed: rank };
+    }
+    if (upper.startsWith('TEAM:')) {
+      const teamId = clean.slice(5);
+      const seedEntry = qualifiedSeeds.find((q) => q.teamId === teamId);
+      const idx = qualifiedTeamIds.indexOf(teamId);
+      return { teamId, seed: seedEntry?.rank || (idx !== -1 ? idx + 1 : undefined) };
+    }
+    return {};
+  };
+
+  const rawMatches: KnockoutMatch[] = config.matches.map((draft, idx) => {
+    const code = draft.matchCode.toUpperCase();
+    const prev = existingByCode.get(code);
+    const court = draft.court || prev?.court || getCourt(idx);
+    const courtName = draft.courtName || prev?.courtName || getCourtName(court);
+    const resA = resolveDirectTeam(draft.participantASource);
+    const resB = resolveDirectTeam(draft.participantBSource);
+
+    // Preserve completed/live state if the match already completed/started with the same participants
+    const canPreserveState =
+      prev &&
+      (prev.status === 'completed' || prev.status === 'live' || prev.status === 'paused') &&
+      (!resA.teamId || prev.teamA === resA.teamId) &&
+      (!resB.teamId || prev.teamB === resB.teamId);
+
+    return {
+      id: prev?.id || draft.id || crypto.randomUUID(),
+      bracketId: prev?.bracketId || bracketId,
+      matchCode: code,
+      stage: draft.stage,
+      playoffRound: draft.playoffRound,
+      roundOrder: draft.roundOrder,
+      matchLabel: draft.matchLabel,
+      slot: draft.slot,
+      court,
+      courtName,
+      scheduledDate: draft.scheduledDate || prev?.scheduledDate || tournamentDate || undefined,
+      scheduledTime: draft.scheduledTime || prev?.scheduledTime,
+      assignedUmpire: draft.assignedUmpire || prev?.assignedUmpire,
+      time: [draft.matchLabel, courtName, draft.scheduledTime || prev?.scheduledTime].filter(Boolean).join(' · '),
+      participantASource: draft.participantASource,
+      participantBSource: draft.participantBSource,
+      seedA: resA.seed,
+      seedB: resB.seed,
+      nextMatchCode: draft.nextMatchCode,
+      nextMatchSlot: draft.nextMatchSlot,
+      teamA: canPreserveState ? prev.teamA : resA.teamId,
+      teamB: canPreserveState ? prev.teamB : resB.teamId,
+      scoreA: canPreserveState ? prev.scoreA : undefined,
+      scoreB: canPreserveState ? prev.scoreB : undefined,
+      sets: canPreserveState ? prev.sets : undefined,
+      winner: canPreserveState ? prev.winner : undefined,
+      loserId: canPreserveState ? prev.loserId : undefined,
+      completedAt: canPreserveState ? prev.completedAt : undefined,
+      status: canPreserveState ? prev.status : 'upcoming',
+      isPlayoff: true,
+      manual: Boolean(
+        draft.participantASource?.startsWith('TEAM:') || draft.participantBSource?.startsWith('TEAM:')
+      ),
+      version: (prev?.version || 0) + 1,
+    };
+  });
+
+  const seedsToUse: PlayoffQualifiedSeed[] =
+    qualifiedSeeds.length > 0
+      ? qualifiedSeeds
+      : qualifiedTeamIds.map((tid, i) => ({
+          rank: i + 1,
+          teamId: tid,
+          teamName: tid,
+          playerNames: [],
+          points: 0,
+          won: 0,
+          lost: 0,
+          played: 0,
+          pointDiff: 0,
+          setDiff: 0,
+          matchWinDiff: 0,
+          status: 'qualified',
+        }));
+
+  return progressKnockoutBracket(rawMatches, 'custom', seedsToUse).matches;
 }
 
 export function validatePlayoffScheduleAndCourts(
@@ -2451,3 +3321,4 @@ export function createPlayoffAuditEntry(
     details,
   };
 }
+

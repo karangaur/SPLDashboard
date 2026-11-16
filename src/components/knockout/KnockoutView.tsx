@@ -32,22 +32,31 @@ import {
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import {
+  CustomKnockoutMatchDraft,
+  CustomKnockoutStageConfig,
   KnockoutMatch,
   PlayoffFormat,
+  PlayoffQualifiedSeed,
   QualificationMode,
 } from '../../types/tournament';
 import { ConfirmModal } from '../common/ConfirmModal';
 import { LiveMatchScoringModal } from '../admin/LiveMatchScoringModal';
 import { IPLPlayoffBracket } from './IPLPlayoffBracket';
 import {
+  buildCustomKnockoutStageConfig,
   calculatePlayoffLeagueStandings,
   canStartOrScorePlayoffMatch,
   evaluatePlayoffGenerationEligibility,
   formatParticipantSourceLabel,
   getFormatDisplayTitle,
   getPlayoffMatchDisplayLabel,
+  getRecommendedCustomCounts,
+  materializeCustomKnockoutMatches,
   normalizePlayoffSettings,
   resolveFormatQualifyingCount,
+  setCustomMatchParticipantSource,
+  setCustomMatchWinnerDestination,
+  validateCustomKnockoutStageConfig,
   validatePlayoffScheduleAndCourts,
 } from '../../utils/playoffEngine';
 
@@ -340,8 +349,263 @@ export const KnockoutView: React.FC = () => {
   const activeFormatMeta =
     FORMAT_OPTIONS.find((f) => f.id === activeFormat) || FORMAT_OPTIONS[2];
 
+  const isCustomFormat = activeFormat === 'custom';
+
+  // Custom Knockout Stage Builder state (Phases 1-5)
+  const [customTeamSearch, setCustomTeamSearch] = useState('');
+  const [customStageConfig, setCustomStageConfig] = useState<CustomKnockoutStageConfig>(() => {
+    if (state.knockout.customStageConfig && state.knockout.customStageConfig.matches?.length > 0) {
+      return state.knockout.customStageConfig;
+    }
+    const initN = state.knockout.qualifyingTeamsCount || 6;
+    const rec = getRecommendedCustomCounts(initN);
+    return buildCustomKnockoutStageConfig({
+      qualifyingTeamsCount: initN,
+      eliminatorsCount: rec.eliminatorsCount,
+      semiFinalsCount: rec.semiFinalsCount,
+      courtsCount: Math.max(1, Number(state.settings.courts) || 2),
+      courtNames: state.settings.courtNames,
+      tournamentDate: state.settings.date,
+      useSmartDefaults: true,
+    });
+  });
+
+  // Sync from persisted state if updated externally via Realtime
+  useEffect(() => {
+    if (
+      state.knockout.customStageConfig &&
+      state.knockout.customStageConfig.updatedAt &&
+      state.knockout.customStageConfig.updatedAt !== customStageConfig.updatedAt
+    ) {
+      setCustomStageConfig(state.knockout.customStageConfig);
+      setCustomCountInput(state.knockout.customStageConfig.qualifyingTeamsCount);
+    }
+  }, [state.knockout.customStageConfig]);
+
+  // Effective qualified seeds for preview & validation
+  const previewQualifiedSeeds: PlayoffQualifiedSeed[] = useMemo(() => {
+    const selectedIds =
+      qualificationMode === 'manual' && manualTeamIds.filter(Boolean).length >= requiredTeams
+        ? manualTeamIds.slice(0, requiredTeams)
+        : leagueStandingData.rankedActive.slice(0, requiredTeams).map((r) => r.team.id);
+
+    return selectedIds.map((tid, idx) => {
+      const row = leagueStandingData.allRows.find((r) => r.team.id === tid);
+      const tObj = state.teams.find((t) => t.id === tid);
+      return {
+        rank: idx + 1,
+        teamId: tid,
+        teamName: row?.team.name || tObj?.name || `Seed #${idx + 1}`,
+        playerNames: row?.playerNames || [],
+        points: row?.points ?? 0,
+        played: row?.played ?? 0,
+        won: row?.won ?? 0,
+        lost: row?.lost ?? 0,
+        matchWinDiff: row?.matchWinDiff ?? 0,
+        setDiff: row?.setDiff ?? 0,
+        pointDiff: row?.pointDiff ?? 0,
+        status: 'qualified',
+      };
+    });
+  }, [qualificationMode, manualTeamIds, requiredTeams, leagueStandingData, state.teams]);
+
+  const customValidation = useMemo(
+    () =>
+      validateCustomKnockoutStageConfig({
+        config: customStageConfig,
+        qualifiedSeeds: previewQualifiedSeeds,
+        teams: state.teams,
+        maxEligibleTeams:
+          qualificationMode === 'manual'
+            ? state.teams.length
+            : leagueStandingData.rankedActive.length,
+      }),
+    [
+      customStageConfig,
+      previewQualifiedSeeds,
+      state.teams,
+      qualificationMode,
+      leagueStandingData.rankedActive.length,
+    ]
+  );
+
+  const persistCustomConfigUpdate = (nextConfig: CustomKnockoutStageConfig) => {
+    setCustomStageConfig(nextConfig);
+    setCustomCountInput(nextConfig.qualifyingTeamsCount);
+    configureKnockoutQualification({
+      format: 'custom',
+      qualifyingTeamsCount: nextConfig.qualifyingTeamsCount,
+      qualificationMode,
+      manualSelectedTeamIds: manualTeamIds,
+      customStageConfig: nextConfig,
+    });
+  };
+
+  const handleCustomTotalTeamsChange = (newN: number, applyRecommendedCounts = true) => {
+    const maxAllowed = Math.max(2, state.teams.length || 32);
+    const clampedN = Math.max(2, Math.min(maxAllowed, Math.floor(Number(newN) || 2)));
+    const rec = getRecommendedCustomCounts(clampedN);
+    const nextConfig = buildCustomKnockoutStageConfig({
+      qualifyingTeamsCount: clampedN,
+      eliminatorsCount: applyRecommendedCounts ? rec.eliminatorsCount : customStageConfig.eliminatorsCount,
+      semiFinalsCount: applyRecommendedCounts ? rec.semiFinalsCount : customStageConfig.semiFinalsCount,
+      existingConfig: applyRecommendedCounts ? null : customStageConfig,
+      courtsCount: Math.max(1, Number(state.settings.courts) || 2),
+      courtNames: state.settings.courtNames,
+      tournamentDate: state.settings.date,
+      useSmartDefaults: applyRecommendedCounts,
+    });
+    persistCustomConfigUpdate(nextConfig);
+  };
+
+  const handleCustomEliminatorsCountChange = (newE: number) => {
+    const clampedE = Math.max(0, Math.min(16, Math.floor(Number(newE) || 0)));
+    const nextConfig = buildCustomKnockoutStageConfig({
+      qualifyingTeamsCount: customStageConfig.qualifyingTeamsCount,
+      eliminatorsCount: clampedE,
+      semiFinalsCount: customStageConfig.semiFinalsCount,
+      existingConfig: customStageConfig,
+      courtsCount: Math.max(1, Number(state.settings.courts) || 2),
+      courtNames: state.settings.courtNames,
+      tournamentDate: state.settings.date,
+      useSmartDefaults: false,
+    });
+    persistCustomConfigUpdate(nextConfig);
+  };
+
+  const handleCustomSemiFinalsCountChange = (newS: number) => {
+    const clampedS = Math.max(0, Math.min(8, Math.floor(Number(newS) || 0)));
+    const nextConfig = buildCustomKnockoutStageConfig({
+      qualifyingTeamsCount: customStageConfig.qualifyingTeamsCount,
+      eliminatorsCount: customStageConfig.eliminatorsCount,
+      semiFinalsCount: clampedS,
+      existingConfig: customStageConfig,
+      courtsCount: Math.max(1, Number(state.settings.courts) || 2),
+      courtNames: state.settings.courtNames,
+      tournamentDate: state.settings.date,
+      useSmartDefaults: false,
+    });
+    persistCustomConfigUpdate(nextConfig);
+  };
+
+  const handleApplyRecommendedCustomStructure = () => {
+    const rec = getRecommendedCustomCounts(customStageConfig.qualifyingTeamsCount);
+    const nextConfig = buildCustomKnockoutStageConfig({
+      qualifyingTeamsCount: rec.qualifyingTeamsCount,
+      eliminatorsCount: rec.eliminatorsCount,
+      semiFinalsCount: rec.semiFinalsCount,
+      courtsCount: Math.max(1, Number(state.settings.courts) || 2),
+      courtNames: state.settings.courtNames,
+      tournamentDate: state.settings.date,
+      useSmartDefaults: true,
+    });
+    persistCustomConfigUpdate(nextConfig);
+    showNotice(`Applied recommended structure: ${rec.summary}`, 'success');
+  };
+
+  const handleCustomMatchParticipantChange = (
+    matchCode: string,
+    slot: 'A' | 'B',
+    newSource: string
+  ) => {
+    const nextConfig = setCustomMatchParticipantSource(
+      customStageConfig,
+      matchCode,
+      slot,
+      newSource
+    );
+    persistCustomConfigUpdate(nextConfig);
+  };
+
+  const handleCustomMatchWinnerDestChange = (
+    upstreamMatchCode: string,
+    destToken: string
+  ) => {
+    const nextConfig = setCustomMatchWinnerDestination(
+      customStageConfig,
+      upstreamMatchCode,
+      destToken
+    );
+    persistCustomConfigUpdate(nextConfig);
+  };
+
+  const handleCustomMatchSwapParticipants = (matchCode: string) => {
+    const nextMatches = customStageConfig.matches.map((m) =>
+      m.matchCode === matchCode
+        ? {
+            ...m,
+            participantASource: m.participantBSource,
+            participantBSource: m.participantASource,
+          }
+        : m
+    );
+    persistCustomConfigUpdate({
+      ...customStageConfig,
+      matches: nextMatches,
+      updatedAt: Date.now(),
+    });
+  };
+
+  const handleCustomMatchMetaChange = (
+    matchCode: string,
+    updates: Partial<CustomKnockoutMatchDraft>
+  ) => {
+    const nextMatches = customStageConfig.matches.map((m) => {
+      if (m.matchCode !== matchCode) return m;
+      const courtNum = updates.court ?? m.court ?? 1;
+      const courtName =
+        updates.court !== undefined
+          ? state.settings.courtNames?.[courtNum - 1]?.trim() || `Court ${courtNum}`
+          : m.courtName;
+      return {
+        ...m,
+        ...updates,
+        court: courtNum,
+        courtName,
+      };
+    });
+    persistCustomConfigUpdate({
+      ...customStageConfig,
+      matches: nextMatches,
+      updatedAt: Date.now(),
+    });
+  };
+
+  const handleRemoveCustomMatchCard = (matchDraft: CustomKnockoutMatchDraft) => {
+    if (matchDraft.stage === 'F' || matchDraft.matchCode === 'FINAL') return;
+    if (matchDraft.stage === 'ELIM') {
+      handleCustomEliminatorsCountChange(Math.max(0, customStageConfig.eliminatorsCount - 1));
+      showNotice(`Removed ${matchDraft.matchLabel} from draft configuration.`, 'success');
+    } else if (matchDraft.stage === 'SF') {
+      handleCustomSemiFinalsCountChange(Math.max(0, customStageConfig.semiFinalsCount - 1));
+      showNotice(`Removed ${matchDraft.matchLabel} from draft configuration.`, 'success');
+    }
+  };
+
   const handleSelectFormat = (fmt: PlayoffFormat, customVal?: number) => {
     const count = resolveFormatQualifyingCount(fmt, customVal ?? customCountInput);
+    if (fmt === 'custom') {
+      const rec = getRecommendedCustomCounts(count);
+      const nextCfg = buildCustomKnockoutStageConfig({
+        qualifyingTeamsCount: count,
+        eliminatorsCount: rec.eliminatorsCount,
+        semiFinalsCount: rec.semiFinalsCount,
+        courtsCount: Math.max(1, Number(state.settings.courts) || 2),
+        courtNames: state.settings.courtNames,
+        tournamentDate: state.settings.date,
+        useSmartDefaults: true,
+      });
+      setCustomStageConfig(nextCfg);
+      setCustomCountInput(count);
+      configureKnockoutQualification({
+        format: fmt,
+        qualifyingTeamsCount: count,
+        qualificationMode,
+        manualSelectedTeamIds: manualTeamIds,
+        customStageConfig: nextCfg,
+      });
+      return;
+    }
     setKnockoutFormat(fmt, count);
   };
 
@@ -351,6 +615,7 @@ export const KnockoutView: React.FC = () => {
       qualifyingTeamsCount: requiredTeams,
       qualificationMode: mode,
       manualSelectedTeamIds: manualTeamIds,
+      customStageConfig: isCustomFormat ? customStageConfig : undefined,
     });
   };
 
@@ -368,6 +633,7 @@ export const KnockoutView: React.FC = () => {
       qualifyingTeamsCount: requiredTeams,
       qualificationMode: 'manual',
       manualSelectedTeamIds: next,
+      customStageConfig: isCustomFormat ? customStageConfig : undefined,
     });
   };
 
@@ -383,6 +649,7 @@ export const KnockoutView: React.FC = () => {
       qualifyingTeamsCount: requiredTeams,
       qualificationMode: 'manual',
       manualSelectedTeamIds: next,
+      customStageConfig: isCustomFormat ? customStageConfig : undefined,
     });
   };
 
@@ -396,16 +663,25 @@ export const KnockoutView: React.FC = () => {
       qualifyingTeamsCount: requiredTeams,
       qualificationMode: 'manual',
       manualSelectedTeamIds: topIds,
+      customStageConfig: isCustomFormat ? customStageConfig : undefined,
     });
     showNotice(`Filled Top ${topIds.length} seeds from Official League Standings.`, 'success');
   };
 
   const executeGenerateBracket = (saveAsDraft = false) => {
+    if (isCustomFormat && !customValidation.valid) {
+      showNotice(
+        customValidation.errors[0] || 'Custom knockout configuration has validation errors.',
+        'error'
+      );
+      return;
+    }
     const res = generateKnockoutBracket({
       format: activeFormat,
-      qualifyingTeamsCount: requiredTeams,
+      qualifyingTeamsCount: isCustomFormat ? customStageConfig.qualifyingTeamsCount : requiredTeams,
       qualificationMode,
       manualTeamIds: qualificationMode === 'manual' ? manualTeamIds : undefined,
+      customStageConfig: isCustomFormat ? customStageConfig : undefined,
       saveAsDraft,
     });
     if (!res.success) {
@@ -413,10 +689,13 @@ export const KnockoutView: React.FC = () => {
       return;
     }
     triggerCelebration();
-    const title = getFormatDisplayTitle(activeFormat, requiredTeams);
+    const title = getFormatDisplayTitle(
+      activeFormat,
+      isCustomFormat ? customStageConfig.qualifyingTeamsCount : requiredTeams
+    );
     showNotice(
       saveAsDraft
-        ? `${title} generated as Draft! You can customize pairings before publishing.`
+        ? `${title} saved as Draft! You can customize pairings before publishing.`
         : `${title} generated & synced live to Match Center and Public Website!`,
       'success'
     );
@@ -426,6 +705,13 @@ export const KnockoutView: React.FC = () => {
     if (!eligibility.canGenerate) {
       showNotice(
         eligibility.blockingReasons[0] || 'Knockout generation prerequisites not met.',
+        'error'
+      );
+      return;
+    }
+    if (isCustomFormat && !customValidation.valid) {
+      showNotice(
+        customValidation.errors[0] || 'Please fix the custom knockout bracket validation errors first.',
         'error'
       );
       return;
@@ -920,27 +1206,870 @@ export const KnockoutView: React.FC = () => {
             })}
           </div>
 
-          {/* Custom Team Count Input when Custom Number is selected */}
-          {activeFormat === 'custom' && (
-            <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-xl bg-slate-900/80 border border-amber-400/30">
-              <label className="text-xs font-bold text-amber-300">
-                Custom Number of Qualifying Teams:
-              </label>
-              <input
-                type="number"
-                min={2}
-                max={Math.max(2, state.teams.length || 32)}
-                value={customCountInput}
-                onChange={(e) => {
-                  const val = Math.max(2, parseInt(e.target.value, 10) || 2);
-                  setCustomCountInput(val);
-                  handleSelectFormat('custom', val);
-                }}
-                className="w-24 bg-slate-950 border border-white/15 rounded-xl px-3 py-1.5 text-sm font-mono font-bold text-white"
-              />
-              <span className="text-xs text-slate-400">
-                Top seeds automatically receive First-Round Byes if count is not a power of 2.
-              </span>
+          {/* =================================================================
+              ADVANCED CUSTOM KNOCKOUT STAGE BUILDER (PHASES 1 – 10)
+             ================================================================= */}
+          {isCustomFormat && (
+            <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/90 border border-amber-400/35 space-y-5 animate-fade-in">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
+                <div>
+                  <span className="text-[10px] font-mono font-black uppercase tracking-[0.2em] text-amber-400 block">
+                    Custom Knockout Stage Builder
+                  </span>
+                  <h3 className="font-display font-black text-base sm:text-lg text-white">
+                    Configure Qualified Teams, Eliminators, Semi Finals &amp; Grand Final
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Define the exact number of Eliminator and Semi Final matches, assign teams or Direct Byes, choose where each winner advances, and preview the live bracket in real time.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleApplyRecommendedCustomStructure}
+                  className="px-3.5 py-2 rounded-xl bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 text-xs font-bold text-amber-300 flex items-center gap-1.5 cursor-pointer transition-colors"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  <span>
+                    Apply Recommended ({customValidation.recommended.eliminatorsCount}E ·{' '}
+                    {customValidation.recommended.semiFinalsCount}SF · 1F)
+                  </span>
+                </button>
+              </div>
+
+              {/* Phase 1: 4-Column Stage Count Controls */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3.5">
+                {/* 1. Total Qualified Teams */}
+                <div className="p-3.5 rounded-xl bg-slate-900/90 border border-white/10 space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-bold text-amber-300">
+                      1. Total Qualified Teams
+                    </label>
+                    <span className="font-mono text-[10px] text-slate-400">
+                      Max: {Math.max(2, state.teams.length || 32)}
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[4, 5, 6, 7, 8].map((presetN) => {
+                      const active = customStageConfig.qualifyingTeamsCount === presetN;
+                      return (
+                        <button
+                          key={presetN}
+                          type="button"
+                          onClick={() => handleCustomTotalTeamsChange(presetN, true)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-amber-400 text-slate-950 border-amber-300'
+                              : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          {presetN} Teams
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-[11px] text-slate-400">Custom Count:</span>
+                    <input
+                      type="number"
+                      min={2}
+                      max={Math.max(2, state.teams.length || 32)}
+                      value={customStageConfig.qualifyingTeamsCount}
+                      onChange={(e) => {
+                        const val = Math.max(2, parseInt(e.target.value, 10) || 2);
+                        handleCustomTotalTeamsChange(val, true);
+                      }}
+                      aria-label="Total Qualified Teams"
+                      className="w-20 bg-slate-950 border border-white/15 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* 2. Number of Eliminator Matches */}
+                <div className="p-3.5 rounded-xl bg-slate-900/90 border border-white/10 space-y-2.5">
+                  <label className="text-xs font-bold text-sky-300 block">
+                    2. How many Eliminator matches do you want?
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[0, 1, 2, 3, 4].map((presetE) => {
+                      const active = customStageConfig.eliminatorsCount === presetE;
+                      return (
+                        <button
+                          key={presetE}
+                          type="button"
+                          onClick={() => handleCustomEliminatorsCountChange(presetE)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-sky-400 text-slate-950 border-sky-300'
+                              : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          {presetE} {presetE === 1 ? 'Eliminator' : 'Eliminators'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-[11px] text-slate-400">Custom Eliminators:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={16}
+                      value={customStageConfig.eliminatorsCount}
+                      onChange={(e) => {
+                        const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                        handleCustomEliminatorsCountChange(val);
+                      }}
+                      aria-label="Number of Eliminator matches"
+                      className="w-20 bg-slate-950 border border-white/15 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Number of Semi Final Matches */}
+                <div className="p-3.5 rounded-xl bg-slate-900/90 border border-white/10 space-y-2.5">
+                  <label className="text-xs font-bold text-violet-300 block">
+                    3. How many Semi Final matches do you want?
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[0, 1, 2].map((presetS) => {
+                      const active = customStageConfig.semiFinalsCount === presetS;
+                      return (
+                        <button
+                          key={presetS}
+                          type="button"
+                          onClick={() => handleCustomSemiFinalsCountChange(presetS)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-mono font-bold border transition-colors cursor-pointer ${
+                            active
+                              ? 'bg-violet-400 text-slate-950 border-violet-300'
+                              : 'bg-white/5 text-slate-300 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          {presetS} {presetS === 1 ? 'Semi Final' : 'Semi Finals'}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center gap-2 pt-1">
+                    <span className="text-[11px] text-slate-400">Custom Semi Finals:</span>
+                    <input
+                      type="number"
+                      min={0}
+                      max={8}
+                      value={customStageConfig.semiFinalsCount}
+                      onChange={(e) => {
+                        const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                        handleCustomSemiFinalsCountChange(val);
+                      }}
+                      aria-label="Number of Semi Final matches"
+                      className="w-20 bg-slate-950 border border-white/15 rounded-lg px-2.5 py-1 text-xs font-mono font-bold text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* 4. Grand Final Summary */}
+                <div className="p-3.5 rounded-xl bg-slate-900/90 border border-amber-400/25 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-amber-300">
+                      4. Championship Grand Final
+                    </span>
+                    <Trophy className="w-4 h-4 text-amber-400" />
+                  </div>
+                  <p className="text-[11px] text-slate-300">
+                    <strong>1 Grand Final Match</strong> receiving two valid finalists (from Semi Final winners, Eliminator winners, or Direct Final Bye).
+                  </p>
+                  <div className="pt-1 flex items-center justify-between text-[11px] font-mono">
+                    <span className="text-slate-400">Total Matches:</span>
+                    <span
+                      className={`font-black ${
+                        customStageConfig.matches.length ===
+                        customStageConfig.qualifyingTeamsCount - 1
+                          ? 'text-emerald-400'
+                          : 'text-rose-400'
+                      }`}
+                    >
+                      {customStageConfig.matches.length} /{' '}
+                      {customStageConfig.qualifyingTeamsCount - 1} required (N − 1)
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Phase 5: Real-Time 14-Point Smart Bracket Validation Status */}
+              <div
+                className={`p-3.5 rounded-2xl border space-y-2 ${
+                  customValidation.valid
+                    ? 'bg-emerald-500/10 border-emerald-400/35'
+                    : 'bg-rose-500/10 border-rose-400/40'
+                }`}
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    {customValidation.valid ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+                    )}
+                    <span
+                      className={`text-xs font-black uppercase tracking-wider ${
+                        customValidation.valid ? 'text-emerald-300' : 'text-rose-300'
+                      }`}
+                    >
+                      {customValidation.valid
+                        ? `Valid Single-Elimination Bracket (${customStageConfig.qualifyingTeamsCount} Teams · ${customStageConfig.matches.length} Matches)`
+                        : `Invalid Custom Bracket Configuration (${customValidation.errors.length} ${
+                            customValidation.errors.length === 1 ? 'Issue' : 'Issues'
+                          })`}
+                    </span>
+                  </div>
+
+                  {!customValidation.valid && (
+                    <button
+                      type="button"
+                      onClick={handleApplyRecommendedCustomStructure}
+                      className="px-3 py-1 rounded-lg bg-amber-400 text-slate-950 text-[11px] font-black cursor-pointer hover:bg-amber-300"
+                    >
+                      Fix with Recommended Structure ({customValidation.recommended.eliminatorsCount}E +{' '}
+                      {customValidation.recommended.semiFinalsCount}SF + 1F)
+                    </button>
+                  )}
+                </div>
+
+                {!customValidation.valid && (
+                  <ul className="space-y-1 text-xs text-rose-200 list-disc list-inside">
+                    {customValidation.errors.map((err, i) => (
+                      <li key={i}>{err}</li>
+                    ))}
+                  </ul>
+                )}
+
+                {customValidation.warnings.length > 0 && (
+                  <ul className="space-y-1 text-xs text-amber-200 list-disc list-inside">
+                    {customValidation.warnings.map((w, i) => (
+                      <li key={i}>{w}</li>
+                    ))}
+                  </ul>
+                )}
+
+                {customValidation.directQualifiers.length > 0 && (
+                  <div className="pt-1 flex flex-wrap items-center gap-1.5 text-[11px]">
+                    <span className="font-mono font-bold text-emerald-300 uppercase">
+                      Direct Qualification / Byes:
+                    </span>
+                    {customValidation.directQualifiers.map((dq, idx) => (
+                      <span
+                        key={idx}
+                        className="px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 font-mono"
+                      >
+                        {dq.label} → {dq.destinationLabel}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Searchable Team Filter for Custom Matchup Assignment */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-2 flex-1">
+                  <span className="text-xs font-bold text-slate-300 shrink-0">
+                    Filter Qualified Teams:
+                  </span>
+                  <input
+                    type="text"
+                    value={customTeamSearch}
+                    onChange={(e) => setCustomTeamSearch(e.target.value)}
+                    placeholder="Search by team name, seed #, or league rank..."
+                    className="w-full max-w-sm bg-slate-900 border border-white/15 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                  />
+                  {customTeamSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setCustomTeamSearch('')}
+                      className="text-xs text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCustomEliminatorsCountChange(customStageConfig.eliminatorsCount + 1)
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 border border-sky-400/35 text-xs font-bold text-sky-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Eliminator</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleCustomSemiFinalsCountChange(customStageConfig.semiFinalsCount + 1)
+                    }
+                    className="px-3 py-1.5 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 border border-violet-400/35 text-xs font-bold text-violet-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Semi Final</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* ===============================================================
+                  SIDE-BY-SIDE DESKTOP / STACKED MOBILE:
+                  LEFT (7 cols): DYNAMIC ELIMINATORS, SEMI FINALS & GRAND FINAL CARDS
+                  RIGHT (5 cols): LIVE KNOCKOUT BRACKET PREVIEW
+                 =============================================================== */}
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
+                {/* LEFT COLUMN: Editable Match Generator Cards */}
+                <div className="xl:col-span-7 space-y-4">
+                  {[
+                    {
+                      stageKey: 'ELIM',
+                      title: `Eliminator Matches (${customStageConfig.eliminatorsCount})`,
+                      badgeClass: 'bg-sky-500/20 text-sky-300 border-sky-400/40',
+                      matches: customStageConfig.matches.filter((m) => m.stage === 'ELIM'),
+                    },
+                    {
+                      stageKey: 'SF',
+                      title: `Semi Final Matches (${customStageConfig.semiFinalsCount})`,
+                      badgeClass: 'bg-violet-500/20 text-violet-300 border-violet-400/40',
+                      matches: customStageConfig.matches.filter((m) => m.stage === 'SF'),
+                    },
+                    {
+                      stageKey: 'F',
+                      title: 'Championship Grand Final (1)',
+                      badgeClass: 'bg-amber-500/20 text-amber-300 border-amber-400/40',
+                      matches: customStageConfig.matches.filter((m) => m.stage === 'F'),
+                    },
+                  ].map((group) => {
+                    if (group.matches.length === 0) return null;
+
+                    return (
+                      <div key={group.stageKey} className="space-y-2.5">
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md border font-mono text-[10px] font-black uppercase ${group.badgeClass}`}
+                          >
+                            {group.title}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {group.matches.map((card) => {
+                            const cardErrs = customValidation.matchErrors[card.matchCode] || [];
+                            const searchLower = customTeamSearch.trim().toLowerCase();
+
+                            // Build participant source options for this custom card
+                            const seedSourceOptions: { value: string; label: string }[] = [];
+                            for (let r = 1; r <= customStageConfig.qualifyingTeamsCount; r++) {
+                              const seedObj = previewQualifiedSeeds.find((s) => s.rank === r);
+                              const teamObj = seedObj ? getTeam(seedObj.teamId) : undefined;
+                              const row = seedObj
+                                ? leagueStandingData.allRows.find((rw) => rw.team.id === seedObj.teamId)
+                                : undefined;
+                              const badge = teamObj?.badge || '🏸';
+                              const name = seedObj?.teamName || `Seed #${r}`;
+                              const leagueRankText = row && row.rank > 0 ? `League #${row.rank}` : '';
+                              const byeSuffix =
+                                card.stage === 'SF'
+                                  ? ' · Direct Semi-Final Bye'
+                                  : card.stage === 'F'
+                                  ? ' · Direct Final Bye'
+                                  : '';
+                              const fullLabel = `Seed #${r} — ${badge} ${name}${
+                                leagueRankText ? ` (${leagueRankText})` : ''
+                              }${byeSuffix}`;
+
+                              const val = `RANK_${r}`;
+                              if (
+                                !searchLower ||
+                                fullLabel.toLowerCase().includes(searchLower) ||
+                                card.participantASource === val ||
+                                card.participantBSource === val
+                              ) {
+                                seedSourceOptions.push({ value: val, label: fullLabel });
+                              }
+                            }
+
+                            // Upstream Winner Reference Options
+                            const upstreamOptions: { value: string; label: string }[] = [];
+                            for (const up of customStageConfig.matches) {
+                              if (up.matchCode === card.matchCode) continue;
+                              if (
+                                up.roundOrder < card.roundOrder ||
+                                (up.stage === 'ELIM' && card.stage === 'ELIM' && up.slot < card.slot)
+                              ) {
+                                upstreamOptions.push({
+                                  value: `WINNER:${up.matchCode}`,
+                                  label: `Winner ${up.matchLabel} (${up.matchCode})`,
+                                });
+                              }
+                            }
+
+                            // Direct Team ID Options from Qualified Pool
+                            const directTeamOptions: { value: string; label: string }[] = [];
+                            for (const seedObj of previewQualifiedSeeds) {
+                              const t = getTeam(seedObj.teamId);
+                              if (!t) continue;
+                              const row = leagueStandingData.allRows.find((rw) => rw.team.id === t.id);
+                              const val = `TEAM:${t.id}`;
+                              const label = `${t.badge || '🏸'} ${t.name} (Seed #${seedObj.rank}${
+                                row ? ` · ${row.points} pts` : ''
+                              })`;
+                              if (
+                                !searchLower ||
+                                label.toLowerCase().includes(searchLower) ||
+                                card.participantASource === val ||
+                                card.participantBSource === val
+                              ) {
+                                directTeamOptions.push({ value: val, label });
+                              }
+                            }
+
+                            // Downstream Destination Options for Winner of this match
+                            const destinationOptions: { value: string; label: string }[] = [];
+                            if (card.stage !== 'F') {
+                              for (const down of customStageConfig.matches) {
+                                if (down.matchCode === card.matchCode) continue;
+                                if (
+                                  down.roundOrder > card.roundOrder ||
+                                  (down.stage === 'ELIM' && card.stage === 'ELIM' && down.slot > card.slot)
+                                ) {
+                                  destinationOptions.push({
+                                    value: `${down.matchCode}:A`,
+                                    label: `${down.matchLabel} (${down.matchCode}) — Slot A`,
+                                  });
+                                  destinationOptions.push({
+                                    value: `${down.matchCode}:B`,
+                                    label: `${down.matchLabel} (${down.matchCode}) — Slot B`,
+                                  });
+                                }
+                              }
+                            }
+
+                            const currentDestValue =
+                              card.nextMatchCode && card.nextMatchSlot
+                                ? `${card.nextMatchCode}:${card.nextMatchSlot}`
+                                : '';
+
+                            return (
+                              <div
+                                key={card.matchCode}
+                                className={`p-3.5 rounded-2xl bg-slate-900 border space-y-3 ${
+                                  cardErrs.length > 0
+                                    ? 'border-rose-400/60 shadow-[0_0_20px_-8px_rgba(244,63,94,0.45)]'
+                                    : 'border-white/10'
+                                }`}
+                              >
+                                <div className="flex items-center justify-between gap-2 pb-2 border-b border-white/10">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <span className="px-2 py-0.5 rounded bg-amber-400/20 border border-amber-400/40 font-mono text-[10px] font-black text-amber-300">
+                                      {card.matchCode}
+                                    </span>
+                                    <span className="font-bold text-xs text-white truncate">
+                                      {card.matchLabel}
+                                    </span>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleCustomMatchSwapParticipants(card.matchCode)
+                                      }
+                                      title="Swap Participant A & Participant B"
+                                      className="px-2 py-1 rounded-lg bg-white/5 hover:bg-white/10 border border-white/10 text-[10px] font-semibold text-slate-200 flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <ArrowLeftRight className="w-3 h-3 text-amber-400" />
+                                      <span>Swap</span>
+                                    </button>
+                                    {card.stage !== 'F' && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleRemoveCustomMatchCard(card)}
+                                        title={`Remove ${card.matchLabel} (Draft)`}
+                                        className="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-rose-300 cursor-pointer"
+                                      >
+                                        <Trash2 className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Team A / Participant A Selection */}
+                                <div className="space-y-2">
+                                  <div>
+                                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                      Team A / Slot A Source
+                                    </label>
+                                    <select
+                                      value={card.participantASource}
+                                      onChange={(e) =>
+                                        handleCustomMatchParticipantChange(
+                                          card.matchCode,
+                                          'A',
+                                          e.target.value
+                                        )
+                                      }
+                                      aria-label={`${card.matchLabel} Team A`}
+                                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                                    >
+                                      <option value="">Select Team or Winner Reference...</option>
+                                      {upstreamOptions.length > 0 && (
+                                        <optgroup label="Previous Match Winners (Dynamic TBD)">
+                                          {upstreamOptions.map((o) => (
+                                            <option key={`up-a-${o.value}`} value={o.value}>
+                                              {o.label}
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                      <optgroup
+                                        label={
+                                          card.stage === 'ELIM'
+                                            ? 'Qualified Team Pool (By Seed Rank)'
+                                            : 'Direct Qualification / Seed Bye'
+                                        }
+                                      >
+                                        {seedSourceOptions.map((o) => (
+                                          <option key={`seed-a-${o.value}`} value={o.value}>
+                                            {o.label}
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                      {directTeamOptions.length > 0 && (
+                                        <optgroup label="Qualified Teams (Direct Team ID)">
+                                          {directTeamOptions.map((o) => (
+                                            <option key={`team-a-${o.value}`} value={o.value}>
+                                              {o.label}
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                    </select>
+                                  </div>
+
+                                  {/* Team B / Participant B Selection */}
+                                  <div>
+                                    <label className="block text-[10px] font-bold uppercase text-slate-400 mb-1">
+                                      Team B / Slot B Source
+                                    </label>
+                                    <select
+                                      value={card.participantBSource}
+                                      onChange={(e) =>
+                                        handleCustomMatchParticipantChange(
+                                          card.matchCode,
+                                          'B',
+                                          e.target.value
+                                        )
+                                      }
+                                      aria-label={`${card.matchLabel} Team B`}
+                                      className="w-full bg-slate-950 border border-white/15 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-400"
+                                    >
+                                      <option value="">Select Team or Winner Reference...</option>
+                                      {upstreamOptions.length > 0 && (
+                                        <optgroup label="Previous Match Winners (Dynamic TBD)">
+                                          {upstreamOptions.map((o) => (
+                                            <option key={`up-b-${o.value}`} value={o.value}>
+                                              {o.label}
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                      <optgroup
+                                        label={
+                                          card.stage === 'ELIM'
+                                            ? 'Qualified Team Pool (By Seed Rank)'
+                                            : 'Direct Qualification / Seed Bye'
+                                        }
+                                      >
+                                        {seedSourceOptions.map((o) => (
+                                          <option key={`seed-b-${o.value}`} value={o.value}>
+                                            {o.label}
+                                          </option>
+                                        ))}
+                                      </optgroup>
+                                      {directTeamOptions.length > 0 && (
+                                        <optgroup label="Qualified Teams (Direct Team ID)">
+                                          {directTeamOptions.map((o) => (
+                                            <option key={`team-b-${o.value}`} value={o.value}>
+                                              {o.label}
+                                            </option>
+                                          ))}
+                                        </optgroup>
+                                      )}
+                                    </select>
+                                  </div>
+
+                                  {/* Winner Destination Selection (for Eliminators & Semi Finals) */}
+                                  {card.stage !== 'F' && (
+                                    <div>
+                                      <label className="block text-[10px] font-bold uppercase text-emerald-300 mb-1">
+                                        Winner Advances To (Destination)
+                                      </label>
+                                      <select
+                                        value={currentDestValue}
+                                        onChange={(e) =>
+                                          handleCustomMatchWinnerDestChange(
+                                            card.matchCode,
+                                            e.target.value
+                                          )
+                                        }
+                                        aria-label={`${card.matchLabel} Winner Destination`}
+                                        className="w-full bg-slate-950 border border-emerald-400/30 rounded-xl px-2.5 py-1.5 text-xs text-emerald-200 focus:outline-none focus:border-emerald-400"
+                                      >
+                                        <option value="">Unassigned Winner Destination...</option>
+                                        {destinationOptions.map((d) => (
+                                          <option key={d.value} value={d.value}>
+                                            {d.label}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  )}
+
+                                  {/* Court, Date & Time Allocation */}
+                                  <div className="grid grid-cols-3 gap-1.5 pt-1">
+                                    <div>
+                                      <label className="block text-[9px] font-bold uppercase text-slate-400 mb-0.5">
+                                        Court
+                                      </label>
+                                      <select
+                                        value={card.court || 1}
+                                        onChange={(e) =>
+                                          handleCustomMatchMetaChange(card.matchCode, {
+                                            court: Number(e.target.value) || 1,
+                                          })
+                                        }
+                                        aria-label={`${card.matchLabel} Court`}
+                                        className="w-full bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-white"
+                                      >
+                                        {Array.from({ length: courtsCount }, (_, i) => i + 1).map(
+                                          (c) => (
+                                            <option key={c} value={c}>
+                                              {state.settings.courtNames?.[c - 1]?.trim() ||
+                                                `Court ${c}`}
+                                            </option>
+                                          )
+                                        )}
+                                      </select>
+                                    </div>
+                                    <div>
+                                      <label className="block text-[9px] font-bold uppercase text-slate-400 mb-0.5">
+                                        Date
+                                      </label>
+                                      <input
+                                        type="date"
+                                        value={card.scheduledDate || ''}
+                                        onChange={(e) =>
+                                          handleCustomMatchMetaChange(card.matchCode, {
+                                            scheduledDate: e.target.value || undefined,
+                                          })
+                                        }
+                                        aria-label={`${card.matchLabel} Date`}
+                                        className="w-full bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-white"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[9px] font-bold uppercase text-slate-400 mb-0.5">
+                                        Time
+                                      </label>
+                                      <input
+                                        type="time"
+                                        value={card.scheduledTime || ''}
+                                        onChange={(e) =>
+                                          handleCustomMatchMetaChange(card.matchCode, {
+                                            scheduledTime: e.target.value || undefined,
+                                          })
+                                        }
+                                        aria-label={`${card.matchLabel} Time`}
+                                        className="w-full bg-slate-950 border border-white/10 rounded-lg px-2 py-1 text-[11px] text-white"
+                                      />
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {cardErrs.length > 0 && (
+                                  <div className="p-2 rounded-lg bg-rose-500/15 border border-rose-400/35 text-[11px] text-rose-200 space-y-0.5">
+                                    {cardErrs.map((ce, idx) => (
+                                      <p key={idx}>• {ce}</p>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* RIGHT COLUMN: PHASE 4 — LIVE KNOCKOUT BRACKET PREVIEW */}
+                <div className="xl:col-span-5 xl:sticky xl:top-4 rounded-2xl bg-slate-900/95 border border-amber-400/30 p-4 space-y-4">
+                  <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-white/10">
+                    <div>
+                      <span className="text-[10px] font-mono font-black uppercase tracking-widest text-amber-400 block">
+                        Live Knockout Bracket Preview
+                      </span>
+                      <h4 className="font-display font-black text-sm text-white">
+                        Interactive Stage Progression Tree
+                      </h4>
+                    </div>
+                    <span
+                      className={`px-2 py-0.5 rounded-full font-mono text-[10px] font-bold border ${
+                        customValidation.valid
+                          ? 'bg-emerald-500/15 text-emerald-300 border-emerald-400/35'
+                          : 'bg-rose-500/15 text-rose-300 border-rose-400/35'
+                      }`}
+                    >
+                      {customValidation.valid ? 'VALID' : 'NEEDS FIX'}
+                    </span>
+                  </div>
+
+                  {/* Visual Stage-by-Stage Progression Diagram */}
+                  <div className="space-y-3 overflow-x-auto pb-1">
+                    {[
+                      {
+                        label: 'ELIMINATORS',
+                        items: customStageConfig.matches.filter((m) => m.stage === 'ELIM'),
+                      },
+                      {
+                        label: 'SEMI FINALS',
+                        items: customStageConfig.matches.filter((m) => m.stage === 'SF'),
+                      },
+                      {
+                        label: 'GRAND FINAL',
+                        items: customStageConfig.matches.filter((m) => m.stage === 'F'),
+                      },
+                    ].map((stageCol) => {
+                      if (stageCol.items.length === 0) return null;
+
+                      const renderPreviewSlot = (
+                        src: string,
+                        stage: CustomKnockoutMatchDraft['stage']
+                      ) => {
+                        if (!src) {
+                          return (
+                            <span className="text-rose-400 font-mono text-[11px] font-bold">
+                              TBD (Unassigned Slot)
+                            </span>
+                          );
+                        }
+                        if (src.toUpperCase().startsWith('WINNER:')) {
+                          const refCode = src.slice(7).toUpperCase();
+                          return (
+                            <span className="text-sky-300 font-mono text-[11px] font-bold">
+                              TBD · Winner {refCode}
+                            </span>
+                          );
+                        }
+                        const label = formatParticipantSourceLabel(src, {
+                          qualifiedTeams: previewQualifiedSeeds,
+                          teams: state.teams,
+                        });
+                        const isDirectBye = stage === 'SF' || stage === 'F';
+                        return (
+                          <span className="flex items-center justify-between gap-1.5 text-[11px] font-bold text-white">
+                            <span className="truncate">{label}</span>
+                            {isDirectBye && (
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-500/20 border border-emerald-400/35 text-[9px] font-mono text-emerald-300 shrink-0">
+                                DIRECT BYE
+                              </span>
+                            )}
+                          </span>
+                        );
+                      };
+
+                      return (
+                        <div key={stageCol.label} className="space-y-2">
+                          <div className="text-[10px] font-mono font-black uppercase tracking-wider text-slate-400">
+                            {stageCol.label}
+                          </div>
+                          <div className="space-y-2">
+                            {stageCol.items.map((item) => {
+                              const hasErr =
+                                (customValidation.matchErrors[item.matchCode] || []).length > 0;
+                              return (
+                                <div
+                                  key={`prev-${item.matchCode}`}
+                                  className={`p-3 rounded-xl border space-y-1.5 ${
+                                    item.stage === 'F'
+                                      ? 'bg-gradient-to-r from-amber-500/15 to-orange-500/10 border-amber-400/40'
+                                      : hasErr
+                                      ? 'bg-rose-500/10 border-rose-400/50'
+                                      : 'bg-slate-950/90 border-white/10'
+                                  }`}
+                                >
+                                  <div className="flex items-center justify-between text-[10px] font-mono">
+                                    <span className="font-black text-amber-300">
+                                      {item.matchCode}: {item.matchLabel}
+                                    </span>
+                                    <span className="text-slate-400">
+                                      {item.courtName || `Court ${item.court || 1}`}
+                                      {item.scheduledTime ? ` · ${item.scheduledTime}` : ''}
+                                    </span>
+                                  </div>
+                                  <div className="p-2 rounded-lg bg-slate-900/90 border border-white/5 space-y-1">
+                                    <div>{renderPreviewSlot(item.participantASource, item.stage)}</div>
+                                    <div className="text-[9px] font-mono text-slate-500 uppercase">
+                                      vs
+                                    </div>
+                                    <div>{renderPreviewSlot(item.participantBSource, item.stage)}</div>
+                                  </div>
+                                  {item.stage !== 'F' && (
+                                    <div className="text-[10px] font-mono text-right">
+                                      {item.nextMatchCode ? (
+                                        <span className="text-emerald-300">
+                                          ── Winner {item.matchCode} ──► {item.nextMatchCode} (Slot{' '}
+                                          {item.nextMatchSlot || 'A'})
+                                        </span>
+                                      ) : (
+                                        <span className="text-rose-400 font-bold">
+                                          ⚠ Winner destination unassigned
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Phase 8 Action Buttons inside Live Preview */}
+                  <div className="pt-2 border-t border-white/10 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!customValidation.valid || !eligibility.canGenerate}
+                      onClick={() => executeGenerateBracket(true)}
+                      className={`flex-1 px-3 py-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
+                        customValidation.valid && eligibility.canGenerate
+                          ? 'bg-white/5 hover:bg-white/10 text-amber-300 border-amber-400/40'
+                          : 'bg-white/5 text-slate-600 border-white/5 cursor-not-allowed'
+                      }`}
+                    >
+                      Save Custom Draft
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!customValidation.valid || !eligibility.canGenerate}
+                      onClick={() => handleRequestGenerate(false)}
+                      className={`flex-1 px-3 py-2 rounded-xl text-xs font-black uppercase tracking-wider transition-colors cursor-pointer ${
+                        customValidation.valid && eligibility.canGenerate
+                          ? 'bg-amber-400 hover:bg-amber-300 text-slate-950 shadow'
+                          : 'bg-white/10 text-slate-500 cursor-not-allowed'
+                      }`}
+                    >
+                      Generate &amp; Publish
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
@@ -952,7 +2081,9 @@ export const KnockoutView: React.FC = () => {
                 <strong className="text-white">
                   {getFormatDisplayTitle(activeFormat, requiredTeams)}:
                 </strong>{' '}
-                {activeFormatMeta.blueprintSummary}
+                {isCustomFormat
+                  ? `${customStageConfig.qualifyingTeamsCount} Qualified Teams · ${customStageConfig.eliminatorsCount} Eliminator(s) · ${customStageConfig.semiFinalsCount} Semi Final(s) · 1 Grand Final`
+                  : activeFormatMeta.blueprintSummary}
               </span>
             </div>
           </div>

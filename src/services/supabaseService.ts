@@ -1879,6 +1879,7 @@ export class SupabaseService {
     qualifyingTeamsCount?: number;
     qualificationMode?: KnockoutData['qualificationMode'];
     manualSelectedTeamIds?: string[];
+    customStageConfig?: KnockoutData['customStageConfig'];
     bracketId?: string;
     published?: boolean;
     publishedAt?: number;
@@ -1944,6 +1945,7 @@ export class SupabaseService {
         qualifyingTeamsCount: knockout.qualifyingTeamsCount,
         qualificationMode: knockout.qualificationMode || 'auto',
         manualSelectedTeamIds: Array.isArray(knockout.manualSelectedTeamIds) ? knockout.manualSelectedTeamIds : [],
+        customStageConfig: knockout.customStageConfig,
         bracketId: knockout.bracketId,
         published: knockout.published !== false,
         publishedAt: knockout.publishedAt,
