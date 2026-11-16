@@ -21,6 +21,7 @@ import {
   StandingsRecord,
   Team,
 } from '../../types/tournament';
+import { resolveStandingsQualificationInfo } from '../../utils/playoffEngine';
 
 export interface StandingsShowcaseSectionProps {
   standings: StandingsRecord[];
@@ -67,12 +68,6 @@ function getKnockoutWinnerId(ko: KnockoutMatch): string | undefined {
     return ko.scoreA > ko.scoreB ? ko.teamA : ko.teamB;
   }
   return undefined;
-}
-
-function getQualificationCut(format?: KnockoutData['format']): number {
-  if (format === 'top8') return 8;
-  if (format === 'top2') return 2;
-  return 4;
 }
 
 function getStatusDisplay(status: OfficialTeamStatus): {
@@ -390,10 +385,18 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
       return map;
     }, [teams]);
 
-    const qualificationCut = useMemo(
-      () => getQualificationCut(knockout?.format),
-      [knockout?.format]
+    const qualificationInfo = useMemo(
+      () =>
+        resolveStandingsQualificationInfo({
+          knockout,
+          totalTeamsCount: standings.length,
+          rankedTeamIds: standings.map((r) => r.team.id),
+          forPublicView: true,
+        }),
+      [knockout, standings]
     );
+
+    const qualificationCut = qualificationInfo.configuredCount;
 
     const hasAnyPlayedMatch = useMemo(
       () => standings.some((r) => r.played > 0),
@@ -443,7 +446,10 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
         seen.add(record.team.id);
 
         const officialRank = rows.length + 1;
-        const inQualificationCut = officialRank <= qualificationCut;
+        const inQualificationCut = qualificationInfo.isTeamQualified(
+          record.team.id,
+          officialRank - 1
+        );
 
         // Authoritative status determination
         let status: OfficialTeamStatus = null;
@@ -500,6 +506,7 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
     }, [
       standings,
       qualificationCut,
+      qualificationInfo,
       tournamentQualificationContext,
       hasAnyPlayedMatch,
       teamMap,
@@ -620,8 +627,9 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
 
     const showQualificationCutoffDivider =
       inspectSort === 'official' &&
-      officialEnrichedRows.length > qualificationCut &&
-      qualificationCut > 0;
+      qualificationInfo.hasValidConfig &&
+      officialEnrichedRows.length > 0 &&
+      qualificationInfo.cutoffIndex >= 0;
 
     return (
       <section
@@ -851,7 +859,8 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
                       const isUpdated = Boolean(updatedTeamIds[record.team.id]);
                       const isExpanded = Boolean(expandedMobileIds[record.team.id]);
                       const showCutoffBar =
-                        showQualificationCutoffDivider && officialRank === qualificationCut;
+                        showQualificationCutoffDivider &&
+                        officialRank === qualificationInfo.effectiveCutoffCount;
 
                       return (
                         <React.Fragment key={record.team.id}>
@@ -1060,7 +1069,7 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
 
                           {showCutoffBar && (
                             <div className="px-3.5 py-1.5 bg-emerald-500/10 border-y border-emerald-400/35 flex items-center justify-between text-[10px] font-display font-bold uppercase tracking-wider text-emerald-300">
-                              <span>Top {qualificationCut} Qualification Cutoff</span>
+                              <span>{qualificationInfo.cutoffLineDescription}</span>
                               <span>Knockout Line</span>
                             </div>
                           )}
@@ -1187,7 +1196,8 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
                           const movement = rankMovements[record.team.id] || 0;
                           const isUpdated = Boolean(updatedTeamIds[record.team.id]);
                           const showCutoffRow =
-                            showQualificationCutoffDivider && officialRank === qualificationCut;
+                            showQualificationCutoffDivider &&
+                            officialRank === qualificationInfo.effectiveCutoffCount;
 
                           return (
                             <React.Fragment key={record.team.id}>
@@ -1400,7 +1410,7 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
                                     colSpan={10}
                                     className="px-4 py-1.5 bg-gradient-to-r from-emerald-500/12 via-amber-400/10 to-transparent border-y border-emerald-400/35 text-[10px] font-display font-bold uppercase tracking-[0.18em] text-emerald-300"
                                   >
-                                    Top {qualificationCut} Knockout Qualification Cutoff
+                                    {qualificationInfo.cutoffLineDescription}
                                   </td>
                                 </tr>
                               )}

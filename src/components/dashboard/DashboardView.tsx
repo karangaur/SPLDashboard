@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { formatINR, calculateRegistrationStats } from '../../utils/tournamentEngine';
+import { resolveStandingsQualificationInfo } from '../../utils/playoffEngine';
 import { NavTab } from '../common/Header';
 
 interface DashboardViewProps {
@@ -517,7 +518,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onSelectTab }) => 
 
           <div className="text-[11px] text-slate-400 pt-1 flex items-center justify-between">
             <span>Win = 2 Pts · Tiebreakers: Pts, Wins, Score Diff</span>
-            <span className="text-amber-400 font-medium">Top 4 qualify for playoffs</span>
+            <span className="text-amber-400 font-medium">
+              Top{' '}
+              {
+                resolveStandingsQualificationInfo({
+                  knockout: state.knockout,
+                  playoffSettings: state.settings.playoffSettings,
+                  totalTeamsCount: standings.length,
+                }).configuredCount
+              }{' '}
+              qualify for playoffs
+            </span>
           </div>
         </div>
 

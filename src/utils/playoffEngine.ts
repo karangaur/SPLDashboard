@@ -59,21 +59,29 @@ export function resolveFormatQualifyingCount(
 ): number {
   switch (format) {
     case 'top2':
+    case 'top2_final':
       return 2;
     case 'top3':
+    case 'top3_stepladder':
       return 3;
     case 'top4':
+    case 'top4_semis':
     case 'ipl_top4':
       return 4;
     case 'top5':
+    case 'top5_elim':
       return 5;
     case 'top6':
+    case 'top6_elim':
       return 6;
     case 'top7':
+    case 'top7_elim':
       return 7;
     case 'top8':
+    case 'top8_quarterfinals':
       return 8;
-    case 'custom': {
+    case 'custom':
+    case 'custom_knockout': {
       const n = Number(customCount);
       return Number.isFinite(n) && n >= 2 ? Math.min(32, Math.floor(n)) : 4;
     }
@@ -82,6 +90,182 @@ export function resolveFormatQualifyingCount(
       return Number.isFinite(n) && n >= 2 ? Math.min(32, Math.floor(n)) : 4;
     }
   }
+}
+
+export interface StandingsQualificationInfo {
+  hasValidConfig: boolean;
+  format: PlayoffFormat;
+  configuredCount: number;
+  effectiveCutoffCount: number;
+  cutoffIndex: number;
+  qualificationMode: QualificationMode;
+  isManualMode: boolean;
+  hasCustomManualSelection: boolean;
+  qualifiedTeamIds: string[];
+  cutoffLineDescription: string;
+  shortCutoffLabel: string;
+  headerSubtitle: string;
+  isTeamQualified: (teamId: string, zeroBasedRankIndex: number) => boolean;
+}
+
+/**
+ * Single authoritative resolver for the Official League Standings qualification cutoff line,
+ * dynamic description text, and team qualification badges across Public and Admin views.
+ */
+export function resolveStandingsQualificationInfo(params: {
+  knockout?: KnockoutData | null;
+  playoffSettings?: Partial<PlayoffSettings> | null;
+  totalTeamsCount?: number;
+  rankedTeamIds?: string[];
+  forPublicView?: boolean;
+}): StandingsQualificationInfo {
+  const {
+    knockout,
+    playoffSettings,
+    totalTeamsCount,
+    rankedTeamIds,
+    forPublicView = false,
+  } = params;
+
+  const isEnabled = playoffSettings?.enabled !== false;
+  const koMatches = knockout?.matches || [];
+  const hasStartedBracket = koMatches.some(
+    (m) => m.status === 'live' || m.status === 'paused' || m.status === 'completed'
+  );
+  const isDraftMode = knockout?.published === false;
+
+  const latestPublishedSnapshot = [...(knockout?.versionHistory || [])]
+    .reverse()
+    .find((v) => v.published === true);
+  const hasPublishedSeedsSnapshot =
+    Array.isArray(knockout?.publishedSnapshot) && knockout!.publishedSnapshot.length >= 2;
+
+  const usePublishedLock =
+    forPublicView &&
+    (hasStartedBracket || isDraftMode) &&
+    Boolean(latestPublishedSnapshot || hasPublishedSeedsSnapshot);
+
+  let activeFormat: PlayoffFormat =
+    (usePublishedLock ? latestPublishedSnapshot?.format : undefined) ||
+    knockout?.format ||
+    playoffSettings?.format ||
+    'top4';
+
+  let rawCount: number | undefined;
+  if (usePublishedLock) {
+    rawCount =
+      latestPublishedSnapshot?.qualifyingTeamsCount ??
+      (hasPublishedSeedsSnapshot ? knockout!.publishedSnapshot!.length : undefined) ??
+      knockout?.qualifyingTeamsCount ??
+      playoffSettings?.qualifyingTeamsCount;
+  } else {
+    rawCount =
+      (activeFormat === 'custom'
+        ? knockout?.customStageConfig?.qualifyingTeamsCount
+        : undefined) ??
+      knockout?.qualifyingTeamsCount ??
+      playoffSettings?.qualifyingTeamsCount;
+  }
+
+  const configuredCount = resolveFormatQualifyingCount(activeFormat, rawCount);
+  const hasValidConfig = isEnabled && Number.isFinite(configuredCount) && configuredCount >= 2;
+
+  const totalRows =
+    typeof totalTeamsCount === 'number' && totalTeamsCount >= 0
+      ? totalTeamsCount
+      : rankedTeamIds
+      ? rankedTeamIds.length
+      : 0;
+
+  // Ensure qualification cutoff never exceeds eligible team count while preserving configuredCount for labels
+  const effectiveCutoffCount = hasValidConfig
+    ? totalRows > 0
+      ? Math.min(configuredCount, totalRows)
+      : configuredCount
+    : 0;
+
+  // 0-based index of the final qualifying row (line renders immediately below this row)
+  const cutoffIndex =
+    hasValidConfig && totalRows > 0 ? Math.max(0, effectiveCutoffCount - 1) : -1;
+
+  const qualificationMode: QualificationMode = usePublishedLock
+    ? latestPublishedSnapshot?.qualificationMode || knockout?.qualificationMode || 'auto'
+    : knockout?.qualificationMode || playoffSettings?.qualificationMode || 'auto';
+
+  const isManualMode = qualificationMode === 'manual';
+
+  let qualifiedTeamIds: string[] = [];
+  if (usePublishedLock) {
+    const seeds = hasPublishedSeedsSnapshot
+      ? knockout!.publishedSnapshot!
+      : latestPublishedSnapshot?.qualifiedTeams || [];
+    qualifiedTeamIds = Array.from(
+      new Set(seeds.map((s) => s.teamId).filter(Boolean))
+    ).slice(0, configuredCount);
+  } else if (isManualMode) {
+    const manualRaw =
+      knockout?.manualSelectedTeamIds && knockout.manualSelectedTeamIds.length > 0
+        ? knockout.manualSelectedTeamIds
+        : (knockout?.qualifiedTeams || []).map((q) => q.teamId);
+    qualifiedTeamIds = Array.from(new Set(manualRaw.filter(Boolean))).slice(
+      0,
+      configuredCount
+    );
+  } else if (rankedTeamIds && rankedTeamIds.length > 0) {
+    qualifiedTeamIds = rankedTeamIds.slice(0, effectiveCutoffCount);
+  } else if (knockout?.qualifiedTeams && knockout.qualifiedTeams.length > 0) {
+    qualifiedTeamIds = knockout.qualifiedTeams
+      .map((q) => q.teamId)
+      .filter(Boolean)
+      .slice(0, configuredCount);
+  }
+
+  const qualifiedSet = new Set(qualifiedTeamIds);
+  const topNRankedIds = rankedTeamIds ? rankedTeamIds.slice(0, effectiveCutoffCount) : [];
+  const hasCustomManualSelection =
+    isManualMode &&
+    qualifiedSet.size > 0 &&
+    (topNRankedIds.length === 0 ||
+      qualifiedSet.size !== topNRankedIds.length ||
+      !topNRankedIds.every((id) => qualifiedSet.has(id)));
+
+  const isTeamQualified = (teamId: string, zeroBasedRankIndex: number): boolean => {
+    if (!hasValidConfig) return false;
+    if (usePublishedLock && qualifiedSet.size > 0) {
+      return qualifiedSet.has(teamId);
+    }
+    if (isManualMode) {
+      return qualifiedSet.size > 0 ? qualifiedSet.has(teamId) : false;
+    }
+    return zeroBasedRankIndex >= 0 && zeroBasedRankIndex < effectiveCutoffCount;
+  };
+
+  const shortCutoffLabel = hasValidConfig ? `Top ${configuredCount}` : 'Knockout';
+  const cutoffLineDescription = hasValidConfig
+    ? `Green line signifies Top ${configuredCount} Knockout Qualification Cutoff`
+    : 'Knockout qualification cutoff pending configuration';
+
+  const headerSubtitle = !hasValidConfig
+    ? 'Teams at the conclusion of group play advance to the Knockout Championship Stage.'
+    : isManualMode
+    ? `${configuredCount} teams advance to the Knockout Championship Stage (Manual Qualification configured in Knockout Control Center).`
+    : `Top ${configuredCount} teams at the conclusion of group play advance directly to the Knockout Championship Stage.`;
+
+  return {
+    hasValidConfig,
+    format: activeFormat,
+    configuredCount,
+    effectiveCutoffCount,
+    cutoffIndex,
+    qualificationMode,
+    isManualMode,
+    hasCustomManualSelection,
+    qualifiedTeamIds,
+    cutoffLineDescription,
+    shortCutoffLabel,
+    headerSubtitle,
+    isTeamQualified,
+  };
 }
 
 export function formatFromQualifyingCount(

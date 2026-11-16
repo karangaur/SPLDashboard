@@ -1875,11 +1875,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 matches = [...matches, data.match];
               }
 
-              matches = progressKnockoutMatches(matches, prev.knockout.format);
-              const isIplKo =
-                prev.knockout.format === 'ipl_top4' ||
-                matches.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
-              const iplProgression = isIplKo && matches.length > 0 ? progressIPLPlayoffs(matches) : null;
+              const bracketProg =
+                matches.length > 0
+                  ? progressKnockoutBracket(
+                      matches,
+                      prev.knockout.format,
+                      prev.knockout.qualifiedTeams
+                    )
+                  : null;
 
               if (scoreChanged) {
                 sportsAudio.playScorePing();
@@ -1892,14 +1895,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 ...prev,
                 knockout: {
                   ...prev.knockout,
-                  matches: iplProgression ? iplProgression.matches : matches,
-                  championTeamId: iplProgression ? iplProgression.championTeamId : prev.knockout.championTeamId,
-                  runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : prev.knockout.runnerUpTeamId,
-                  status: iplProgression
-                    ? iplProgression.isCompleted
+                  matches: bracketProg ? bracketProg.matches : matches,
+                  championTeamId: bracketProg
+                    ? bracketProg.championTeamId
+                    : prev.knockout.championTeamId,
+                  runnerUpTeamId: bracketProg
+                    ? bracketProg.runnerUpTeamId
+                    : prev.knockout.runnerUpTeamId,
+                  status: bracketProg
+                    ? bracketProg.isCompleted
                       ? 'completed'
                       : matches.length > 0
-                      ? 'active'
+                      ? prev.knockout.published === false
+                        ? 'draft'
+                        : 'active'
                       : 'draft'
                     : prev.knockout.status,
                 },
@@ -3849,22 +3858,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       format,
       customQualifyingCount ?? currentState.knockout.qualifyingTeamsCount
     );
+    const hasStartedBracket = (currentState.knockout.matches || []).some(
+      (m) => m.status === 'live' || m.status === 'paused' || m.status === 'completed'
+    );
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
       format,
       qualifyingTeamsCount: resolvedCount,
+      publishedSnapshot: hasStartedBracket
+        ? currentState.knockout.publishedSnapshot
+        : undefined,
       updatedAt: Date.now(),
     };
-    setState((prev) => ({
-      ...prev,
-      knockout: nextKnockout,
-    }));
-    if (SupabaseService.isAvailable()) {
-      SupabaseService.savePlayoffState(
-        currentState.registrationSettings.seasonSlug || 'season-4',
-        nextKnockout
-      ).catch(() => {});
-    }
+    persistKnockoutState(nextKnockout, false);
   };
 
   const configureKnockoutQualification = (params: {
@@ -3882,6 +3888,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         params.customStageConfig?.qualifyingTeamsCount ??
         currentState.knockout.qualifyingTeamsCount
     );
+    const hasStartedBracket = (currentState.knockout.matches || []).some(
+      (m) => m.status === 'live' || m.status === 'paused' || m.status === 'completed'
+    );
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
       format: nextFormat,
@@ -3895,18 +3904,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         params.customStageConfig !== undefined
           ? params.customStageConfig
           : currentState.knockout.customStageConfig,
+      publishedSnapshot: hasStartedBracket
+        ? currentState.knockout.publishedSnapshot
+        : undefined,
       updatedAt: Date.now(),
     };
-    setState((prev) => ({
-      ...prev,
-      knockout: nextKnockout,
-    }));
-    if (SupabaseService.isAvailable()) {
-      SupabaseService.savePlayoffState(
-        currentState.registrationSettings.seasonSlug || 'season-4',
-        nextKnockout
-      ).catch(() => {});
-    }
+    persistKnockoutState(nextKnockout, false);
   };
 
   const generateKnockoutBracket = (options?: {
@@ -4095,6 +4098,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       format: activeFormat,
       qualifyingTeamsCount: required,
       qualificationMode: activeQualificationMode,
+      published: shouldPublish,
       qualifiedTeams: qualifiedSeeds,
       customStageConfig: effectiveCustomConfig,
       matches: bracketMatches.map((m) => ({ ...m })),
@@ -4565,6 +4569,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       format: currentState.knockout.format,
       qualifyingTeamsCount: currentState.knockout.qualifyingTeamsCount,
       qualificationMode: currentState.knockout.qualificationMode,
+      published: false,
       qualifiedTeams: currentState.knockout.qualifiedTeams,
       customStageConfig: effectiveCustomConfig,
       matches: progressed.matches.map((m) => ({ ...m })),
@@ -4784,7 +4789,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           format: currentState.knockout.format,
           qualifyingTeamsCount: currentState.knockout.qualifyingTeamsCount,
           qualificationMode: currentState.knockout.qualificationMode,
+          published: true,
           qualifiedTeams: currentState.knockout.qualifiedTeams,
+          customStageConfig: currentState.knockout.customStageConfig,
           matches: currentState.knockout.matches.map((m) => ({ ...m })),
         }
       : undefined;

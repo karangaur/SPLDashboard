@@ -10,7 +10,10 @@ import {
   XCircle,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
-import { normalizePlayoffSettings } from '../../utils/playoffEngine';
+import {
+  normalizePlayoffSettings,
+  resolveStandingsQualificationInfo,
+} from '../../utils/playoffEngine';
 
 export const StandingsView: React.FC = () => {
   const { state, standings, updateSettings } = useTournament();
@@ -18,6 +21,13 @@ export const StandingsView: React.FC = () => {
 
   const playoffSettings = normalizePlayoffSettings(state.settings.playoffSettings);
   const includeKnockoutInStandings = playoffSettings.includeKnockoutInStandings !== false;
+  const qualificationInfo = resolveStandingsQualificationInfo({
+    knockout: state.knockout,
+    playoffSettings: state.settings.playoffSettings,
+    totalTeamsCount: standings.length,
+    rankedTeamIds: standings.map((r) => r.team.id),
+    forPublicView: false,
+  });
 
   const formatStandingText = () => {
     const lines = [
@@ -34,7 +44,11 @@ export const StandingsView: React.FC = () => {
     });
 
     lines.push('----------------------------------------');
-    lines.push('🏆 Top 4 qualify for the Knockout Championship Stage');
+    if (qualificationInfo.hasValidConfig) {
+      lines.push(
+        `🏆 Top ${qualificationInfo.configuredCount} qualify for the Knockout Championship Stage`
+      );
+    }
     return lines.join('\n');
   };
 
@@ -134,8 +148,9 @@ export const StandingsView: React.FC = () => {
               </thead>
               <tbody className="divide-y divide-white/5">
                 {standings.map((row, idx) => {
-                  const isTop4 = idx < 4;
-                  const isCutoff = idx === 3;
+                  const isQualified = qualificationInfo.isTeamQualified(row.team.id, idx);
+                  const isCutoff =
+                    qualificationInfo.hasValidConfig && idx === qualificationInfo.cutoffIndex;
                   const isLeader = idx === 0;
 
                   return (
@@ -144,10 +159,10 @@ export const StandingsView: React.FC = () => {
                         className={`transition-colors hover:bg-white/5 ${
                           isLeader
                             ? 'bg-amber-500/[0.04]'
-                            : isTop4
+                            : isQualified
                             ? 'bg-blue-500/[0.02]'
                             : ''
-                        }`}
+                        } ${isCutoff ? 'border-b-2 border-lime-400/40' : ''}`}
                       >
                         {/* Rank */}
                         <td className="py-4 pl-6">
@@ -168,6 +183,13 @@ export const StandingsView: React.FC = () => {
                                 {isLeader && (
                                   <span className="text-[10px] uppercase font-bold text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded-full border border-amber-400/20">
                                     Leader
+                                  </span>
+                                )}
+                                {isQualified && (
+                                  <span className="text-[10px] uppercase font-bold text-lime-400 bg-lime-400/10 px-1.5 py-0.5 rounded-full border border-lime-400/25">
+                                    {qualificationInfo.isManualMode
+                                      ? 'Qualified'
+                                      : qualificationInfo.shortCutoffLabel}
                                   </span>
                                 )}
                               </div>
@@ -247,11 +269,11 @@ export const StandingsView: React.FC = () => {
                         </td>
                       </tr>
 
-                      {/* Playoff qualification boundary line after #4 */}
-                      {isCutoff && standings.length > 4 && (
-                        <tr className="border-b-2 border-dashed border-amber-500/40 bg-amber-500/[0.03]">
-                          <td colSpan={10} className="py-1 px-6 text-center text-[11px] font-bold uppercase tracking-wider text-amber-400">
-                            ▲ Top 4 Playoff & Knockout Championship Qualification Line ▲
+                      {/* Playoff qualification boundary line after #N */}
+                      {isCutoff && (
+                        <tr className="border-b-2 border-dashed border-lime-400/40 bg-lime-400/[0.03]">
+                          <td colSpan={10} className="py-1 px-6 text-center text-[11px] font-bold uppercase tracking-wider text-lime-400">
+                            ▲ Top {qualificationInfo.configuredCount} Playoff & Knockout Championship Qualification Line ▲
                           </td>
                         </tr>
                       )}
@@ -265,17 +287,19 @@ export const StandingsView: React.FC = () => {
           {/* Mobile Card-Based Standings Presentation */}
           <div className="md:hidden divide-y divide-white/5">
             {standings.map((row, idx) => {
-              const isTop4 = idx < 4;
+              const isQualified = qualificationInfo.isTeamQualified(row.team.id, idx);
+              const isCutoff =
+                qualificationInfo.hasValidConfig && idx === qualificationInfo.cutoffIndex;
               return (
                 <div
                   key={row.team.id}
                   className={`p-4 space-y-3 ${
                     idx === 0
                       ? 'bg-amber-500/5'
-                      : isTop4
+                      : isQualified
                       ? 'bg-blue-500/[0.02]'
                       : ''
-                  }`}
+                  } ${isCutoff ? 'border-b-2 border-lime-400/40' : ''}`}
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2.5">
@@ -288,7 +312,11 @@ export const StandingsView: React.FC = () => {
                           {row.team.name}
                         </h4>
                         <div className="text-[11px] text-slate-400">
-                          {idx === 0 ? 'Tournament Leader' : isTop4 ? 'Playoff Zone' : 'Challenger'}
+                          {idx === 0
+                            ? 'Tournament Leader'
+                            : isQualified
+                            ? 'Playoff Zone'
+                            : 'Challenger'}
                         </div>
                       </div>
                     </div>
@@ -363,9 +391,9 @@ export const StandingsView: React.FC = () => {
                 Scoring Rule: 2 Pts per Win, 0 Pts per Loss. Point Diff is points scored minus points conceded.
               </span>
             </div>
-            <div className="flex items-center gap-1.5 font-semibold text-amber-400">
-              <Award className="w-4 h-4" />
-              <span>Top 4 Teams Qualify for Knockout Championship</span>
+            <div className="flex items-center gap-1.5 font-semibold text-lime-400">
+              <span className="w-2.5 h-2.5 rounded-full bg-lime-400 shrink-0" />
+              <span>{qualificationInfo.cutoffLineDescription}</span>
             </div>
           </div>
         </div>

@@ -236,6 +236,7 @@ export const KnockoutView: React.FC = () => {
         tieBreakerOrder: playoffSettings.tieBreakerOrder,
         disqualifiedTeamIds: state.knockout.disqualifiedTeamIds || [],
         manualTieBreakOrder: state.knockout.manualTieBreakOrder || [],
+        qualifyingCutoff: requiredTeams,
       }),
     [
       state.teams,
@@ -246,6 +247,7 @@ export const KnockoutView: React.FC = () => {
       playoffSettings.tieBreakerOrder,
       state.knockout.disqualifiedTeamIds,
       state.knockout.manualTieBreakOrder,
+      requiredTeams,
     ]
   );
 

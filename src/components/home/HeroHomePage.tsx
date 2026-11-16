@@ -42,6 +42,7 @@ import {
   inferPlayoffRound,
   normalizeMatchStatus,
   normalizePlayoffSettings,
+  resolveStandingsQualificationInfo,
 } from '../../utils/playoffEngine';
 
 interface HeroHomePageProps {
@@ -295,10 +296,25 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       lines.push(`${idx + 1}. ${r.team.name} | P:${r.played} W:${r.won} L:${r.lost} Diff:${r.diff > 0 ? `+${r.diff}` : r.diff} | Pts:${r.points}`);
     });
     lines.push('---------------------------------------');
+    if (standingsQualificationInfo.hasValidConfig) {
+      lines.push(`🏆 Top ${standingsQualificationInfo.configuredCount} Knockout Qualification Cutoff`);
+    }
     navigator.clipboard.writeText(lines.join('\n'));
     setCopiedStandings(true);
     setTimeout(() => setCopiedStandings(false), 2000);
   };
+
+  const standingsQualificationInfo = useMemo(
+    () =>
+      resolveStandingsQualificationInfo({
+        knockout: state.knockout,
+        playoffSettings: state.settings.playoffSettings,
+        totalTeamsCount: standings.length,
+        rankedTeamIds: standings.map((r) => r.team.id),
+        forPublicView: true,
+      }),
+    [state.knockout, state.settings.playoffSettings, standings]
+  );
 
   return (
     <div className="min-h-screen bg-[#04060e] text-slate-100 selection:bg-amber-400 selection:text-slate-950 font-sans relative overflow-x-hidden">
@@ -606,7 +622,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 Official League Standings
               </h2>
               <p className="text-sm text-slate-400 mt-1">
-                Top 4 teams at the conclusion of group play advance directly to the Knockout Semifinals.
+                {standingsQualificationInfo.headerSubtitle}
               </p>
             </div>
 
@@ -631,12 +647,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               {/* Mobile Standings Card View (< 640px) */}
               <div className="sm:hidden divide-y divide-white/5">
                 {standings.map((row, idx) => {
-                  const isTop4 = idx < 4;
+                  const isQualified = standingsQualificationInfo.isTeamQualified(row.team.id, idx);
+                  const isCutoffRow =
+                    standingsQualificationInfo.hasValidConfig &&
+                    idx === standingsQualificationInfo.cutoffIndex;
                   return (
                     <div
                       key={row.team.id}
                       className={`p-4 space-y-2.5 ${
-                        idx === 3 ? 'border-b-2 border-lime-400/40' : ''
+                        isCutoffRow ? 'border-b-2 border-lime-400/40' : ''
                       }`}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -646,9 +665,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                           </span>
                           <span className="text-lg shrink-0">{row.team.badge || '🏸'}</span>
                           <span className="font-bold text-white text-sm truncate">{row.team.name}</span>
-                          {isTop4 && (
+                          {isQualified && (
                             <span className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-lime-400/15 text-lime-400 border border-lime-400/30 shrink-0">
-                              Top 4
+                              {standingsQualificationInfo.isManualMode
+                                ? 'Qualified'
+                                : standingsQualificationInfo.shortCutoffLabel}
                             </span>
                           )}
                         </div>
@@ -700,12 +721,15 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   </thead>
                   <tbody className="divide-y divide-white/5 font-mono text-xs">
                     {standings.map((row, idx) => {
-                      const isTop4 = idx < 4;
+                      const isQualified = standingsQualificationInfo.isTeamQualified(row.team.id, idx);
+                      const isCutoffRow =
+                        standingsQualificationInfo.hasValidConfig &&
+                        idx === standingsQualificationInfo.cutoffIndex;
                       return (
                         <tr
                           key={row.team.id}
                           className={`hover:bg-white/[0.04] transition-colors ${
-                            idx === 3 ? 'border-b-2 border-lime-400/40' : ''
+                            isCutoffRow ? 'border-b-2 border-lime-400/40' : ''
                           }`}
                         >
                           <td className="px-5 py-4 text-center font-bold">
@@ -716,7 +740,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                             <div className="flex items-center gap-2.5">
                               <span className="text-lg">{row.team.badge || '🏸'}</span>
                               <span>{row.team.name}</span>
-                              {isTop4 && (
+                              {isQualified && (
                                 <span className="hidden sm:inline px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider bg-lime-400/15 text-lime-400 border border-lime-400/30">
                                   Playoff
                                 </span>
@@ -763,7 +787,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               <div className="px-4 sm:px-6 py-3.5 bg-slate-950/90 border-t border-white/5 flex flex-col sm:flex-row items-center justify-between text-xs text-slate-400 gap-2 text-center sm:text-left">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-lime-400 shrink-0" />
-                  <span>Green line signifies Top 4 Knockout Qualification Cutoff</span>
+                  <span>{standingsQualificationInfo.cutoffLineDescription}</span>
                 </div>
                 <span>BWF Badminton Standard Tiebreak Applied</span>
               </div>
