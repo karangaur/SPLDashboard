@@ -871,7 +871,7 @@ export const TokensView: React.FC = () => {
                   showNotice(res.error || 'Failed to generate match schedule.', 'error');
                 }
               }}
-              className="text-xs font-bold text-amber-400 hover:underline self-start sm:self-auto"
+              className="min-h-[40px] px-2 inline-flex items-center text-xs font-bold text-amber-400 hover:underline self-start sm:self-auto cursor-pointer"
             >
               Generate Match Schedule from These Teams →
             </button>
@@ -906,9 +906,9 @@ export const TokensView: React.FC = () => {
                           onClick={() => setEditingTeamId(team.id)}
                           title={`Edit ${team.name} members`}
                           aria-label={`Edit ${team.name}`}
-                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-black/25 hover:bg-black/40 text-white text-[10px] font-bold tracking-normal normal-case border border-white/20 transition-colors"
+                          className="inline-flex items-center gap-1 px-2.5 py-1 min-h-[32px] rounded-lg bg-black/30 hover:bg-black/45 text-white text-[10px] font-bold tracking-normal normal-case border border-white/25 transition-colors cursor-pointer"
                         >
-                          <Edit2 className="w-2.5 h-2.5" />
+                          <Edit2 className="w-3 h-3" />
                           <span>Edit</span>
                         </button>
                         <span>{team.badge || '🏸'}</span>

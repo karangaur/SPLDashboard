@@ -323,7 +323,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                     role="tab"
                     aria-selected={isActive}
                     onClick={() => handleSelectTab(tab.id)}
-                    className={`px-3 py-2 min-h-[40px] rounded-lg text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
+                    className={`px-3 py-2 min-h-[44px] rounded-lg text-xs font-display font-bold uppercase tracking-wider whitespace-nowrap flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 ${
                       isActive
                         ? tab.id === 'live'
                           ? 'bg-red-600 text-white shadow-md shadow-red-600/30'
@@ -352,7 +352,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                 <button
                   type="button"
                   onClick={() => setSelectedCourt('all')}
-                  className={`px-3 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                  className={`px-3 py-2 min-h-[40px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
                     selectedCourt === 'all'
                       ? 'bg-white/15 text-white'
                       : 'text-slate-400 hover:text-white'
@@ -368,7 +368,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                       key={c}
                       type="button"
                       onClick={() => setSelectedCourt(c)}
-                      className={`px-3 py-1.5 min-h-[36px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
+                      className={`px-3 py-2 min-h-[40px] rounded-lg text-[11px] font-bold whitespace-nowrap transition-colors cursor-pointer ${
                         isActive
                           ? 'bg-amber-400/20 text-amber-300 border border-amber-400/35'
                           : 'text-slate-400 hover:text-white'
@@ -514,9 +514,9 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                         </div>
 
                         {/* MAIN MATCH AREA: Left Team 1 | Center Score / VS | Right Team 2 */}
-                        <div className="grid grid-cols-12 gap-2 items-center py-1">
+                        <div className="grid grid-cols-12 gap-1.5 sm:gap-2 items-center py-1">
                           {/* LEFT: Team 1 */}
-                          <div className="col-span-5 flex flex-col items-center text-center min-w-0 space-y-1.5">
+                          <div className="col-span-4 sm:col-span-5 flex flex-col items-center text-center min-w-0 space-y-1.5">
                             <div
                               className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-xl sm:text-2xl shadow-md ring-1 ${
                                 isWinnerA
@@ -545,7 +545,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                           </div>
 
                           {/* CENTRE: Score Display or VS */}
-                          <div className="col-span-2 flex flex-col items-center justify-center text-center min-w-0">
+                          <div className="col-span-4 sm:col-span-2 flex flex-col items-center justify-center text-center min-w-0">
                             {hasStartedScore ? (
                               <div className="space-y-0.5">
                                 <div
@@ -559,7 +559,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                                   <span className="mx-0.5 text-slate-500">:</span>
                                   {sB}
                                 </div>
-                                <span className="block text-[9px] font-display font-bold uppercase tracking-widest text-slate-400">
+                                <span className="block text-[9px] font-display font-bold uppercase tracking-wider sm:tracking-widest text-slate-400">
                                   {isLive ? 'Points' : isPaused ? 'Pause' : 'Completed'}
                                 </span>
                               </div>
@@ -571,7 +571,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                           </div>
 
                           {/* RIGHT: Team 2 */}
-                          <div className="col-span-5 flex flex-col items-center text-center min-w-0 space-y-1.5">
+                          <div className="col-span-4 sm:col-span-5 flex flex-col items-center text-center min-w-0 space-y-1.5">
                             <div
                               className={`w-11 h-11 sm:w-12 sm:h-12 rounded-xl flex items-center justify-center text-xl sm:text-2xl shadow-md ring-1 ${
                                 isWinnerB
@@ -670,7 +670,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
               </span>
             </div>
 
-            {knockout?.format === 'ipl_top4' && knockout.matches.length > 0 ? (
+            {knockout && knockout.published !== false && knockout.matches.length > 0 ? (
               <div className="pt-5">
                 <IPLPlayoffBracket
                   mode="public"

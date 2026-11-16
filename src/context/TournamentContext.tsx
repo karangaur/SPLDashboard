@@ -7,6 +7,8 @@ import {
   KnockoutData,
   KnockoutMatch,
   PlayoffFormat,
+  QualificationMode,
+  KnockoutBracketSnapshot,
   PlayoffAuditEntry,
   PlayoffQualifiedSeed,
   Registration,
@@ -35,11 +37,17 @@ import {
 import {
   DEFAULT_PLAYOFF_SETTINGS,
   normalizePlayoffSettings,
+  resolveFormatQualifyingCount,
+  getFormatDisplayTitle,
   calculatePlayoffLeagueStandings,
   evaluatePlayoffGenerationEligibility,
   generateIPLPlayoffBracket,
+  generateFlexibleKnockoutBracket,
   canStartOrScorePlayoffMatch,
   progressIPLPlayoffs,
+  progressKnockoutBracket,
+  findDownstreamDependentMatches,
+  validateKnockoutBracketConfig,
   createPlayoffAuditEntry,
   inferPlayoffRound,
   extractCompletedMatchStats,
@@ -171,14 +179,49 @@ interface TournamentContextType {
   clearResults: () => void;
   clearAllMatches: () => void;
   
-  // Knockout & IPL Playoff Management
-  setKnockoutFormat: (format: PlayoffFormat) => void;
-  generateKnockoutBracket: (options?: { overrideTop4Ids?: string[] }) => { success: boolean; error?: string };
-  updateKnockoutMatch: (id: string, updates: Partial<KnockoutMatch>) => { success: boolean; error?: string };
+  // Knockout & Playoff Management
+  setKnockoutFormat: (format: PlayoffFormat, customQualifyingCount?: number) => void;
+  configureKnockoutQualification: (params: {
+    format?: PlayoffFormat;
+    qualifyingTeamsCount?: number;
+    qualificationMode?: QualificationMode;
+    manualSelectedTeamIds?: string[];
+  }) => void;
+  generateKnockoutBracket: (options?: {
+    format?: PlayoffFormat;
+    qualifyingTeamsCount?: number;
+    qualificationMode?: QualificationMode;
+    manualTeamIds?: string[];
+    overrideTop4Ids?: string[];
+    saveAsDraft?: boolean;
+  }) => { success: boolean; error?: string };
+  updateKnockoutMatch: (
+    id: string,
+    updates: Partial<KnockoutMatch>,
+    options?: { forceCascadeDownstream?: boolean }
+  ) => {
+    success: boolean;
+    error?: string;
+    dependencyWarning?: boolean;
+    dependentMatches?: KnockoutMatch[];
+  };
+  saveKnockoutDraft: (
+    draftMatches?: KnockoutMatch[]
+  ) => { success: boolean; error?: string; warnings?: string[] };
+  rollbackKnockoutVersion: (versionId: string) => { success: boolean; error?: string };
+  resetSingleKnockoutMatch: (
+    matchId: string,
+    forceCascade?: boolean
+  ) => {
+    success: boolean;
+    error?: string;
+    dependencyWarning?: boolean;
+    dependentMatches?: KnockoutMatch[];
+  };
   clearKnockout: () => void;
   resetPlayoffs: () => void;
   deletePlayoffs: () => void;
-  publishPlayoffs: (published: boolean) => void;
+  publishPlayoffs: (published: boolean) => { success: boolean; error?: string };
   overridePlayoffQualifiedTeams: (top4Ids: [string, string, string, string]) => { success: boolean; error?: string };
   setPlayoffTieBreakOrder: (teamIdsOrder: string[]) => void;
   toggleTeamPlayoffDisqualification: (teamId: string) => void;
@@ -738,15 +781,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                     : prev.knockout.format
                   : prev.knockout.format);
 
-              const progressedKoMatches =
-                matchData !== null
-                  ? progressKnockoutMatches(nextKoMatchesRaw, inferredFormat)
-                  : prev.knockout.matches;
+              const effectiveQualified =
+                playoffMeta?.qualifiedTeams ?? prev.knockout.qualifiedTeams;
 
-              const iplSummary =
-                inferredFormat === 'ipl_top4' && progressedKoMatches.length > 0
-                  ? progressIPLPlayoffs(progressedKoMatches)
+              const bracketProg =
+                matchData !== null && nextKoMatchesRaw.length > 0
+                  ? progressKnockoutBracket(nextKoMatchesRaw, inferredFormat, effectiveQualified)
                   : null;
+
+              const progressedKoMatches = bracketProg
+                ? bracketProg.matches
+                : matchData !== null
+                ? progressKnockoutMatches(nextKoMatchesRaw, inferredFormat)
+                : prev.knockout.matches;
 
               const dbSettings = extractedFromSupabase.settings;
               const dbPayment = extractedFromSupabase.payment;
@@ -760,20 +807,46 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   ...prev.knockout,
                   ...(playoffMeta
                     ? {
+                        qualifyingTeamsCount:
+                          playoffMeta.qualifyingTeamsCount ?? prev.knockout.qualifyingTeamsCount,
+                        qualificationMode:
+                          playoffMeta.qualificationMode ?? prev.knockout.qualificationMode,
+                        manualSelectedTeamIds:
+                          playoffMeta.manualSelectedTeamIds ?? prev.knockout.manualSelectedTeamIds,
                         bracketId: playoffMeta.bracketId ?? prev.knockout.bracketId,
                         published: playoffMeta.published ?? prev.knockout.published,
-                        showOnPublicHomepage: playoffMeta.showOnPublicHomepage ?? prev.knockout.showOnPublicHomepage,
+                        publishedAt: playoffMeta.publishedAt ?? prev.knockout.publishedAt,
+                        publishedSnapshot:
+                          playoffMeta.publishedSnapshot ?? prev.knockout.publishedSnapshot,
+                        versionHistory:
+                          playoffMeta.versionHistory ?? prev.knockout.versionHistory,
+                        showOnPublicHomepage:
+                          playoffMeta.showOnPublicHomepage ?? prev.knockout.showOnPublicHomepage,
                         qualifiedTeams: playoffMeta.qualifiedTeams ?? prev.knockout.qualifiedTeams,
-                        disqualifiedTeamIds: playoffMeta.disqualifiedTeamIds ?? prev.knockout.disqualifiedTeamIds,
-                        manualTieBreakOrder: playoffMeta.manualTieBreakOrder ?? prev.knockout.manualTieBreakOrder,
+                        disqualifiedTeamIds:
+                          playoffMeta.disqualifiedTeamIds ?? prev.knockout.disqualifiedTeamIds,
+                        manualTieBreakOrder:
+                          playoffMeta.manualTieBreakOrder ?? prev.knockout.manualTieBreakOrder,
                         auditLogs: playoffMeta.auditLogs ?? prev.knockout.auditLogs,
                       }
                     : {}),
                   format: inferredFormat,
                   matches: progressedKoMatches,
-                  championTeamId: iplSummary?.championTeamId ?? playoffMeta?.championTeamId ?? prev.knockout.championTeamId,
-                  runnerUpTeamId: iplSummary?.runnerUpTeamId ?? playoffMeta?.runnerUpTeamId ?? prev.knockout.runnerUpTeamId,
-                  status: iplSummary?.isCompleted ? 'completed' : progressedKoMatches.length > 0 ? 'active' : 'draft',
+                  championTeamId:
+                    bracketProg?.championTeamId ??
+                    playoffMeta?.championTeamId ??
+                    prev.knockout.championTeamId,
+                  runnerUpTeamId:
+                    bracketProg?.runnerUpTeamId ??
+                    playoffMeta?.runnerUpTeamId ??
+                    prev.knockout.runnerUpTeamId,
+                  status: bracketProg?.isCompleted
+                    ? 'completed'
+                    : progressedKoMatches.length > 0
+                    ? playoffMeta?.published === false
+                      ? 'draft'
+                      : 'active'
+                    : 'draft',
                 },
                 registrations: regs !== null ? regs : prev.registrations,
                 registrationSettings: {
@@ -1267,26 +1340,29 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   ? nextKnockoutMatches.filter((k) => k.id !== updated.id)
                   : nextKnockoutMatches;
 
-              const progressedKo = progressKnockoutMatches(cleanedKnockoutMatches, prev.knockout.format);
-              const isIplKo =
-                prev.knockout.format === 'ipl_top4' ||
-                progressedKo.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
-              const iplProgression = isIplKo && progressedKo.length > 0 ? progressIPLPlayoffs(progressedKo) : null;
+              const bracketProg =
+                cleanedKnockoutMatches.length > 0
+                  ? progressKnockoutBracket(
+                      cleanedKnockoutMatches,
+                      prev.knockout.format,
+                      prev.knockout.qualifiedTeams
+                    )
+                  : null;
 
               return {
                 ...prev,
                 matches: cleanedMatches,
                 knockout: {
                   ...prev.knockout,
-                  matches: iplProgression ? iplProgression.matches : progressedKo,
-                  championTeamId: iplProgression ? iplProgression.championTeamId : prev.knockout.championTeamId,
-                  runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : prev.knockout.runnerUpTeamId,
-                  status: iplProgression
-                    ? iplProgression.isCompleted
+                  matches: bracketProg ? bracketProg.matches : cleanedKnockoutMatches,
+                  championTeamId: bracketProg ? bracketProg.championTeamId : prev.knockout.championTeamId,
+                  runnerUpTeamId: bracketProg ? bracketProg.runnerUpTeamId : prev.knockout.runnerUpTeamId,
+                  status: bracketProg
+                    ? bracketProg.isCompleted
                       ? 'completed'
-                      : progressedKo.length > 0
-                      ? 'active'
-                      : 'draft'
+                      : prev.knockout.published === false
+                      ? 'draft'
+                      : 'active'
                     : prev.knockout.status,
                 },
               };
@@ -1296,19 +1372,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             localMatchGuardRef.current.delete(deletedId);
             setState((prev) => {
               const remainingKo = prev.knockout.matches.filter((k) => k.id !== deletedId);
-              const progressedKo = progressKnockoutMatches(remainingKo, prev.knockout.format);
-              const isIplKo =
-                prev.knockout.format === 'ipl_top4' ||
-                progressedKo.some((m) => Boolean(inferPlayoffRound(m, prev.knockout.format)));
-              const iplProgression = isIplKo && progressedKo.length > 0 ? progressIPLPlayoffs(progressedKo) : null;
+              const bracketProg =
+                remainingKo.length > 0
+                  ? progressKnockoutBracket(remainingKo, prev.knockout.format, prev.knockout.qualifiedTeams)
+                  : null;
               return {
                 ...prev,
                 matches: prev.matches.filter((m) => m.id !== deletedId),
                 knockout: {
                   ...prev.knockout,
-                  matches: iplProgression ? iplProgression.matches : progressedKo,
-                  championTeamId: iplProgression ? iplProgression.championTeamId : undefined,
-                  runnerUpTeamId: iplProgression ? iplProgression.runnerUpTeamId : undefined,
+                  matches: bracketProg ? bracketProg.matches : remainingKo,
+                  championTeamId: bracketProg ? bracketProg.championTeamId : undefined,
+                  runnerUpTeamId: bracketProg ? bracketProg.runnerUpTeamId : undefined,
                 },
               };
             });
@@ -1577,8 +1652,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                   ? {
                       ...prev.knockout,
                       format: playoffMeta.format ?? prev.knockout.format,
+                      qualifyingTeamsCount:
+                        playoffMeta.qualifyingTeamsCount ?? prev.knockout.qualifyingTeamsCount,
+                      qualificationMode:
+                        playoffMeta.qualificationMode ?? prev.knockout.qualificationMode,
+                      manualSelectedTeamIds:
+                        playoffMeta.manualSelectedTeamIds ?? prev.knockout.manualSelectedTeamIds,
                       bracketId: playoffMeta.bracketId ?? prev.knockout.bracketId,
                       published: playoffMeta.published ?? prev.knockout.published,
+                      publishedAt: playoffMeta.publishedAt ?? prev.knockout.publishedAt,
+                      publishedSnapshot:
+                        playoffMeta.publishedSnapshot ?? prev.knockout.publishedSnapshot,
+                      versionHistory:
+                        playoffMeta.versionHistory ?? prev.knockout.versionHistory,
                       showOnPublicHomepage: playoffMeta.showOnPublicHomepage ?? prev.knockout.showOnPublicHomepage,
                       qualifiedTeams: playoffMeta.qualifiedTeams ?? prev.knockout.qualifiedTeams,
                       disqualifiedTeamIds: playoffMeta.disqualifiedTeamIds ?? prev.knockout.disqualifiedTeamIds,
@@ -3746,12 +3832,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
   };
 
-  // Knockout Bracket & IPL-Style Top 4 Playoff Engine
-  const setKnockoutFormat = (format: PlayoffFormat) => {
+  // Knockout Bracket & Advanced Flexible Knockout Engine
+  const setKnockoutFormat = (format: PlayoffFormat, customQualifyingCount?: number) => {
     const currentState = stateRef.current;
+    const resolvedCount = resolveFormatQualifyingCount(
+      format,
+      customQualifyingCount ?? currentState.knockout.qualifyingTeamsCount
+    );
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
       format,
+      qualifyingTeamsCount: resolvedCount,
       updatedAt: Date.now(),
     };
     setState((prev) => ({
@@ -3766,10 +3857,65 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
   };
 
-  const generateKnockoutBracket = (options?: { overrideTop4Ids?: string[] }): { success: boolean; error?: string } => {
+  const configureKnockoutQualification = (params: {
+    format?: PlayoffFormat;
+    qualifyingTeamsCount?: number;
+    qualificationMode?: QualificationMode;
+    manualSelectedTeamIds?: string[];
+  }) => {
+    const currentState = stateRef.current;
+    const nextFormat = params.format ?? currentState.knockout.format;
+    const nextCount = resolveFormatQualifyingCount(
+      nextFormat,
+      params.qualifyingTeamsCount ?? currentState.knockout.qualifyingTeamsCount
+    );
+    const nextKnockout: KnockoutData = {
+      ...currentState.knockout,
+      format: nextFormat,
+      qualifyingTeamsCount: nextCount,
+      qualificationMode: params.qualificationMode ?? currentState.knockout.qualificationMode ?? 'auto',
+      manualSelectedTeamIds:
+        params.manualSelectedTeamIds !== undefined
+          ? params.manualSelectedTeamIds
+          : currentState.knockout.manualSelectedTeamIds,
+      updatedAt: Date.now(),
+    };
+    setState((prev) => ({
+      ...prev,
+      knockout: nextKnockout,
+    }));
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.savePlayoffState(
+        currentState.registrationSettings.seasonSlug || 'season-4',
+        nextKnockout
+      ).catch(() => {});
+    }
+  };
+
+  const generateKnockoutBracket = (options?: {
+    format?: PlayoffFormat;
+    qualifyingTeamsCount?: number;
+    qualificationMode?: QualificationMode;
+    manualTeamIds?: string[];
+    overrideTop4Ids?: string[];
+    saveAsDraft?: boolean;
+  }): { success: boolean; error?: string } => {
     const currentState = stateRef.current;
     const playoffSettings = normalizePlayoffSettings(currentState.settings.playoffSettings);
-    const activeFormat: PlayoffFormat = currentState.knockout.format || playoffSettings.format || 'ipl_top4';
+    const activeFormat: PlayoffFormat =
+      options?.format || currentState.knockout.format || playoffSettings.format || 'top4';
+    const required = resolveFormatQualifyingCount(
+      activeFormat,
+      options?.qualifyingTeamsCount ??
+        currentState.knockout.qualifyingTeamsCount ??
+        playoffSettings.qualifyingTeamsCount
+    );
+
+    const activeQualificationMode: QualificationMode =
+      options?.qualificationMode ||
+      (options?.overrideTop4Ids || options?.manualTeamIds ? 'manual' : undefined) ||
+      currentState.knockout.qualificationMode ||
+      'auto';
 
     const disqualifiedIds = currentState.knockout.disqualifiedTeamIds || [];
     const manualTieBreakOrder = currentState.knockout.manualTieBreakOrder || [];
@@ -3783,248 +3929,203 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       manualTieBreakOrder,
     });
 
-    const required = activeFormat === 'top2' ? 2 : activeFormat === 'top8' ? 8 : 4;
+    const explicitManualList =
+      options?.manualTeamIds ||
+      options?.overrideTop4Ids ||
+      (activeQualificationMode === 'manual' ? currentState.knockout.manualSelectedTeamIds : undefined);
 
-    // Validate eligibility rules when overriding isn't explicitly supplying all 4 valid teams
-    const eligibility = evaluatePlayoffGenerationEligibility({
-      rankedActiveCount: leagueStandings.rankedActive.length,
-      leagueMatches: currentState.matches,
-      knockout: { ...currentState.knockout, format: activeFormat },
-      playoffSettings: { ...playoffSettings, format: activeFormat },
-      unresolvedTies: leagueStandings.unresolvedTies,
-    });
+    let selectedTeamIds: string[] = [];
 
-    if (options?.overrideTop4Ids && options.overrideTop4Ids.length === 4) {
-      const uniqueOverride = Array.from(new Set(options.overrideTop4Ids.filter(Boolean)));
-      if (uniqueOverride.length !== 4) {
-        return { success: false, error: 'Qualified teams override must contain 4 distinct teams.' };
+    if (activeQualificationMode === 'manual' && explicitManualList && explicitManualList.length > 0) {
+      const uniqueIds = Array.from(new Set(explicitManualList.filter(Boolean)));
+      if (uniqueIds.length < required) {
+        return {
+          success: false,
+          error: `Please select ${required} distinct teams for ${getFormatDisplayTitle(activeFormat, required)} (currently ${uniqueIds.length} selected).`,
+        };
       }
-      if (!playoffSettings.enabled) {
-        return { success: false, error: 'Playoffs are currently disabled in Tournament Settings.' };
+      const validIds = uniqueIds
+        .slice(0, required)
+        .filter((tid) => currentState.teams.some((t) => t.id === tid));
+      if (validIds.length < required) {
+        return {
+          success: false,
+          error: `All ${required} manually selected teams must exist in the tournament roster.`,
+        };
       }
-    } else if (!eligibility.canGenerate) {
-      return {
-        success: false,
-        error: eligibility.blockingReasons[0] || 'Unable to generate playoffs with current league standings.',
-      };
+      selectedTeamIds = validIds;
+    } else {
+      const eligibility = evaluatePlayoffGenerationEligibility({
+        rankedActiveCount: leagueStandings.rankedActive.length,
+        leagueMatches: currentState.matches,
+        knockout: {
+          ...currentState.knockout,
+          format: activeFormat,
+          qualifyingTeamsCount: required,
+          qualificationMode: 'auto',
+        },
+        playoffSettings: {
+          ...playoffSettings,
+          format: activeFormat,
+          qualifyingTeamsCount: required,
+        },
+        unresolvedTies: leagueStandings.unresolvedTies,
+        requiredTeamsCount: required,
+      });
+
+      if (!eligibility.canGenerate) {
+        return {
+          success: false,
+          error:
+            eligibility.blockingReasons[0] ||
+            `At least ${required} eligible teams are required in League Standings to generate ${getFormatDisplayTitle(activeFormat, required)}.`,
+        };
+      }
+
+      selectedTeamIds = leagueStandings.rankedActive.slice(0, required).map((r) => r.team.id);
     }
 
     const courtsCount = Math.max(1, currentState.settings.courts || 1);
-    const getCourtName = (c: number) =>
-      currentState.settings.courtNames?.[c - 1]?.trim() || `Court ${c}`;
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
+    const bracketId = crypto.randomUUID();
+    const shouldPublish = options?.saveAsDraft ? false : currentState.knockout.published ?? true;
 
-    if (activeFormat === 'ipl_top4') {
-      const top4Ids: [string, string, string, string] =
-        options?.overrideTop4Ids && options.overrideTop4Ids.length === 4
-          ? [
-              options.overrideTop4Ids[0],
-              options.overrideTop4Ids[1],
-              options.overrideTop4Ids[2],
-              options.overrideTop4Ids[3],
-            ]
-          : [
-              leagueStandings.rankedActive[0].team.id,
-              leagueStandings.rankedActive[1].team.id,
-              leagueStandings.rankedActive[2].team.id,
-              leagueStandings.rankedActive[3].team.id,
-            ];
-
-      const bracketId = crypto.randomUUID();
-      const bracketMatches = generateIPLPlayoffBracket({
-        top4TeamIds: top4Ids,
-        courtsCount,
-        courtNames: currentState.settings.courtNames,
-        tournamentDate: currentState.settings.date,
-        bracketId,
-        showOnPublicHomepage: playoffSettings.showOnPublicHomepage,
-      });
-
-      const qualifiedSeeds: PlayoffQualifiedSeed[] = top4Ids.map((tid, idx) => {
-        const standingRow = leagueStandings.allRows.find((r) => r.team.id === tid);
-        const teamObj = currentState.teams.find((t) => t.id === tid);
-        const isOverride =
-          Boolean(options?.overrideTop4Ids) ||
-          leagueStandings.rankedActive[idx]?.team.id !== tid;
-        return {
-          rank: idx + 1,
-          teamId: tid,
-          teamName: standingRow?.team.name || teamObj?.name || `Team ${idx + 1}`,
-          playerNames: standingRow?.playerNames || [],
-          points: standingRow?.points ?? 0,
-          played: standingRow?.played ?? 0,
-          won: standingRow?.won ?? 0,
-          lost: standingRow?.lost ?? 0,
-          matchWinDiff: standingRow?.matchWinDiff ?? 0,
-          setDiff: standingRow?.setDiff ?? 0,
-          pointDiff: standingRow?.pointDiff ?? 0,
-          isManualOverride: isOverride,
-          status: 'qualified',
-        };
-      });
-
-      const auditEntry = createPlayoffAuditEntry(
-        options?.overrideTop4Ids ? 'qualification_overridden' : 'playoffs_generated',
-        options?.overrideTop4Ids
-          ? `Generated SPL Top-4 Playoffs with custom qualification seeding (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`
-          : `Generated SPL Top-4 Playoffs from league standings (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`,
-        actorName
-      );
-
-      const nextKnockout: KnockoutData = {
-        ...currentState.knockout,
-        format: 'ipl_top4',
-        bracketId,
-        published: currentState.knockout.published ?? true,
-        showOnPublicHomepage: playoffSettings.showOnPublicHomepage,
-        status: 'active',
-        qualifiedTeams: qualifiedSeeds,
-        championTeamId: undefined,
-        runnerUpTeamId: undefined,
-        completedAt: undefined,
-        updatedAt: Date.now(),
-        auditLogs: [...(currentState.knockout.auditLogs || []).slice(-49), auditEntry],
-        matches: bracketMatches,
+    const qualifiedSeeds: PlayoffQualifiedSeed[] = selectedTeamIds.map((tid, idx) => {
+      const standingRow = leagueStandings.allRows.find((r) => r.team.id === tid);
+      const teamObj = currentState.teams.find((t) => t.id === tid);
+      const isOverride =
+        activeQualificationMode === 'manual' ||
+        leagueStandings.rankedActive[idx]?.team.id !== tid;
+      return {
+        rank: idx + 1,
+        teamId: tid,
+        teamName: standingRow?.team.name || teamObj?.name || `Team ${idx + 1}`,
+        playerNames: standingRow?.playerNames || [],
+        points: standingRow?.points ?? 0,
+        played: standingRow?.played ?? 0,
+        won: standingRow?.won ?? 0,
+        lost: standingRow?.lost ?? 0,
+        matchWinDiff: standingRow?.matchWinDiff ?? 0,
+        setDiff: standingRow?.setDiff ?? 0,
+        pointDiff: standingRow?.pointDiff ?? 0,
+        isManualOverride: isOverride,
+        status: 'qualified',
       };
+    });
 
-      persistKnockoutState(nextKnockout, true);
-      if (SupabaseService.isAvailable()) {
-        SupabaseService.logAudit(auditEntry.action, 'playoffs', bracketId, {
-          qualifiedSeeds: qualifiedSeeds.map((q) => ({ rank: q.rank, teamId: q.teamId, teamName: q.teamName })),
-        }).catch(() => {});
-      }
-      return { success: true };
-    }
+    const bracketMatches = generateFlexibleKnockoutBracket({
+      format: activeFormat,
+      qualifiedTeamIds: selectedTeamIds,
+      courtsCount,
+      courtNames: currentState.settings.courtNames,
+      tournamentDate: currentState.settings.date,
+      bracketId,
+      showOnPublicHomepage: playoffSettings.showOnPublicHomepage,
+    });
 
-    // Legacy formats: top2 / top4 / top8
-    if (standings.length < required) {
-      return { success: false, error: `At least ${required} teams are required for ${activeFormat.toUpperCase()} bracket.` };
-    }
+    const formatTitle = getFormatDisplayTitle(activeFormat, required);
+    const auditEntry = createPlayoffAuditEntry(
+      activeQualificationMode === 'manual' ? 'qualification_overridden' : 'playoffs_generated',
+      activeQualificationMode === 'manual'
+        ? `Generated ${formatTitle} with manual team seeding (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`
+        : `Generated ${formatTitle} from Official League Standings (${qualifiedSeeds.map((q) => `#${q.rank} ${q.teamName}`).join(', ')})`,
+      actorName
+    );
 
-    const qualified = standings.slice(0, required).map((s) => s.team.id);
-    const bracketMatches: KnockoutMatch[] = [];
-
-    if (activeFormat === 'top2') {
-      const courtNum = 1;
-      bracketMatches.push({
-        id: crypto.randomUUID(),
-        stage: 'F',
-        slot: 1,
-        court: courtNum,
-        courtName: getCourtName(courtNum),
-        time: `Grand Final · ${getCourtName(courtNum)}`,
-        teamA: qualified[0],
-        teamB: qualified[1],
-        status: 'upcoming',
-      });
-    } else if (activeFormat === 'top4') {
-      const sf1Court = 1;
-      const sf2Court = courtsCount >= 2 ? 2 : 1;
-      const finalCourt = 1;
-      bracketMatches.push(
-        {
-          id: crypto.randomUUID(),
-          stage: 'SF',
-          slot: 1,
-          court: sf1Court,
-          courtName: getCourtName(sf1Court),
-          time: `Semi-Final 1 · ${getCourtName(sf1Court)}`,
-          teamA: qualified[0],
-          teamB: qualified[3],
-          status: 'upcoming',
-        },
-        {
-          id: crypto.randomUUID(),
-          stage: 'SF',
-          slot: 2,
-          court: sf2Court,
-          courtName: getCourtName(sf2Court),
-          time: `Semi-Final 2 · ${getCourtName(sf2Court)}`,
-          teamA: qualified[1],
-          teamB: qualified[2],
-          status: 'upcoming',
-        },
-        {
-          id: crypto.randomUUID(),
-          stage: 'F',
-          slot: 1,
-          court: finalCourt,
-          courtName: getCourtName(finalCourt),
-          time: `Grand Final · ${getCourtName(finalCourt)}`,
-          status: 'upcoming',
-        }
-      );
-    } else {
-      const pairings = [
-        [0, 7],
-        [3, 4],
-        [1, 6],
-        [2, 5],
-      ];
-      pairings.forEach((pair, idx) => {
-        const qfCourt = (idx % courtsCount) + 1;
-        bracketMatches.push({
-          id: crypto.randomUUID(),
-          stage: 'ELIM',
-          slot: idx + 1,
-          court: qfCourt,
-          courtName: getCourtName(qfCourt),
-          time: `Quarter-Final ${idx + 1} · ${getCourtName(qfCourt)}`,
-          teamA: qualified[pair[0]],
-          teamB: qualified[pair[1]],
-          status: 'upcoming',
-        });
-      });
-      const sf1Court = 1;
-      const sf2Court = courtsCount >= 2 ? 2 : 1;
-      bracketMatches.push(
-        {
-          id: crypto.randomUUID(),
-          stage: 'SF',
-          slot: 1,
-          court: sf1Court,
-          courtName: getCourtName(sf1Court),
-          time: `Semi-Final 1 · ${getCourtName(sf1Court)}`,
-          status: 'upcoming',
-        },
-        {
-          id: crypto.randomUUID(),
-          stage: 'SF',
-          slot: 2,
-          court: sf2Court,
-          courtName: getCourtName(sf2Court),
-          time: `Semi-Final 2 · ${getCourtName(sf2Court)}`,
-          status: 'upcoming',
-        },
-        {
-          id: crypto.randomUUID(),
-          stage: 'F',
-          slot: 1,
-          court: 1,
-          courtName: getCourtName(1),
-          time: `Grand Final · ${getCourtName(1)}`,
-          status: 'upcoming',
-        }
-      );
-    }
+    const nowTs = Date.now();
+    const snapshotEntry: KnockoutBracketSnapshot = {
+      id: crypto.randomUUID(),
+      version: (currentState.knockout.versionHistory?.length || 0) + 1,
+      label: `${formatTitle} (${shouldPublish ? 'Published' : 'Draft'})`,
+      createdAt: nowTs,
+      createdBy: actorName,
+      format: activeFormat,
+      qualifyingTeamsCount: required,
+      qualificationMode: activeQualificationMode,
+      qualifiedTeams: qualifiedSeeds,
+      matches: bracketMatches.map((m) => ({ ...m })),
+    };
 
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
       format: activeFormat,
-      updatedAt: Date.now(),
+      qualifyingTeamsCount: required,
+      qualificationMode: activeQualificationMode,
+      manualSelectedTeamIds:
+        activeQualificationMode === 'manual'
+          ? selectedTeamIds
+          : currentState.knockout.manualSelectedTeamIds,
+      bracketId,
+      published: shouldPublish,
+      publishedAt: shouldPublish ? nowTs : currentState.knockout.publishedAt,
+      publishedSnapshot: shouldPublish ? qualifiedSeeds : currentState.knockout.publishedSnapshot,
+      versionHistory: [...(currentState.knockout.versionHistory || []).slice(-14), snapshotEntry],
+      showOnPublicHomepage: shouldPublish,
+      status: shouldPublish ? 'active' : 'draft',
+      qualifiedTeams: qualifiedSeeds,
+      championTeamId: undefined,
+      runnerUpTeamId: undefined,
+      completedAt: undefined,
+      updatedAt: nowTs,
+      auditLogs: [...(currentState.knockout.auditLogs || []).slice(-49), auditEntry],
       matches: bracketMatches,
     };
 
     persistKnockoutState(nextKnockout, true);
+    if (SupabaseService.isAvailable()) {
+      SupabaseService.logAudit(auditEntry.action, 'playoffs', bracketId, {
+        format: activeFormat,
+        qualifyingTeamsCount: required,
+        qualificationMode: activeQualificationMode,
+        qualifiedSeeds: qualifiedSeeds.map((q) => ({
+          rank: q.rank,
+          teamId: q.teamId,
+          teamName: q.teamName,
+        })),
+      }).catch(() => {});
+    }
     return { success: true };
   };
 
-  const updateKnockoutMatch = (id: string, updates: Partial<KnockoutMatch>): { success: boolean; error?: string } => {
+  const updateKnockoutMatch = (
+    id: string,
+    updates: Partial<KnockoutMatch>,
+    options?: { forceCascadeDownstream?: boolean }
+  ): {
+    success: boolean;
+    error?: string;
+    dependencyWarning?: boolean;
+    dependentMatches?: KnockoutMatch[];
+  } => {
     const now = Date.now();
     const currentState = stateRef.current;
     const seasonSlug = currentState.registrationSettings.seasonSlug || 'season-4';
     const targetMatch = currentState.knockout.matches.find((m) => m.id === id);
-    if (!targetMatch) return { success: false, error: 'Playoff match not found.' };
+    if (!targetMatch) return { success: false, error: 'Knockout match not found.' };
+
+    // Protect downstream dependencies when editing participants/winner or resetting a match
+    const isAlteringOutcomeOrParticipants =
+      ('teamA' in updates && updates.teamA !== targetMatch.teamA) ||
+      ('teamB' in updates && updates.teamB !== targetMatch.teamB) ||
+      ('participantASource' in updates && updates.participantASource !== targetMatch.participantASource) ||
+      ('participantBSource' in updates && updates.participantBSource !== targetMatch.participantBSource) ||
+      ('winner' in updates && updates.winner !== targetMatch.winner && targetMatch.status === 'completed') ||
+      (updates.status === 'upcoming' && targetMatch.status === 'completed');
+
+    const { startedOrCompletedDownstream: activeDownstream } = findDownstreamDependentMatches(
+      id,
+      currentState.knockout.matches
+    );
+
+    if (isAlteringOutcomeOrParticipants && activeDownstream.length > 0 && !options?.forceCascadeDownstream) {
+      const names = activeDownstream.map((dm) => dm.matchLabel || dm.matchCode || dm.stage).join(', ');
+      return {
+        success: false,
+        dependencyWarning: true,
+        dependentMatches: activeDownstream,
+        error: `Downstream match (${names}) has already started or completed. Confirm cascade update to reset dependent downstream matches.`,
+      };
+    }
 
     const isScoringOrStarting =
       updates.status === 'live' ||
@@ -4034,15 +4135,36 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       updates.sets !== undefined ||
       updates.winner !== undefined;
 
-    if (isScoringOrStarting && (currentState.knockout.format === 'ipl_top4' || targetMatch.playoffRound || targetMatch.isPlayoff)) {
+    if (isScoringOrStarting) {
       const simulatedTarget: KnockoutMatch = { ...targetMatch, ...updates };
-      const eligibility = canStartOrScorePlayoffMatch(
-        simulatedTarget,
-        currentState.knockout.matches,
-        currentState.knockout.format
-      );
-      if (!eligibility.allowed) {
-        return { success: false, error: eligibility.reason || 'Prerequisite playoff match is not completed yet.' };
+      if (!simulatedTarget.teamA || !simulatedTarget.teamB) {
+        return {
+          success: false,
+          error: 'Both competing teams must be assigned or qualified before starting or scoring this knockout match.',
+        };
+      }
+      if (simulatedTarget.teamA === simulatedTarget.teamB) {
+        return {
+          success: false,
+          error: 'A team cannot play against itself in a knockout match.',
+        };
+      }
+      if (
+        currentState.knockout.format === 'ipl_top4' ||
+        targetMatch.playoffRound === 'Q1' ||
+        targetMatch.playoffRound === 'Q2'
+      ) {
+        const eligibility = canStartOrScorePlayoffMatch(
+          simulatedTarget,
+          currentState.knockout.matches,
+          currentState.knockout.format
+        );
+        if (!eligibility.allowed) {
+          return {
+            success: false,
+            error: eligibility.reason || 'Prerequisite knockout match is not completed yet.',
+          };
+        }
       }
     }
 
@@ -4051,9 +4173,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
     const wasCompleted = targetMatch.status === 'completed';
+    const cascadeIds = new Set(
+      options?.forceCascadeDownstream ? activeDownstream.map((dm) => dm.id) : []
+    );
 
     let updatedKoMatch: KnockoutMatch | undefined;
     const updatedMatches = currentState.knockout.matches.map((m) => {
+      if (cascadeIds.has(m.id)) {
+        return {
+          ...m,
+          scoreA: undefined,
+          scoreB: undefined,
+          sets: undefined,
+          winner: undefined,
+          loserId: undefined,
+          completedAt: undefined,
+          status: 'upcoming' as const,
+        };
+      }
       if (m.id !== id) return m;
       const resolvedCourt = updates.court ?? m.court ?? 1;
       const resolvedCourtName =
@@ -4110,30 +4247,28 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       return current;
     });
 
-    const isIpl =
-      currentState.knockout.format === 'ipl_top4' ||
-      updatedMatches.some((m) => Boolean(inferPlayoffRound(m, currentState.knockout.format)));
-
-    let progressed: KnockoutMatch[];
-    let championTeamId = currentState.knockout.championTeamId;
-    let runnerUpTeamId = currentState.knockout.runnerUpTeamId;
-    let playoffStatus: KnockoutData['status'] = currentState.knockout.status;
-    let completedAt = currentState.knockout.completedAt;
-
-    if (isIpl) {
-      const res = progressIPLPlayoffs(updatedMatches);
-      progressed = res.matches;
-      championTeamId = res.championTeamId;
-      runnerUpTeamId = res.runnerUpTeamId;
-      playoffStatus = res.isCompleted ? 'completed' : progressed.length > 0 ? 'active' : 'draft';
-      completedAt = res.isCompleted ? (completedAt || now) : undefined;
-    } else {
-      progressed = progressKnockoutMatches(updatedMatches, currentState.knockout.format);
-    }
+    const bracketProg = progressKnockoutBracket(
+      updatedMatches,
+      currentState.knockout.format,
+      currentState.knockout.qualifiedTeams
+    );
+    const progressed = bracketProg.matches;
+    const championTeamId = bracketProg.championTeamId;
+    const runnerUpTeamId = bracketProg.runnerUpTeamId;
+    const playoffStatus: KnockoutData['status'] = bracketProg.isCompleted
+      ? 'completed'
+      : progressed.length > 0
+      ? currentState.knockout.published === false
+        ? 'draft'
+        : 'active'
+      : 'draft';
+    const completedAt = bracketProg.isCompleted
+      ? currentState.knockout.completedAt || now
+      : undefined;
 
     const auditLogs: PlayoffAuditEntry[] = [...(currentState.knockout.auditLogs || [])];
     if (updatedKoMatch) {
-      const label = updatedKoMatch.matchLabel || updatedKoMatch.playoffRound || updatedKoMatch.stage;
+      const label = updatedKoMatch.matchLabel || updatedKoMatch.matchCode || updatedKoMatch.playoffRound || updatedKoMatch.stage;
       if (updatedKoMatch.status === 'completed' && !wasCompleted) {
         const winTeam = currentState.teams.find((t) => t.id === updatedKoMatch?.winner)?.name || 'Winner';
         auditLogs.push(
@@ -4150,6 +4285,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           createPlayoffAuditEntry(
             'result_corrected',
             `${label} result corrected by admin: ${winTeam} awarded victory; downstream slots synchronized.`,
+            actorName,
+            id
+          )
+        );
+      } else if (
+        'teamA' in updates ||
+        'teamB' in updates ||
+        'participantASource' in updates ||
+        'participantBSource' in updates
+      ) {
+        auditLogs.push(
+          createPlayoffAuditEntry(
+            'bracket_match_edited',
+            `${label} matchup participants updated by admin.`,
             actorName,
             id
           )
@@ -4195,7 +4344,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       auditLogs: auditLogs.slice(-50),
     };
 
-    // Detect any downstream bracket slots updated via progression (e.g. Q1 winner entering Final, Q1 loser entering Q2)
+    // Detect any downstream bracket slots updated via progression
     const progressedUpdates = progressed.filter((pm) => {
       if (pm.id === id) return false;
       const prevMatch = currentState.knockout.matches.find((orig) => orig.id === pm.id);
@@ -4293,12 +4442,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }).catch(() => {});
     }
 
-    // Also persist bracket metadata on /api/tournament/state when non-score metadata or completion changed
+    // Also persist bracket metadata on /api/tournament/state
     if (
       updates.scheduledDate !== undefined ||
       updates.scheduledTime !== undefined ||
       updates.assignedUmpire !== undefined ||
       updates.court !== undefined ||
+      'teamA' in updates ||
+      'teamB' in updates ||
+      'participantASource' in updates ||
+      'participantBSource' in updates ||
       progressedUpdates.length > 0 ||
       updatedKoMatch?.status === 'completed'
     ) {
@@ -4317,18 +4470,159 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return { success: true };
   };
 
+  const saveKnockoutDraft = (
+    draftMatches?: KnockoutMatch[]
+  ): { success: boolean; error?: string; warnings?: string[] } => {
+    const currentState = stateRef.current;
+    const matchesToValidate = draftMatches || currentState.knockout.matches;
+    const validation = validateKnockoutBracketConfig({
+      matches: matchesToValidate,
+      qualifiedTeams: currentState.knockout.qualifiedTeams,
+    });
+    if (!validation.valid) {
+      return {
+        success: false,
+        error: validation.errors[0] || 'Invalid knockout bracket configuration.',
+        warnings: validation.warnings,
+      };
+    }
+
+    const progressed = progressKnockoutBracket(
+      matchesToValidate,
+      currentState.knockout.format,
+      currentState.knockout.qualifiedTeams
+    );
+    const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
+    const nowTs = Date.now();
+    const auditEntry = createPlayoffAuditEntry(
+      'bracket_draft_saved',
+      `Saved knockout bracket configuration draft (${progressed.matches.length} fixtures).`,
+      actorName
+    );
+    const snapshotEntry: KnockoutBracketSnapshot = {
+      id: crypto.randomUUID(),
+      version: (currentState.knockout.versionHistory?.length || 0) + 1,
+      label: `Draft Snapshot · ${getFormatDisplayTitle(currentState.knockout.format, currentState.knockout.qualifyingTeamsCount)}`,
+      createdAt: nowTs,
+      createdBy: actorName,
+      format: currentState.knockout.format,
+      qualifyingTeamsCount: currentState.knockout.qualifyingTeamsCount,
+      qualificationMode: currentState.knockout.qualificationMode,
+      qualifiedTeams: currentState.knockout.qualifiedTeams,
+      matches: progressed.matches.map((m) => ({ ...m })),
+    };
+
+    const nextKnockout: KnockoutData = {
+      ...currentState.knockout,
+      published: false,
+      showOnPublicHomepage: false,
+      status: progressed.isCompleted ? 'completed' : 'draft',
+      matches: progressed.matches,
+      championTeamId: progressed.championTeamId,
+      runnerUpTeamId: progressed.runnerUpTeamId,
+      versionHistory: [...(currentState.knockout.versionHistory || []).slice(-14), snapshotEntry],
+      updatedAt: nowTs,
+      auditLogs: [...(currentState.knockout.auditLogs || []).slice(-49), auditEntry],
+    };
+
+    persistKnockoutState(nextKnockout, true);
+    return { success: true, warnings: validation.warnings };
+  };
+
+  const rollbackKnockoutVersion = (versionId: string): { success: boolean; error?: string } => {
+    const currentState = stateRef.current;
+    const snapshot = (currentState.knockout.versionHistory || []).find((v) => v.id === versionId);
+    if (!snapshot) {
+      return { success: false, error: 'Selected bracket snapshot version was not found.' };
+    }
+    const hasLive = currentState.knockout.matches.some((m) => m.status === 'live');
+    if (hasLive) {
+      return {
+        success: false,
+        error: 'Cannot roll back bracket while a knockout match is currently LIVE.',
+      };
+    }
+
+    const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
+    const progressed = progressKnockoutBracket(
+      snapshot.matches,
+      snapshot.format,
+      snapshot.qualifiedTeams
+    );
+    const auditEntry = createPlayoffAuditEntry(
+      'bracket_rolled_back',
+      `Rolled back knockout bracket to Version v${snapshot.version} (${snapshot.label}).`,
+      actorName
+    );
+
+    const nextKnockout: KnockoutData = {
+      ...currentState.knockout,
+      format: snapshot.format,
+      qualifyingTeamsCount: snapshot.qualifyingTeamsCount,
+      qualificationMode: snapshot.qualificationMode,
+      qualifiedTeams: snapshot.qualifiedTeams,
+      matches: progressed.matches,
+      championTeamId: progressed.championTeamId,
+      runnerUpTeamId: progressed.runnerUpTeamId,
+      status: progressed.isCompleted
+        ? 'completed'
+        : currentState.knockout.published
+        ? 'active'
+        : 'draft',
+      updatedAt: Date.now(),
+      auditLogs: [...(currentState.knockout.auditLogs || []).slice(-49), auditEntry],
+    };
+
+    persistKnockoutState(nextKnockout, true);
+    return { success: true };
+  };
+
+  const resetSingleKnockoutMatch = (
+    matchId: string,
+    forceCascade = false
+  ): {
+    success: boolean;
+    error?: string;
+    dependencyWarning?: boolean;
+    dependentMatches?: KnockoutMatch[];
+  } => {
+    return updateKnockoutMatch(
+      matchId,
+      {
+        status: 'upcoming',
+        scoreA: undefined,
+        scoreB: undefined,
+        sets: undefined,
+        winner: undefined,
+        loserId: undefined,
+        completedAt: undefined,
+      },
+      { forceCascadeDownstream: forceCascade }
+    );
+  };
+
   const resetPlayoffs = () => {
     const currentState = stateRef.current;
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
-    const resetMatches = currentState.knockout.matches.map((m) => {
-      const pr = inferPlayoffRound(m, currentState.knockout.format);
-      const isDownstream =
-        pr === 'Q2' ||
-        pr === 'F' ||
-        (!pr && (m.stage === 'F' || (currentState.knockout.format === 'top8' && m.stage === 'SF')));
+    const resetRaw = currentState.knockout.matches.map((m) => {
+      const hasUpstreamSourceA = Boolean(
+        m.participantASource &&
+          (m.participantASource.startsWith('WINNER:') ||
+            m.participantASource.startsWith('LOSER:') ||
+            m.participantASource.endsWith('_WINNER') ||
+            m.participantASource.endsWith('_LOSER'))
+      );
+      const hasUpstreamSourceB = Boolean(
+        m.participantBSource &&
+          (m.participantBSource.startsWith('WINNER:') ||
+            m.participantBSource.startsWith('LOSER:') ||
+            m.participantBSource.endsWith('_WINNER') ||
+            m.participantBSource.endsWith('_LOSER'))
+      );
       return {
         ...m,
-        ...(isDownstream && !m.manual ? { teamA: undefined, teamB: undefined } : {}),
+        teamA: hasUpstreamSourceA && !m.manual ? undefined : m.teamA,
+        teamB: hasUpstreamSourceB && !m.manual ? undefined : m.teamB,
         scoreA: undefined,
         scoreB: undefined,
         sets: undefined,
@@ -4339,21 +4633,27 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     });
 
+    const progressed = progressKnockoutBracket(
+      resetRaw,
+      currentState.knockout.format,
+      currentState.knockout.qualifiedTeams
+    );
+
     const auditEntry = createPlayoffAuditEntry(
       'playoffs_reset',
-      'Playoff scores and downstream pairings reset to upcoming (league matches & standings preserved).',
+      'Knockout scores and downstream pairings reset to scheduled (league matches & standings preserved).',
       actorName
     );
 
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
-      status: resetMatches.length > 0 ? 'active' : 'draft',
+      status: progressed.matches.length > 0 ? (currentState.knockout.published ? 'active' : 'draft') : 'draft',
       championTeamId: undefined,
       runnerUpTeamId: undefined,
       completedAt: undefined,
       updatedAt: Date.now(),
       auditLogs: [...(currentState.knockout.auditLogs || []).slice(-49), auditEntry],
-      matches: resetMatches,
+      matches: progressed.matches,
     };
 
     persistKnockoutState(nextKnockout, true);
@@ -4364,7 +4664,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
     const auditEntry = createPlayoffAuditEntry(
       'playoffs_deleted',
-      'Deleted current tournament playoff bracket & playoff matches (league matches & standings preserved).',
+      'Deleted current tournament knockout bracket & knockout matches (league matches & standings preserved).',
       actorName
     );
 
@@ -4373,6 +4673,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       bracketId: undefined,
       status: 'draft',
       qualifiedTeams: undefined,
+      publishedSnapshot: undefined,
       championTeamId: undefined,
       runnerUpTeamId: undefined,
       completedAt: undefined,
@@ -4388,26 +4689,72 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     deletePlayoffs();
   };
 
-  const publishPlayoffs = (published: boolean) => {
+  const publishPlayoffs = (published: boolean): { success: boolean; error?: string } => {
     const currentState = stateRef.current;
+    if (published) {
+      const validation = validateKnockoutBracketConfig({
+        matches: currentState.knockout.matches,
+        qualifiedTeams: currentState.knockout.qualifiedTeams,
+      });
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: validation.errors[0] || 'Cannot publish knockout bracket due to validation errors.',
+        };
+      }
+    }
+
+    const nowTs = Date.now();
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
     const auditEntry = createPlayoffAuditEntry(
       published ? 'bracket_published' : 'bracket_unpublished',
-      published ? 'Playoff bracket published to Public Homepage.' : 'Playoff bracket hidden from Public Homepage.',
+      published
+        ? 'Knockout bracket published to Public Website & Match Center.'
+        : 'Knockout bracket switched to Unpublished Draft mode.',
       actorName
     );
+
+    const snapshotEntry: KnockoutBracketSnapshot | undefined = published
+      ? {
+          id: crypto.randomUUID(),
+          version: (currentState.knockout.versionHistory?.length || 0) + 1,
+          label: `Published · ${getFormatDisplayTitle(currentState.knockout.format, currentState.knockout.qualifyingTeamsCount)}`,
+          createdAt: nowTs,
+          createdBy: actorName,
+          format: currentState.knockout.format,
+          qualifyingTeamsCount: currentState.knockout.qualifyingTeamsCount,
+          qualificationMode: currentState.knockout.qualificationMode,
+          qualifiedTeams: currentState.knockout.qualifiedTeams,
+          matches: currentState.knockout.matches.map((m) => ({ ...m })),
+        }
+      : undefined;
+
     const nextKnockout: KnockoutData = {
       ...currentState.knockout,
       published,
+      publishedAt: published ? nowTs : currentState.knockout.publishedAt,
+      publishedSnapshot: published
+        ? currentState.knockout.qualifiedTeams
+        : currentState.knockout.publishedSnapshot,
+      versionHistory: snapshotEntry
+        ? [...(currentState.knockout.versionHistory || []).slice(-14), snapshotEntry]
+        : currentState.knockout.versionHistory,
       showOnPublicHomepage: published,
-      updatedAt: Date.now(),
+      status:
+        currentState.knockout.status === 'completed'
+          ? 'completed'
+          : published && currentState.knockout.matches.length > 0
+          ? 'active'
+          : 'draft',
+      updatedAt: nowTs,
       auditLogs: [...(currentState.knockout.auditLogs || []).slice(-49), auditEntry],
     };
     persistKnockoutState(nextKnockout, false);
+    return { success: true };
   };
 
   const overridePlayoffQualifiedTeams = (top4Ids: [string, string, string, string]): { success: boolean; error?: string } => {
-    return generateKnockoutBracket({ overrideTop4Ids: top4Ids });
+    return generateKnockoutBracket({ overrideTop4Ids: top4Ids, qualificationMode: 'manual', manualTeamIds: top4Ids });
   };
 
   const setPlayoffTieBreakOrder = (teamIdsOrder: string[]) => {
@@ -4439,8 +4786,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     const auditEntry = createPlayoffAuditEntry(
       isCurrentlyDq ? 'team_restored' : 'team_disqualified',
       isCurrentlyDq
-        ? `Restored ${teamName} to playoff eligibility.`
-        : `Excluded ${teamName} from playoff qualification.`,
+        ? `Restored ${teamName} to knockout eligibility.`
+        : `Excluded ${teamName} from knockout qualification.`,
       actorName
     );
     const nextKnockout: KnockoutData = {
@@ -5851,8 +6198,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         clearResults,
         clearAllMatches,
         setKnockoutFormat,
+        configureKnockoutQualification,
         generateKnockoutBracket,
         updateKnockoutMatch,
+        saveKnockoutDraft,
+        rollbackKnockoutVersion,
+        resetSingleKnockoutMatch,
         clearKnockout,
         resetPlayoffs,
         deletePlayoffs,

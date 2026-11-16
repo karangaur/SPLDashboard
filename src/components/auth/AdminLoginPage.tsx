@@ -101,31 +101,34 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
       </div>
 
       {/* Top Bar / Minimal Navigation */}
-      <header className="relative z-10 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 flex items-center justify-between border-b border-white/5">
-        <div className="flex items-center gap-3">
+      <header className="relative z-10 w-full max-w-7xl mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-5 flex flex-wrap items-center justify-between gap-2.5 border-b border-white/5 min-w-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <img
             src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
             alt="Smash Premier League"
-            className="h-10 sm:h-12 w-auto object-contain drop-shadow"
+            decoding="async"
+            className="h-9 sm:h-12 w-auto object-contain drop-shadow shrink-0"
           />
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-display text-lg font-black tracking-tight text-white uppercase">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+              <span className="font-display text-sm sm:text-lg font-black tracking-tight text-white uppercase truncate">
                 Smash Premier League
               </span>
-              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono">
+              <span className="px-2 py-0.5 rounded text-[10px] font-black uppercase tracking-wider bg-amber-400 text-slate-950 font-mono shrink-0">
                 ADMIN
               </span>
             </div>
-            <p className="text-xs text-slate-400 font-medium">Maharajganj Badminton Tournament Suite</p>
+            <p className="text-[11px] sm:text-xs text-slate-400 font-medium truncate">
+              Maharajganj Badminton Tournament Suite
+            </p>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           {onBackToHome && (
             <button
               onClick={onBackToHome}
-              className="px-3.5 py-1.5 text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all"
+              className="px-3 py-2 min-h-[40px] text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-all cursor-pointer"
             >
               ← Tournament Home
             </button>
@@ -136,49 +139,51 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             <button
               type="button"
               onClick={onGoToPublicRegister}
-              className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all"
+              className="flex items-center gap-2 px-3 py-2 min-h-[40px] text-xs font-semibold text-lime-400 bg-lime-400/10 hover:bg-lime-400/20 border border-lime-400/30 rounded-xl transition-all cursor-pointer"
             >
               <span>Public Registration</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <ArrowRight className="w-3.5 h-3.5 shrink-0" />
             </button>
           )}
         </div>
       </header>
 
       {/* Main Content: Split-Screen on Desktop */}
-      <main className="relative z-10 flex-1 max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 lg:py-12 flex items-center">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 w-full items-center">
+      <main className="relative z-10 flex-1 max-w-7xl mx-auto w-full px-3.5 sm:px-6 lg:px-8 py-6 sm:py-8 lg:py-12 flex items-center">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 sm:gap-10 lg:gap-14 w-full items-center">
           
           {/* Left Column: Athletic Badminton Stadium Showcase (55%) */}
-          <div className="lg:col-span-7 flex flex-col justify-center space-y-8">
+          <div className="lg:col-span-7 flex flex-col justify-center space-y-6 sm:space-y-8">
             <div className="space-y-4">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-lime-500/10 border border-lime-500/30 text-lime-400 text-xs font-bold tracking-wide uppercase">
-                <Zap className="w-3.5 h-3.5 animate-pulse" />
+                <Zap className="w-3.5 h-3.5 animate-pulse shrink-0" />
                 <span>Season IV Championship Portal</span>
               </div>
 
-              <h1 className="text-4xl sm:text-5xl lg:text-6xl font-black font-display tracking-tight text-white uppercase leading-[1.08]">
+              <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black font-display tracking-tight text-white uppercase leading-[1.08]">
                 Built for <br />
                 <span className="bg-gradient-to-r from-lime-400 via-emerald-300 to-cyan-400 bg-clip-text text-transparent">
                   The Game.
                 </span>
               </h1>
 
-              <p className="text-base sm:text-lg text-slate-300 max-w-xl font-normal leading-relaxed">
+              <p className="text-sm sm:text-lg text-slate-300 max-w-xl font-normal leading-relaxed">
                 Take full command of your badminton league. Live scoring, automated round-robin and knockout brackets, real-time player draft, and verified athlete registrations in one arena.
               </p>
             </div>
 
             {/* Athletic Visual Banner / Badminton Action Graphic */}
-            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900/90 via-[#0a0f1e] to-slate-950 p-6 shadow-2xl backdrop-blur-md">
-              <div className="flex flex-col sm:flex-row items-center gap-6">
+            <div className="relative rounded-2xl overflow-hidden border border-white/10 bg-gradient-to-br from-slate-900/90 via-[#0a0f1e] to-slate-950 p-4 sm:p-6 shadow-2xl backdrop-blur-md">
+              <div className="flex flex-col sm:flex-row items-center gap-5 sm:gap-6">
                 
                 {/* Official 3D Tournament Badge */}
-                <div className="relative shrink-0 w-28 h-28 sm:w-32 sm:h-32 rounded-2xl bg-gradient-to-tr from-blue-600/20 via-sky-500/10 to-amber-500/15 border border-blue-400/30 flex items-center justify-center p-2 shadow-inner">
+                <div className="relative shrink-0 w-24 h-24 sm:w-32 sm:h-32 rounded-2xl bg-gradient-to-tr from-blue-600/20 via-sky-500/10 to-amber-500/15 border border-blue-400/30 flex items-center justify-center p-2 shadow-inner">
                   <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,rgba(59,130,246,0.25)_0%,transparent_70%)]" />
                   <img
                     src="/assets/aistudio/7fdef8a3-3175-4f56-903d-bb6551369ac1_16fe4ad8.png"
                     alt="Smash Premier League 3D Logo"
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-contain drop-shadow-[0_4px_12px_rgba(37,99,235,0.4)]"
                   />
                 </div>

@@ -385,6 +385,8 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
           <img
             src={imageToRender}
             alt=""
+            decoding="async"
+            fetchPriority="high"
             className={`w-full h-full ${
               animationsActive && animations.backgroundMotion && background.backgroundMotion
                 ? 'transition-transform duration-1000 scale-[1.02]'
@@ -404,6 +406,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
             <img
               src={posterToRender}
               alt=""
+              decoding="async"
               className="w-full h-full object-cover"
               style={{ objectPosition: `${focalX}% ${focalY}%` }}
             />
@@ -502,7 +505,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
           type="button"
           onClick={toggleVideoPlay}
           aria-label={videoManuallyPaused ? 'Play background video' : 'Pause background video'}
-          className="absolute bottom-3 right-3 z-20 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-950/75 hover:bg-slate-900 border border-white/15 text-[11px] font-semibold text-slate-200 backdrop-blur-md transition-colors cursor-pointer"
+          className="absolute bottom-3 right-3 z-20 inline-flex items-center justify-center gap-1.5 px-3 py-2 min-h-[44px] min-w-[44px] rounded-xl bg-slate-950/75 hover:bg-slate-900 border border-white/15 text-[11px] font-semibold text-slate-200 backdrop-blur-md transition-colors cursor-pointer"
         >
           {videoManuallyPaused ? <Play className="w-3.5 h-3.5 text-amber-300" /> : <Pause className="w-3.5 h-3.5 text-amber-300" />}
           <span className="hidden sm:inline">{videoManuallyPaused ? 'Play Video' : 'Pause Video'}</span>
@@ -531,6 +534,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                     <img
                       src={logo.customLogoUrl}
                       alt="Smash Premier League Official Logo"
+                      decoding="async"
                       className={`${customLogoHeightClass} w-auto max-w-[220px] sm:max-w-[320px] object-contain drop-shadow-[0_12px_28px_rgba(0,0,0,0.65)]`}
                     />
                     {logo.subtitle && (
@@ -783,17 +787,11 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
         {theme.showInfoStrip && (
           <div
             aria-label="Live Tournament Information Strip"
-            className="mt-8 sm:mt-10 rounded-2xl border border-white/10 bg-[#0b0e18]/85 backdrop-blur-md p-3.5 sm:p-4 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
+            className="mt-7 sm:mt-10 rounded-2xl border border-white/10 bg-[#0b0e18]/85 backdrop-blur-md p-3.5 sm:p-4 shadow-[0_18px_40px_-20px_rgba(0,0,0,0.9)]"
           >
-            <div
-              className={`grid ${
-                isMobileViewport
-                  ? 'grid-cols-1 gap-3 divide-y divide-white/10'
-                  : 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 divide-y sm:divide-y-0 sm:divide-x divide-white/10'
-              }`}
-            >
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-3 sm:gap-4 lg:divide-x lg:divide-white/10">
               {/* 1. Tournament Name */}
-              <div className="pt-1 sm:pt-0 sm:pr-3 min-w-0">
+              <div className="col-span-2 sm:col-span-1 pb-2.5 sm:pb-0 border-b sm:border-b-0 border-white/10 lg:pr-3 min-w-0">
                 <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
                   Tournament
                 </span>
@@ -806,27 +804,27 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
               </div>
 
               {/* 2. Current Stage */}
-              <div className="pt-2.5 sm:pt-0 sm:pl-4 sm:pr-3 min-w-0">
+              <div className="pb-2.5 sm:pb-0 border-b sm:border-b-0 border-white/10 lg:pl-4 lg:pr-3 min-w-0">
                 <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
                   Current Stage
                 </span>
-                <span className="mt-1 block text-sm sm:text-base font-display font-black text-amber-300 break-words sm:truncate">
+                <span className="mt-1 block text-xs sm:text-base font-display font-black text-amber-300 break-words sm:truncate">
                   {currentTournamentStage}
                 </span>
               </div>
 
               {/* 3. Registered Teams */}
-              <div className="pt-2.5 sm:pt-0 sm:pl-4 sm:pr-3 min-w-0">
+              <div className="pb-2.5 sm:pb-0 border-b sm:border-b-0 border-white/10 lg:pl-4 lg:pr-3 min-w-0">
                 <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
                   Registered Teams
                 </span>
-                <span className="mt-1 block text-sm sm:text-base font-mono font-black text-white tabular-nums">
+                <span className="mt-1 block text-xs sm:text-base font-mono font-black text-white tabular-nums">
                   {teamsCount > 0 ? `${teamsCount} Teams` : 'No Teams Yet'}
                 </span>
               </div>
 
               {/* 4. Active Live Matches */}
-              <div className="pt-2.5 sm:pt-0 sm:pl-4 sm:pr-3 min-w-0">
+              <div className="lg:pl-4 lg:pr-3 min-w-0">
                 <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
                   Active Live Matches
                 </span>
@@ -835,7 +833,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                     <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
                   )}
                   <span
-                    className={`text-sm sm:text-base font-mono font-black tabular-nums ${
+                    className={`text-xs sm:text-base font-mono font-black tabular-nums ${
                       liveMatchesCount > 0 ? 'text-red-400' : 'text-slate-300'
                     }`}
                   >
@@ -845,7 +843,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
               </div>
 
               {/* 5. Next / Active Match Info */}
-              <div className="pt-2.5 sm:pt-0 sm:pl-4 min-w-0">
+              <div className="lg:pl-4 min-w-0">
                 <span className="block text-[10px] font-display font-bold uppercase tracking-[0.2em] text-slate-400">
                   {featuredFixture?.status === 'live' ? 'On Court Now' : 'Upcoming Match'}
                 </span>

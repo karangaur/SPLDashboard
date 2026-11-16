@@ -1125,7 +1125,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     <button
                       type="button"
                       onClick={onRetryRealtime}
-                      className="ml-1 px-1.5 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase cursor-pointer"
+                      className="ml-1 px-2.5 py-1 min-h-[36px] rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase cursor-pointer"
                     >
                       Retry
                     </button>
@@ -1195,7 +1195,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     <button
                       type="button"
                       onClick={() => setActiveGfIntroMatchId(null)}
-                      className="px-2.5 py-1 min-h-[32px] rounded-lg text-[10px] font-bold uppercase tracking-wider text-amber-200 hover:text-white bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/35 transition-colors cursor-pointer"
+                      className="px-3 py-1.5 min-h-[40px] rounded-lg text-[10px] font-bold uppercase tracking-wider text-amber-200 hover:text-white bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400/35 transition-colors cursor-pointer"
                     >
                       Live View
                     </button>
@@ -1424,7 +1424,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                 {/* Large Score Digit (zero animation delay for instant real-time updates) */}
                 <div className={`text-right shrink-0 pl-2 ${showGrandFinalIntro ? 'spl-gf-scoreboard-reveal' : ''}`}>
                   <div
-                    className={`text-4xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums leading-none ${
+                    className={`text-3xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums leading-none ${
                       scoreA > scoreB
                         ? isGrandFinal
                           ? 'text-amber-300 drop-shadow-[0_0_22px_rgba(251,191,36,0.75)]'
@@ -1575,7 +1575,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                   }`}
                 >
                   <div
-                    className={`text-4xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums leading-none ${
+                    className={`text-3xl sm:text-5xl lg:text-6xl font-black font-mono tracking-tight tabular-nums leading-none ${
                       scoreB > scoreA
                         ? isGrandFinal
                           ? 'text-amber-300 drop-shadow-[0_0_22px_rgba(251,191,36,0.75)]'

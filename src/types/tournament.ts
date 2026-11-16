@@ -6,9 +6,20 @@ export interface BadmintonScoringRules {
   changeEndsAtInterval: boolean; // interval at 11 pts (or half point target)
 }
 
-export type PlayoffFormat = 'ipl_top4' | 'top2' | 'top4' | 'top8';
+export type PlayoffFormat =
+  | 'ipl_top4'
+  | 'top2'
+  | 'top3'
+  | 'top4'
+  | 'top5'
+  | 'top6'
+  | 'top7'
+  | 'top8'
+  | 'custom';
 
-export type PlayoffRoundType = 'Q1' | 'ELIM' | 'Q2' | 'F';
+export type PlayoffRoundType = 'PRELIM' | 'Q1' | 'ELIM' | 'QF' | 'Q2' | 'SF' | 'F';
+
+export type QualificationMode = 'auto' | 'manual';
 
 export type PlayoffTiebreakerCriterion =
   | 'points'
@@ -21,7 +32,8 @@ export type PlayoffTiebreakerCriterion =
 export interface PlayoffSettings {
   enabled: boolean;
   format: PlayoffFormat;
-  qualifyingTeamsCount: number; // Default: 4 for SPL Championship Top 4
+  qualifyingTeamsCount: number; // Default: 4
+  qualificationMode?: QualificationMode;
   autoQualifyFromStandings: boolean;
   allowManualOverride: boolean;
   requireLeagueCompletion: boolean;
@@ -68,6 +80,9 @@ export interface PlayoffAuditEntry {
     | 'result_corrected'
     | 'bracket_published'
     | 'bracket_unpublished'
+    | 'bracket_draft_saved'
+    | 'bracket_match_edited'
+    | 'bracket_rolled_back'
     | 'playoffs_reset'
     | 'playoffs_deleted'
     | 'standings_recalculated';
@@ -162,8 +177,10 @@ export interface Match {
 
 export interface KnockoutMatch {
   id: string;
+  matchCode?: string; // e.g. 'P1', 'E1', 'E2', 'SF1', 'SF2', 'FINAL', 'Q1', 'Q2'
   stage: 'ELIM' | 'QF' | 'SF' | 'F';
   playoffRound?: PlayoffRoundType;
+  roundOrder?: number; // 1 = Prelim, 2 = Eliminator/QF, 3 = Semi-Final/Q2, 4 = Grand Final
   matchLabel?: string;
   slot: number;
   court?: number;
@@ -172,8 +189,12 @@ export interface KnockoutMatch {
   scheduledDate?: string;
   scheduledTime?: string;
   assignedUmpire?: string;
-  participantASource?: string; // e.g. 'RANK_1', 'RANK_3', 'Q1_LOSER', 'Q1_WINNER'
-  participantBSource?: string; // e.g. 'RANK_2', 'RANK_4', 'ELIM_WINNER', 'Q2_WINNER'
+  participantASource?: string; // e.g. 'RANK_1', 'RANK_4', 'WINNER:E1', 'WINNER:SF1', 'TEAM:<id>', 'Q1_LOSER'
+  participantBSource?: string; // e.g. 'RANK_2', 'RANK_5', 'WINNER:E2', 'WINNER:SF2', 'TEAM:<id>', 'ELIM_WINNER'
+  seedA?: number;
+  seedB?: number;
+  nextMatchCode?: string; // e.g. 'SF1', 'SF2', 'FINAL'
+  nextMatchSlot?: 'A' | 'B';
   teamA?: string;
   teamB?: string;
   scoreA?: number;
@@ -190,10 +211,29 @@ export interface KnockoutMatch {
   version?: number;
 }
 
+export interface KnockoutBracketSnapshot {
+  id: string;
+  version?: number;
+  createdAt: number;
+  createdBy: string;
+  label: string;
+  format: PlayoffFormat;
+  qualifyingTeamsCount?: number;
+  qualificationMode?: QualificationMode;
+  published?: boolean;
+  qualifiedTeams?: PlayoffQualifiedSeed[];
+  matches: KnockoutMatch[];
+}
+
 export interface KnockoutData {
   format: PlayoffFormat;
+  qualifyingTeamsCount?: number;
+  qualificationMode?: QualificationMode;
+  manualSelectedTeamIds?: string[];
   bracketId?: string;
   published?: boolean;
+  publishedAt?: number;
+  publishedSnapshot?: PlayoffQualifiedSeed[];
   showOnPublicHomepage?: boolean;
   status?: 'draft' | 'active' | 'completed';
   qualifiedTeams?: PlayoffQualifiedSeed[];
@@ -204,6 +244,7 @@ export interface KnockoutData {
   completedAt?: number;
   updatedAt?: number;
   auditLogs?: PlayoffAuditEntry[];
+  versionHistory?: KnockoutBracketSnapshot[];
   matches: KnockoutMatch[];
 }
 

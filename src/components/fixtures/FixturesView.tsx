@@ -25,11 +25,17 @@ import {
   parseMatchScheduleTime,
 } from '../../utils/scheduleEditorEngine';
 import { AuthService } from '../../services/authService';
+import {
+  formatParticipantSourceLabel,
+  getPlayoffMatchDisplayLabel,
+} from '../../utils/playoffEngine';
 
 export const FixturesView: React.FC = () => {
   const {
     state,
     updateMatch,
+    updateKnockoutMatch,
+    resetSingleKnockoutMatch,
     clearResults,
     setMatches,
     saveEditedSchedule,
@@ -46,6 +52,7 @@ export const FixturesView: React.FC = () => {
   const [deleteConfirmMatchId, setDeleteConfirmMatchId] = useState<string | null>(null);
   const [manualModalOpen, setManualModalOpen] = useState(false);
   const [liveScoringMatchId, setLiveScoringMatchId] = useState(null as string | null);
+  const [liveScoringIsKnockout, setLiveScoringIsKnockout] = useState(false);
 
   const currentUser = AuthService.getCurrentUser();
   const canEditSchedule =
@@ -92,6 +99,12 @@ export const FixturesView: React.FC = () => {
   const filteredMatches = sequencedMatches.filter((m) => {
     if (filterStatus !== 'all' && m.status !== filterStatus) return false;
     if (selectedCourt !== 'all' && m.court !== selectedCourt) return false;
+    return true;
+  });
+
+  const filteredKnockoutMatches = (state.knockout?.matches || []).filter((km) => {
+    if (filterStatus !== 'all' && km.status !== filterStatus) return false;
+    if (selectedCourt !== 'all' && (km.court || 1) !== selectedCourt) return false;
     return true;
   });
 
@@ -270,10 +283,22 @@ export const FixturesView: React.FC = () => {
         <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
           <button
             onClick={() => {
+              const liveKo = (state.knockout?.matches || []).find((m) => m.status === 'live');
+              if (liveKo) {
+                setLiveScoringIsKnockout(true);
+                setLiveScoringMatchId(liveKo.id);
+                return;
+              }
               const liveOrFirst = state.matches.find((m) => m.status === 'live') || state.matches[0];
-              if (liveOrFirst) setLiveScoringMatchId(liveOrFirst.id);
+              if (liveOrFirst) {
+                setLiveScoringIsKnockout(false);
+                setLiveScoringMatchId(liveOrFirst.id);
+              } else if (state.knockout?.matches?.[0]) {
+                setLiveScoringIsKnockout(true);
+                setLiveScoringMatchId(state.knockout.matches[0].id);
+              }
             }}
-            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-lime-400 hover:from-emerald-300 rounded-xl shadow-md transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[42px] text-xs font-bold text-slate-950 bg-gradient-to-r from-emerald-400 to-lime-400 hover:from-emerald-300 rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
             title="Open Live Badminton Scoreboard and Umpire Console"
           >
             <SlidersHorizontal className="w-4 h-4 shrink-0" />
@@ -282,7 +307,7 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setGenerateModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[42px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
           >
             <RefreshCw className="w-4 h-4 shrink-0" />
             <span>Generate Schedule</span>
@@ -294,7 +319,7 @@ export const FixturesView: React.FC = () => {
               onClick={handleToggleScheduleEditor}
               aria-disabled={state.matches.length === 0}
               data-testid="edit-schedule-button"
-              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[38px] text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 border ${
+              className={`flex items-center gap-1.5 px-3.5 py-2 min-h-[42px] text-xs font-bold rounded-xl shadow-md transition-all active:scale-95 border cursor-pointer ${
                 state.matches.length === 0
                   ? 'bg-white/5 text-slate-400 border-white/10 opacity-75 hover:bg-white/10'
                   : isScheduleEditMode
@@ -314,7 +339,7 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setManualModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[38px] text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[42px] text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10 cursor-pointer"
           >
             <Plus className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>Add Match</span>
@@ -322,7 +347,7 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={handleShareSchedule}
-            className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/5"
+            className="p-2 min-w-[42px] min-h-[42px] flex items-center justify-center text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-colors border border-white/5 cursor-pointer"
             title="Share Schedule"
             aria-label="Share Schedule"
           >
@@ -331,7 +356,7 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setShowClearConfirm(true)}
-            className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-amber-400 bg-white/5 hover:bg-amber-500/10 rounded-xl transition-colors border border-white/5"
+            className="p-2 min-w-[42px] min-h-[42px] flex items-center justify-center text-slate-400 hover:text-amber-400 bg-white/5 hover:bg-amber-500/10 rounded-xl transition-colors border border-white/5 cursor-pointer"
             title="Reset All Match Scores to 0-0"
             aria-label="Reset All Match Scores to 0-0"
           >
@@ -340,7 +365,7 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setShowClearAllMatchesConfirm(true)}
-            className="p-2 min-w-[38px] min-h-[38px] flex items-center justify-center text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5"
+            className="p-2 min-w-[42px] min-h-[42px] flex items-center justify-center text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5 cursor-pointer"
             title="Delete All Matches Permanently"
             aria-label="Delete All Matches Permanently"
           >
@@ -369,14 +394,16 @@ export const FixturesView: React.FC = () => {
         {/* Status Tabs */}
         <div className="flex items-center gap-1 p-1 bg-white/5 rounded-xl overflow-x-auto no-scrollbar">
           {(['all', 'live', 'upcoming', 'completed'] as const).map((st) => {
+            const koList = state.knockout?.matches || [];
             const count =
               st === 'all'
-                ? state.matches.length
-                : state.matches.filter((m) => m.status === st).length;
+                ? state.matches.length + koList.length
+                : state.matches.filter((m) => m.status === st).length +
+                  koList.filter((k) => k.status === st).length;
             const labels = {
               all: 'All Matches',
               live: 'Live Now',
-              upcoming: 'Upcoming',
+              upcoming: 'Scheduled',
               completed: 'Completed',
             };
 
@@ -384,7 +411,7 @@ export const FixturesView: React.FC = () => {
               <button
                 key={st}
                 onClick={() => setFilterStatus(st)}
-                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 ${
+                className={`px-3 py-2 min-h-[38px] text-xs font-semibold rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer ${
                   filterStatus === st
                     ? 'bg-amber-400 text-slate-950 shadow-sm'
                     : 'text-slate-400 hover:text-white'
@@ -403,7 +430,7 @@ export const FixturesView: React.FC = () => {
           <div className="flex items-center gap-1">
             <button
               onClick={() => setSelectedCourt('all')}
-              className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-colors whitespace-nowrap ${
+              className={`px-2.5 py-1.5 min-h-[36px] text-xs font-semibold rounded-lg transition-colors whitespace-nowrap cursor-pointer ${
                 selectedCourt === 'all'
                   ? 'bg-white/20 text-white font-bold'
                   : 'text-slate-400 hover:text-white'
@@ -428,11 +455,237 @@ export const FixturesView: React.FC = () => {
         </div>
       </div>
 
+      {/* Knockout Stage Fixtures Section in Match Centre */}
+      {filteredKnockoutMatches.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 rounded-2xl bg-gradient-to-r from-amber-500/15 via-slate-900/80 to-slate-900/80 border border-amber-400/30">
+            <div className="flex items-center gap-2">
+              <span className="text-base">🏆</span>
+              <h2 className="text-sm sm:text-base font-extrabold text-white tracking-tight uppercase">
+                Championship Knockout Stage Fixtures
+              </h2>
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-400/20 border border-amber-400/40 text-[11px] font-mono font-bold text-amber-300">
+                {filteredKnockoutMatches.length} of {(state.knockout?.matches || []).length} Knockout Ties
+              </span>
+            </div>
+            <span className="text-xs text-slate-300 font-mono">
+              Automatic Winner Advancement Active
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filteredKnockoutMatches.map((km) => {
+              const tA = km.teamA ? getTeam(km.teamA) : undefined;
+              const tB = km.teamB ? getTeam(km.teamB) : undefined;
+              const isLive = km.status === 'live';
+              const isPaused = km.status === 'paused' || km.status === 'postponed';
+              const isCompleted = km.status === 'completed';
+              const isAWinner = Boolean(isCompleted && km.winner && km.winner === km.teamA);
+              const isBWinner = Boolean(isCompleted && km.winner && km.winner === km.teamB);
+              const meta = getPlayoffMatchDisplayLabel(km, state.knockout.format);
+              const code = km.matchCode || meta.shortCode;
+              const title = km.matchLabel || meta.title;
+              const courtName = km.courtName || getCourtDisplayName(km.court || 1);
+              const placeholderA = formatParticipantSourceLabel(
+                km.participantASource,
+                state.knockout.matches,
+                state.knockout.qualifiedTeams,
+                state.teams,
+                'Awaiting Qualification'
+              );
+              const placeholderB = formatParticipantSourceLabel(
+                km.participantBSource,
+                state.knockout.matches,
+                state.knockout.qualifiedTeams,
+                state.teams,
+                'Awaiting Qualification'
+              );
+
+              return (
+                <div
+                  key={km.id}
+                  className={`rounded-2xl glass-card p-3.5 sm:p-5 border transition-all space-y-3.5 ${
+                    isLive
+                      ? 'border-rose-500/50 bg-rose-500/5 shadow-lg'
+                      : km.stage === 'F'
+                      ? 'border-amber-400/45 bg-amber-500/5'
+                      : 'border-white/10'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs pb-2.5 border-b border-white/10">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2 py-0.5 rounded-md bg-amber-400/20 border border-amber-400/40 text-[10px] font-mono font-black text-amber-300">
+                        {code}
+                      </span>
+                      <span className="font-bold uppercase tracking-wider text-white">
+                        {title} · {courtName}
+                      </span>
+                      {(km.scheduledDate || km.scheduledTime) && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] font-semibold text-slate-300">
+                          {km.scheduledDate && <span>{km.scheduledDate}</span>}
+                          {km.scheduledTime && <span>{km.scheduledTime}</span>}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLiveScoringIsKnockout(true);
+                          setLiveScoringMatchId(km.id);
+                        }}
+                        className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all cursor-pointer"
+                      >
+                        <Maximize2 className="w-3 h-3 shrink-0" />
+                        <span>Umpire</span>
+                      </button>
+
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                          isLive
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            : isPaused
+                            ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                            : isCompleted
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                            : 'bg-sky-500/15 text-sky-300 border border-sky-400/30'
+                        }`}
+                      >
+                        {isLive
+                          ? 'LIVE'
+                          : isPaused
+                          ? 'PAUSE'
+                          : isCompleted
+                          ? 'COMPLETED'
+                          : 'SCHEDULED'}
+                      </span>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const res = resetSingleKnockoutMatch(km.id, true);
+                          if (res.success) {
+                            showToast(`${title} reset to Scheduled.`, 'success');
+                          } else if (res.error) {
+                            showToast(res.error, 'error');
+                          }
+                        }}
+                        title="Reset knockout match score"
+                        className="text-slate-500 hover:text-amber-300 p-1 rounded transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Teams & Scoreboard */}
+                  <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 sm:gap-3">
+                    <div className={`space-y-0.5 min-w-0 ${isAWinner ? 'text-amber-300' : 'text-white'}`}>
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span className="text-lg shrink-0">{tA?.badge || '🏸'}</span>
+                        <span className="font-bold text-xs sm:text-sm truncate block">
+                          {tA?.name || placeholderA}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        {tA ? 'Qualified Contender' : placeholderA}
+                      </p>
+                    </div>
+
+                    <div className="text-center px-1 sm:px-2 shrink-0">
+                      <div className="flex items-center justify-center gap-1.5 bg-black/50 px-3 py-1.5 rounded-xl border border-white/10">
+                        <span className={`font-mono text-xl sm:text-2xl font-black tabular-nums ${isAWinner ? 'text-amber-400' : 'text-white'}`}>
+                          {km.scoreA ?? 0}
+                        </span>
+                        <span className="text-slate-500 font-bold text-xs">-</span>
+                        <span className={`font-mono text-xl sm:text-2xl font-black tabular-nums ${isBWinner ? 'text-amber-400' : 'text-white'}`}>
+                          {km.scoreB ?? 0}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className={`space-y-0.5 min-w-0 text-right ${isBWinner ? 'text-amber-300' : 'text-white'}`}>
+                      <div className="flex items-center justify-end gap-1.5 min-w-0">
+                        <span className="font-bold text-xs sm:text-sm truncate block">
+                          {tB?.name || placeholderB}
+                        </span>
+                        <span className="text-lg shrink-0">{tB?.badge || '🏸'}</span>
+                      </div>
+                      <p className="text-[10px] text-slate-400 truncate">
+                        {tB ? 'Qualified Contender' : placeholderB}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Quick Controls */}
+                  <div className="pt-2 border-t border-white/5 flex flex-wrap items-center justify-between gap-2 text-xs">
+                    <div className="flex items-center gap-1.5">
+                      {km.status === 'upcoming' && tA && tB && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const res = updateKnockoutMatch(km.id, {
+                              status: 'live',
+                              scoreA: km.scoreA ?? 0,
+                              scoreB: km.scoreB ?? 0,
+                            });
+                            if (!res.success && res.error) showToast(res.error, 'error');
+                          }}
+                          className="px-2.5 py-1 text-[11px] font-bold text-slate-950 bg-emerald-400 hover:bg-emerald-300 rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>Start</span>
+                        </button>
+                      )}
+                      {km.status === 'live' && (
+                        <button
+                          type="button"
+                          onClick={() => updateKnockoutMatch(km.id, { status: 'paused' })}
+                          className="px-2.5 py-1 text-[11px] font-bold text-amber-300 bg-amber-500/20 border border-amber-500/30 rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <Pause className="w-3 h-3" />
+                          <span>Pause</span>
+                        </button>
+                      )}
+                      {isPaused && (
+                        <button
+                          type="button"
+                          onClick={() => updateKnockoutMatch(km.id, { status: 'live' })}
+                          className="px-2.5 py-1 text-[11px] font-bold text-emerald-300 bg-emerald-500/20 border border-emerald-500/30 rounded-lg flex items-center gap-1 cursor-pointer"
+                        >
+                          <Play className="w-3 h-3 fill-current" />
+                          <span>Resume</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {isCompleted && km.winner ? (
+                      <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5 shrink-0" />
+                        <span>
+                          Winner: {getTeam(km.winner)?.name}
+                          {km.nextMatchCode ? ` → ${km.nextMatchCode}` : km.stage === 'F' ? ' 🏆 Champion' : ''}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-[11px] text-slate-400 font-mono">
+                        {km.nextMatchCode ? `Winner advances to ${km.nextMatchCode}` : km.stage === 'F' ? 'Championship Title Tie' : ''}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Generated Fixtures Section Header Bar with Prominent Edit Schedule Button */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 px-4 py-3 rounded-2xl bg-slate-900/70 border border-white/10">
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-sm sm:text-base font-extrabold text-white tracking-tight">
-            Generated Fixtures
+            Generated League Fixtures
           </h2>
           <span className="px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-[11px] font-mono font-bold text-amber-300">
             {filteredMatches.length} of {state.matches.length} Matches
@@ -545,7 +798,10 @@ export const FixturesView: React.FC = () => {
                       </button>
                     )}
                     <button
-                      onClick={() => setLiveScoringMatchId(match.id)}
+                      onClick={() => {
+                        setLiveScoringIsKnockout(false);
+                        setLiveScoringMatchId(match.id);
+                      }}
                       className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 transition-all active:scale-95"
                       title="Open full badminton umpire scoring console"
                     >
@@ -569,7 +825,7 @@ export const FixturesView: React.FC = () => {
                         ? 'PAUSE'
                         : isCompleted
                         ? 'COMPLETED'
-                        : 'UPCOMING'}
+                        : 'SCHEDULED'}
                     </span>
                     <button
                       onClick={() => handleResetMatch(match.id)}
@@ -953,7 +1209,7 @@ export const FixturesView: React.FC = () => {
         isOpen={Boolean(liveScoringMatchId)}
         onClose={() => setLiveScoringMatchId(null)}
         initialMatchId={liveScoringMatchId || undefined}
-        isKnockout={false}
+        isKnockout={liveScoringIsKnockout}
       />
     </div>
   );

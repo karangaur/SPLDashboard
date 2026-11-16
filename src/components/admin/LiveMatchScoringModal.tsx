@@ -342,7 +342,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               <button
                 type="button"
                 onClick={() => setShowRulesConfig(!showRulesConfig)}
-                className={`min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 rounded-xl border flex items-center justify-center transition-all ${
+                className={`min-w-[44px] min-h-[44px] p-2 rounded-xl border flex items-center justify-center transition-all cursor-pointer ${
                   showRulesConfig
                     ? 'bg-amber-400 text-slate-950 border-amber-400 font-bold'
                     : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
@@ -356,7 +356,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-w-[40px] min-h-[40px] sm:min-w-[44px] sm:min-h-[44px] p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 transition-colors flex items-center justify-center"
+                className="min-w-[44px] min-h-[44px] p-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white border border-white/10 transition-colors flex items-center justify-center cursor-pointer"
                 title="Close Umpire Mode"
                 aria-label="Close Umpire Mode"
               >
@@ -390,7 +390,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
               <button
                 type="button"
                 onClick={reconnectRealtime}
-                className="px-2 py-0.5 rounded bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase shrink-0"
+                className="px-2.5 py-1 min-h-[36px] rounded-lg bg-white/10 hover:bg-white/20 text-white text-[10px] font-black uppercase shrink-0 cursor-pointer"
               >
                 Retry
               </button>
@@ -399,14 +399,14 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
 
           {/* Second Row: Responsive Match Switcher & Court Selector (for Knockout) */}
           <div className="flex flex-wrap items-center gap-2 min-w-0">
-            <span className="text-[10px] sm:text-xs font-semibold text-slate-400 shrink-0 hidden xs:inline">
+            <span className="text-[10px] sm:text-xs font-semibold text-slate-400 shrink-0 hidden sm:inline">
               Match:
             </span>
-            <div className="relative flex-1 min-w-[160px]">
+            <div className="relative flex-1 min-w-[140px]">
               <select
                 value={selectedId}
                 onChange={(e) => setSelectedId(e.target.value)}
-                className="w-full appearance-none pl-3 pr-8 py-1.5 min-h-[38px] rounded-xl text-xs font-bold text-slate-200 bg-white/10 border border-white/15 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
+                className="w-full appearance-none pl-3 pr-8 py-2 min-h-[42px] rounded-xl text-xs font-bold text-slate-200 bg-white/10 border border-white/15 focus:outline-none focus:border-amber-400 cursor-pointer truncate"
               >
                 {allMatches.map((m) => {
                   const tA = state.teams.find((t) => t.id === m.teamA)?.name || 'TBD';
@@ -441,7 +441,7 @@ export const LiveMatchScoringModal: React.FC<LiveMatchScoringModalProps> = ({
                     });
                   }}
                   aria-label="Assign Knockout Match Court"
-                  className="appearance-none pl-3 pr-7 py-1.5 min-h-[38px] rounded-xl text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 focus:outline-none focus:border-amber-400 cursor-pointer"
+                  className="appearance-none pl-3 pr-7 py-2 min-h-[42px] rounded-xl text-xs font-bold text-amber-300 bg-amber-500/10 border border-amber-500/30 focus:outline-none focus:border-amber-400 cursor-pointer"
                 >
                   {Array.from({ length: courtsCount }, (_, i) => i + 1).map((c) => (
                     <option key={c} value={c} className="bg-slate-900 text-white">

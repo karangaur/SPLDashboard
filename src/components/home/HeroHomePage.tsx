@@ -36,6 +36,7 @@ import { Match, Player } from '../../types/tournament';
 import { AuthService } from '../../services/authService';
 import { resolveYouTubeLiveCtaState } from '../../utils/youtube';
 import {
+  getFormatDisplayTitle,
   getKnockoutProgressionOrder,
   getPlayoffMatchDisplayLabel,
   inferPlayoffRound,
@@ -119,6 +120,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
   // Normalize knockout matches into unified public Match broadcast shape (strictly deduplicated by ID and ordered in tournament progression order: Q1 -> ELIM/QF -> Q2/SF -> F)
   const normalizedKnockoutMatches: Match[] = React.useMemo(() => {
+    if (state.knockout?.published === false) return [];
     const seenIds = new Set<string>();
     const uniqueKo = (state.knockout?.matches || []).filter((ko) => {
       if (!ko?.id || seenIds.has(ko.id)) return false;
@@ -413,7 +415,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               onClick={() => setMobileNavOpen((prev) => !prev)}
               aria-label="Toggle public navigation menu"
               aria-expanded={mobileNavOpen}
-              className="md:hidden p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-colors"
+              className="md:hidden p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
             >
               {mobileNavOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
@@ -427,28 +429,28 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => scrollToSection('live-match')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-bold text-left cursor-pointer"
               >
                 <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
                 <span>Live Scoreboard</span>
               </button>
               <button
                 onClick={() => scrollToSection('matches-schedule')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left cursor-pointer"
               >
                 <Swords className="w-3.5 h-3.5 text-lime-400 shrink-0" />
                 <span>Match Schedule</span>
               </button>
               <button
                 onClick={() => scrollToSection('teams-roster')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left cursor-pointer"
               >
                 <Users className="w-3.5 h-3.5 text-sky-400 shrink-0" />
                 <span>The Teams ({state.teams.length})</span>
               </button>
               <button
                 onClick={() => scrollToSection('standings-table')}
-                className="flex items-center gap-2 p-3 rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left"
+                className="flex items-center gap-2 p-3 min-h-[44px] rounded-xl bg-white/5 border border-white/10 text-slate-200 text-xs font-bold text-left cursor-pointer"
               >
                 <Trophy className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                 <span>Points Table</span>
@@ -458,10 +460,10 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="pt-2 border-t border-white/10 flex flex-col gap-2">
               <button
                 onClick={() => scrollToSection('tournament-info')}
-                className="w-full flex items-center justify-between p-2.5 rounded-xl bg-white/[0.03] hover:bg-white/10 text-slate-300 text-xs font-semibold"
+                className="w-full flex items-center justify-between p-2.5 min-h-[44px] rounded-xl bg-white/[0.03] hover:bg-white/10 text-slate-300 text-xs font-semibold cursor-pointer"
               >
                 <span>Venue & Tournament Rules</span>
-                <MapPin className="w-4 h-4 text-amber-400" />
+                <MapPin className="w-4 h-4 text-amber-400 shrink-0" />
               </button>
 
               {showNavbarRegistration && (
@@ -471,7 +473,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     setMobileNavOpen(false);
                     onOpenPublicRegister();
                   }}
-                  className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg cursor-pointer"
+                  className="w-full flex items-center justify-center gap-2 py-3 px-4 min-h-[44px] rounded-xl text-xs font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-400 to-yellow-400 shadow-lg cursor-pointer"
                 >
                   <PlusCircle className="w-4 h-4" />
                   <span>Register as an Athlete</span>
@@ -776,11 +778,13 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             ps.enabled !== false &&
             ps.showOnPublicHomepage !== false &&
             state.knockout.published !== false &&
-            state.knockout.format === 'ipl_top4' &&
             state.knockout.matches.length > 0;
           if (!showSection) return null;
 
-          const gfMatch = state.knockout.matches.find((m) => inferPlayoffRound(m, 'ipl_top4') === 'F');
+          const gfMatch =
+            state.knockout.matches.find(
+              (m) => inferPlayoffRound(m, state.knockout.format) === 'F' || m.stage === 'F'
+            ) || state.knockout.matches[state.knockout.matches.length - 1];
           const gfCompleted = Boolean(gfMatch?.status === 'completed' && gfMatch.winner);
           const championTeam = gfCompleted && gfMatch?.winner ? getTeam(gfMatch.winner) : undefined;
           const runnerUpTeam =
@@ -796,17 +800,22 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               .join(' & ');
           };
 
+          const bracketHeadingLabel = getFormatDisplayTitle(
+            state.knockout.format,
+            state.knockout.qualifyingTeamsCount
+          );
+
           return (
             <section
               id="playoffs-bracket"
-              aria-label="Road to the Grand Final Playoff Bracket"
+              aria-label="Road to the Grand Final Knockout Bracket"
               className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 scroll-mt-24 space-y-6"
             >
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.2em] text-amber-400">
                     <Trophy className="w-4 h-4" />
-                    <span>SPL Championship Top 4 Playoffs</span>
+                    <span>{bracketHeadingLabel}</span>
                   </div>
                   <h2 className="text-3xl sm:text-4xl font-black text-white font-display uppercase tracking-tight mt-1">
                     🏆 Road to the{' '}
@@ -815,7 +824,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     </span>
                   </h2>
                   <p className="text-sm text-slate-400 mt-1">
-                    Qualifier 1 (#1 vs #2), Eliminator (#3 vs #4), Qualifier 2, and the Championship Grand Final.
+                    Official Smash Premier League knockout progression with real-time score synchronization and automatic winner advancement.
                   </p>
                 </div>
               </div>
@@ -982,14 +991,17 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
               <button
                 onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                className="hover:text-lime-400 transition-colors"
+                className="min-h-[44px] px-2 inline-flex items-center hover:text-lime-400 transition-colors cursor-pointer"
               >
                 Back to Top ↑
               </button>
               {showNavbarRegistration && (
                 <>
-                  <span>•</span>
-                  <button onClick={onOpenPublicRegister} className="hover:text-lime-400 transition-colors">
+                  <span aria-hidden="true">•</span>
+                  <button
+                    onClick={onOpenPublicRegister}
+                    className="min-h-[44px] px-2 inline-flex items-center hover:text-lime-400 transition-colors cursor-pointer"
+                  >
                     Athlete Entry Form
                   </button>
                 </>
@@ -1019,42 +1031,45 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
         <div
           role="dialog"
           aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setDetailMatch(null);
+          }}
           className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in"
         >
-          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/15 rounded-3xl p-5 sm:p-8 shadow-2xl relative">
+          <div className="w-full max-w-lg max-h-[90dvh] overflow-y-auto bg-slate-900 border border-white/15 rounded-3xl p-4 sm:p-8 shadow-2xl relative">
             <button
               onClick={() => setDetailMatch(null)}
               aria-label="Close match details"
-              className="absolute top-4 right-4 p-2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors"
+              className="absolute top-3.5 right-3.5 p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-lime-400 mb-1">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-bold uppercase tracking-wider text-lime-400 mb-1 pr-10">
               <span>{detailMatch.matchType === 'knockout' ? 'Knockout Championship' : 'Match Center Card'}</span>
               <span>•</span>
               <span>{detailMatch.courtName || state.settings.courtNames?.[detailMatch.court - 1]?.trim() || `Court ${detailMatch.court}`}</span>
             </div>
 
-            <h3 className="text-xl font-black text-white font-display uppercase tracking-tight">
+            <h3 className="text-lg sm:text-xl font-black text-white font-display uppercase tracking-tight pr-10">
               {detailMatch.matchType === 'knockout'
                 ? `${detailMatch.stageLabel || 'Knockout Stage'} Breakdown`
                 : `Round ${detailMatch.round} Fixture Breakdown`}
             </h3>
 
             {/* Scorecard Body */}
-            <div className="mt-6 p-5 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
+            <div className="mt-5 sm:mt-6 p-4 sm:p-5 rounded-2xl bg-slate-950 border border-white/10 space-y-4">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="text-2xl shrink-0">{getTeam(detailMatch.teamA)?.badge || '🏸'}</span>
                   <div className="min-w-0">
-                    <p className="font-bold text-white text-base truncate">{getTeam(detailMatch.teamA)?.name || 'Awaiting Team'}</p>
+                    <p className="font-bold text-white text-sm sm:text-base truncate">{getTeam(detailMatch.teamA)?.name || 'Awaiting Team'}</p>
                     <p className="text-xs text-slate-400 mt-0.5 truncate">
                       {(getTeam(detailMatch.teamA)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
                     </p>
                   </div>
                 </div>
-                <span className="text-3xl font-black font-mono text-lime-400 shrink-0">
+                <span className="text-2xl sm:text-3xl font-black font-mono text-lime-400 tabular-nums shrink-0">
                   {detailMatch.scoreA ?? 0}
                 </span>
               </div>
@@ -1070,11 +1085,11 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                     : 'Scheduled Match'}
                 </span>
                 {detailMatch.sets && detailMatch.sets.length > 0 && (
-                  <div className="flex items-center justify-center gap-1.5 mt-1.5">
+                  <div className="flex flex-wrap items-center justify-center gap-1.5 mt-1.5">
                     {detailMatch.sets.map((s, idx) => (
                       <span
                         key={idx}
-                        className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-slate-300"
+                        className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-white/10 text-slate-300 tabular-nums"
                       >
                         Set {idx + 1}: {s.scoreA}-{s.scoreB}
                       </span>
@@ -1087,13 +1102,13 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <div className="flex items-center gap-2.5 min-w-0">
                   <span className="text-2xl shrink-0">{getTeam(detailMatch.teamB)?.badge || '🏸'}</span>
                   <div className="min-w-0">
-                    <p className="font-bold text-white text-base truncate">{getTeam(detailMatch.teamB)?.name || 'Awaiting Team'}</p>
+                    <p className="font-bold text-white text-sm sm:text-base truncate">{getTeam(detailMatch.teamB)?.name || 'Awaiting Team'}</p>
                     <p className="text-xs text-slate-400 mt-0.5 truncate">
                       {(getTeam(detailMatch.teamB)?.players?.map(getPlayer).filter((p): p is Player => Boolean(p)).map((p) => p.name).join(' & ')) || 'Doubles Pair'}
                     </p>
                   </div>
                 </div>
-                <span className="text-3xl font-black font-mono text-white shrink-0">
+                <span className="text-2xl sm:text-3xl font-black font-mono text-white tabular-nums shrink-0">
                   {detailMatch.scoreB ?? 0}
                 </span>
               </div>
@@ -1110,7 +1125,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="mt-6 flex justify-end">
               <button
                 onClick={() => setDetailMatch(null)}
-                className="px-5 py-2.5 rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white transition-colors"
+                className="px-5 py-2.5 min-h-[44px] rounded-xl text-xs font-bold bg-white/10 hover:bg-white/15 text-white transition-colors cursor-pointer"
               >
                 Close Scorecard
               </button>

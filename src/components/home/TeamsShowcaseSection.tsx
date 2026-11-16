@@ -993,7 +993,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
           </p>
 
           {teams.length > 0 && (
-            <div className="pt-1 flex items-center justify-center gap-3 text-xs font-mono text-slate-400 tabular-nums">
+            <div className="pt-1 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 text-xs font-mono text-slate-400 tabular-nums">
               <span>{teams.length} Official Contenders</span>
               <span aria-hidden="true">·</span>
               <span>{players.length} Athletes</span>

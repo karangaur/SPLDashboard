@@ -1251,15 +1251,27 @@ export class SupabaseService {
         const safeDbStage =
           pr === 'Q1' || pr === 'Q2'
             ? 'SF'
-            : pr === 'ELIM'
+            : pr === 'ELIM' || pr === 'PRELIM'
             ? 'ELIM'
             : pr === 'F'
             ? 'F'
             : m.stage === 'QF'
             ? 'ELIM'
             : m.stage || 'SF';
+        const isIplElim =
+          pr === 'ELIM' &&
+          (m.matchCode === 'ELIM' ||
+            (m.matchLabel && m.matchLabel.trim().toLowerCase() === 'eliminator'));
         const safeSlot =
-          pr === 'Q1' ? 1 : pr === 'ELIM' ? 2 : pr === 'Q2' ? 3 : pr === 'F' ? 1 : m.slot || 1;
+          pr === 'Q1'
+            ? 1
+            : isIplElim
+            ? 2
+            : pr === 'Q2'
+            ? 3
+            : pr === 'F'
+            ? 1
+            : m.slot || 1;
         return {
           id: m.id,
           tournament_season: season,
@@ -1864,8 +1876,14 @@ export class SupabaseService {
 
   static extractPlayoffStateFromConfig(config: RegistrationFormConfig | null): {
     format?: KnockoutData['format'];
+    qualifyingTeamsCount?: number;
+    qualificationMode?: KnockoutData['qualificationMode'];
+    manualSelectedTeamIds?: string[];
     bracketId?: string;
     published?: boolean;
+    publishedAt?: number;
+    publishedSnapshot?: KnockoutData['publishedSnapshot'];
+    versionHistory?: KnockoutData['versionHistory'];
     showOnPublicHomepage?: boolean;
     status?: KnockoutData['status'];
     qualifiedTeams?: KnockoutData['qualifiedTeams'];
@@ -1897,6 +1915,10 @@ export class SupabaseService {
       for (const m of knockout.matches || []) {
         if (!m?.id) continue;
         matchMetaById[m.id] = {
+          stage: m.stage,
+          slot: m.slot,
+          matchCode: m.matchCode,
+          roundOrder: m.roundOrder,
           playoffRound: inferPlayoffRound(m, knockout.format),
           matchLabel: m.matchLabel,
           courtName: m.courtName,
@@ -1905,6 +1927,10 @@ export class SupabaseService {
           assignedUmpire: m.assignedUmpire,
           participantASource: m.participantASource,
           participantBSource: m.participantBSource,
+          seedA: m.seedA,
+          seedB: m.seedB,
+          nextMatchCode: m.nextMatchCode,
+          nextMatchSlot: m.nextMatchSlot,
           loserId: m.loserId,
           completedAt: m.completedAt,
           bracketId: m.bracketId || knockout.bracketId,
@@ -1915,8 +1941,14 @@ export class SupabaseService {
 
       const playoffStateSnapshot = {
         format: knockout.format || DEFAULT_PLAYOFF_SETTINGS.format,
+        qualifyingTeamsCount: knockout.qualifyingTeamsCount,
+        qualificationMode: knockout.qualificationMode || 'auto',
+        manualSelectedTeamIds: Array.isArray(knockout.manualSelectedTeamIds) ? knockout.manualSelectedTeamIds : [],
         bracketId: knockout.bracketId,
         published: knockout.published !== false,
+        publishedAt: knockout.publishedAt,
+        publishedSnapshot: Array.isArray(knockout.publishedSnapshot) ? knockout.publishedSnapshot : undefined,
+        versionHistory: Array.isArray(knockout.versionHistory) ? knockout.versionHistory.slice(-15) : [],
         showOnPublicHomepage: knockout.showOnPublicHomepage !== false,
         status: knockout.status || 'active',
         qualifiedTeams: Array.isArray(knockout.qualifiedTeams) ? knockout.qualifiedTeams : [],

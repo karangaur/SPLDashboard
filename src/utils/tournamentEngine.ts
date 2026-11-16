@@ -24,7 +24,7 @@ import {
   getKnockoutProgressionOrder,
   getMatchStatusDisplayLabel,
   normalizeMatchStatus,
-  progressIPLPlayoffs,
+  progressKnockoutBracket,
 } from './playoffEngine';
 
 export { getKnockoutProgressionOrder, getMatchStatusDisplayLabel, normalizeMatchStatus };
@@ -544,43 +544,13 @@ export function generateRoundRobinFixtures(
 }
 
 // Knockout Bracket Progression Engine
-export function progressKnockoutMatches(matches: KnockoutMatch[], format: PlayoffFormat): KnockoutMatch[] {
+export function progressKnockoutMatches(
+  matches: KnockoutMatch[],
+  format: PlayoffFormat,
+  qualifiedSeeds?: any[]
+): KnockoutMatch[] {
   if (!matches || matches.length === 0) return matches;
-  if (
-    format === 'ipl_top4' ||
-    matches.some((m) => m.playoffRound || m.isPlayoff || m.participantASource)
-  ) {
-    return progressIPLPlayoffs(matches).matches;
-  }
-
-  const updated = matches.map((m) => ({ ...m }));
-
-  const elims = updated.filter((m) => m.stage === 'ELIM').sort((a, b) => a.slot - b.slot);
-  const sfs = updated.filter((m) => m.stage === 'SF').sort((a, b) => a.slot - b.slot);
-  const f = updated.find((m) => m.stage === 'F');
-
-  const updatePairing = (target: KnockoutMatch, newA?: string, newB?: string) => {
-    const changed = target.teamA !== newA || target.teamB !== newB;
-    target.teamA = newA;
-    target.teamB = newB;
-    if (changed && target.status === 'completed') {
-      target.status = 'upcoming';
-      target.winner = undefined;
-      target.scoreA = undefined;
-      target.scoreB = undefined;
-    }
-  };
-
-  if (format === 'top8' && elims.length >= 4 && sfs.length >= 2) {
-    if (!sfs[0].manual) updatePairing(sfs[0], elims[0]?.winner, elims[1]?.winner);
-    if (!sfs[1].manual) updatePairing(sfs[1], elims[2]?.winner, elims[3]?.winner);
-  }
-
-  if ((format === 'top4' || format === 'top8') && sfs.length >= 2 && f && !f.manual) {
-    updatePairing(f, sfs[0]?.winner, sfs[1]?.winner);
-  }
-
-  return updated;
+  return progressKnockoutBracket(matches, format, qualifiedSeeds).matches;
 }
 
 // Indian Mobile Validator

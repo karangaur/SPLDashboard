@@ -436,20 +436,21 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
   const upiLink = buildUPIPaymentLink(state.payment, effectiveFee, 'ENTRY');
 
   return (
-    <div className="min-h-screen bg-[#070a13] text-slate-100 selection:bg-emerald-400 selection:text-slate-950 flex flex-col justify-between py-6 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[#070a13] text-slate-100 selection:bg-emerald-400 selection:text-slate-950 flex flex-col justify-between py-5 sm:py-6 px-3.5 sm:px-6 lg:px-8 overflow-x-hidden">
       {/* Top Header Bar */}
-      <header className="max-w-3xl w-full mx-auto flex items-center justify-between pb-6 border-b border-white/10">
-        <div className="flex items-center gap-3">
+      <header className="max-w-3xl w-full mx-auto flex items-center justify-between gap-2 pb-5 sm:pb-6 border-b border-white/10 min-w-0">
+        <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
           <img
             src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
             alt="Smash Premier League Logo"
-            className="h-10 sm:h-12 w-auto object-contain drop-shadow"
+            decoding="async"
+            className="h-9 sm:h-12 w-auto object-contain drop-shadow shrink-0"
           />
-          <div>
-            <span className="block font-display text-base sm:text-lg font-black tracking-tight text-white leading-tight">
+          <div className="min-w-0">
+            <span className="block font-display text-sm sm:text-lg font-black tracking-tight text-white leading-tight truncate">
               {formConfig.tournamentName || 'Smash Premier League'}
             </span>
-            <span className="block text-[11px] font-semibold text-slate-400">
+            <span className="block text-[10px] sm:text-[11px] font-semibold text-slate-400 truncate">
               Official Athlete Registration Portal · {formConfig.seasonTitle}
             </span>
           </div>
@@ -458,7 +459,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
         {onBackToApp && (
           <button
             onClick={onBackToApp}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[40px] rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors shrink-0 cursor-pointer"
           >
             <span>Organizer Hub</span>
           </button>
@@ -466,15 +467,16 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
       </header>
 
       {/* Main Form Content Container */}
-      <main className="max-w-2xl w-full mx-auto my-6">
+      <main className="max-w-2xl w-full mx-auto my-5 sm:my-6">
         {loadingConfig ? (
           /* Loading State: Clean Sports Skeleton */
-          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-10 sm:p-14 text-center space-y-5 shadow-2xl animate-fade-in relative overflow-hidden">
+          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-8 sm:p-14 text-center space-y-5 shadow-2xl animate-fade-in relative overflow-hidden">
             <div className="flex flex-col items-center justify-center space-y-4">
               <img
                 src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
                 alt="Smash Premier League Official 3D Logo"
-                className="max-w-[240px] sm:max-w-[280px] h-auto object-contain mx-auto filter drop-shadow-[0_10px_25px_rgba(59,130,246,0.35)] animate-pulse"
+                decoding="async"
+                className="max-w-[200px] sm:max-w-[280px] h-auto object-contain mx-auto filter drop-shadow-[0_10px_25px_rgba(59,130,246,0.35)] animate-pulse"
               />
               <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
                 <RefreshCw className="w-4 h-4 animate-spin" />
@@ -653,7 +655,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
             <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
               <button
                 onClick={handleShareWhatsAppConfirmation}
-                className="w-full sm:w-auto px-6 py-2.5 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center justify-center gap-2 shadow-lg"
+                className="w-full sm:w-auto px-6 py-3 min-h-[44px] rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white transition-all flex items-center justify-center gap-2 shadow-lg cursor-pointer"
               >
                 <MessageCircle className="w-4 h-4" />
                 <span>Share Entry on WhatsApp</span>
@@ -661,7 +663,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
 
               <button
                 onClick={handleResetForm}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl font-bold text-xs bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white transition-colors"
+                className="w-full sm:w-auto px-5 py-3 min-h-[44px] rounded-xl font-bold text-xs bg-white/10 hover:bg-white/15 text-slate-300 hover:text-white transition-colors cursor-pointer"
               >
                 <span>Register Another Player</span>
               </button>
@@ -669,7 +671,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
           </div>
         ) : (
           /* State 3: Public Athlete Registration Form */
-          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-6 sm:p-8 shadow-2xl relative overflow-hidden space-y-6">
+          <div className="rounded-3xl bg-[#090d18] border border-white/10 p-4 sm:p-8 shadow-2xl relative overflow-hidden space-y-6">
             {/* Athletic subtle glow banner */}
             <div
               className="absolute -top-32 left-1/2 -translate-x-1/2 w-[500px] h-[500px] rounded-full blur-3xl opacity-10 pointer-events-none"
@@ -685,7 +687,8 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
                   <img
                     src="/assets/aistudio/7a3a1914-888e-46cc-b532-3a0d7a80647d_2393d0ea.png"
                     alt="Smash Premier League Official 3D Logo"
-                    className="relative max-w-[260px] sm:max-w-[340px] max-h-36 sm:max-h-48 w-auto h-auto object-contain mx-auto filter drop-shadow-[0_12px_28px_rgba(37,99,235,0.45)] transition-transform duration-300 hover:scale-[1.02]"
+                    decoding="async"
+                    className="relative max-w-[220px] sm:max-w-[340px] max-h-32 sm:max-h-48 w-auto h-auto object-contain mx-auto filter drop-shadow-[0_12px_28px_rgba(37,99,235,0.45)] transition-transform duration-300 hover:scale-[1.02]"
                   />
                 </div>
               </div>
