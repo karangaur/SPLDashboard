@@ -28,8 +28,9 @@ import {
 } from '../../utils/youtube';
 
 export const YouTubeLiveManagerView: React.FC = () => {
-  const { youtubeLiveConfig, saveYouTubeLiveConfig } = useTournament();
-  const canManage = AuthService.canManageTournament();
+  const { youtubeLiveConfig, saveYouTubeLiveConfig, activeSeason, isSeasonLocked } = useTournament();
+  const canManage = AuthService.canManageTournament() && !isSeasonLocked;
+  const activeSeasonNumber = activeSeason.seasonNumber || '3.0';
 
   const [draftUrl, setDraftUrl] = useState(youtubeLiveConfig.videoUrl || '');
   const [title, setTitle] = useState(youtubeLiveConfig.title || '');
@@ -61,13 +62,13 @@ export const YouTubeLiveManagerView: React.FC = () => {
       videoUrl: parsedInput.valid ? parsedInput.normalizedUrl : '',
       videoId: parsedInput.valid ? parsedInput.videoId : '',
       status,
-      title: title.trim() || 'SPL 3.0 Championship Court Live Broadcast',
+      title: title.trim() || `SPL ${activeSeasonNumber} Championship Court Live Broadcast`,
       scheduledAt: scheduledAt.trim(),
       allowReplay,
       updatedAt: youtubeLiveConfig.updatedAt,
       updatedBy: youtubeLiveConfig.updatedBy,
     }),
-    [enabled, parsedInput, status, title, scheduledAt, allowReplay, youtubeLiveConfig.updatedAt, youtubeLiveConfig.updatedBy]
+    [enabled, parsedInput, status, title, scheduledAt, allowReplay, youtubeLiveConfig.updatedAt, youtubeLiveConfig.updatedBy, activeSeasonNumber]
   );
 
   const publicPreviewCta = useMemo(() => resolveYouTubeLiveCtaState(previewConfig), [previewConfig]);
@@ -125,7 +126,7 @@ export const YouTubeLiveManagerView: React.FC = () => {
         videoUrl: '',
         videoId: '',
         status: 'scheduled',
-        title: title.trim() || 'SPL 3.0 Championship Court Live Broadcast',
+        title: title.trim() || `SPL ${activeSeasonNumber} Championship Court Live Broadcast`,
         scheduledAt: '',
         allowReplay,
       };
@@ -186,7 +187,7 @@ export const YouTubeLiveManagerView: React.FC = () => {
             YouTube Live Streaming
           </h1>
           <p className="text-xs sm:text-sm text-slate-400 max-w-2xl">
-            Manage the embedded YouTube Live stream shown directly on the SPL 3.0 public website alongside synchronized live scores.
+            Manage the embedded YouTube Live stream shown directly on the SPL {activeSeasonNumber} public website alongside synchronized live scores.
           </p>
         </div>
 
@@ -221,7 +222,12 @@ export const YouTubeLiveManagerView: React.FC = () => {
         </div>
       </div>
 
-      {!canManage && (
+      {isSeasonLocked ? (
+        <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200 flex items-center gap-2">
+          <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
+          <span>SPL {activeSeasonNumber} is archived (read-only). Switch to an active or draft season in Settings to update livestream settings.</span>
+        </div>
+      ) : !canManage && (
         <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-xs text-amber-200 flex items-center gap-2">
           <ShieldCheck className="w-4 h-4 text-amber-400 shrink-0" />
           <span>Read-only view. Super Admin or Tournament Director permissions are required to publish stream changes.</span>
@@ -384,7 +390,7 @@ export const YouTubeLiveManagerView: React.FC = () => {
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
                 disabled={!canManage || isSaving}
-                placeholder="SPL 3.0 Grand Final · Court 1 Live"
+                placeholder={`SPL ${activeSeasonNumber} Grand Final · Court 1 Live`}
                 className="w-full px-3.5 py-2.5 min-h-[44px] rounded-xl bg-slate-950 border border-white/15 focus:border-amber-400 focus:outline-none text-sm text-white placeholder:text-slate-500"
               />
             </div>

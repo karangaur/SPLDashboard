@@ -41,6 +41,8 @@ export const FixturesView: React.FC = () => {
     saveEditedSchedule,
     deleteMatch,
     clearAllMatches,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const [filterStatus, setFilterStatus] = useState<'all' | 'live' | 'upcoming' | 'completed'>('all');
@@ -276,8 +278,13 @@ export const FixturesView: React.FC = () => {
             </h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            Real-time scoring, live court feeds, and round-robin scheduling for {state.settings.name}.
+            Real-time scoring, live court feeds, and round-robin scheduling for {state.settings.name} (SPL {activeSeason.seasonNumber}).
           </p>
+          {isSeasonLocked && (
+            <p className="mt-2 inline-block rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-200">
+              Archived Read-Only Mode: Match schedules and scores are locked for historical preservation.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2 sm:gap-2.5">
@@ -307,13 +314,14 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setGenerateModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[42px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95 cursor-pointer"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3.5 py-2 min-h-[42px] text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <RefreshCw className="w-4 h-4 shrink-0" />
             <span>Generate Schedule</span>
           </button>
 
-          {canEditSchedule && (
+          {canEditSchedule && !isSeasonLocked && (
             <button
               type="button"
               onClick={handleToggleScheduleEditor}
@@ -339,7 +347,8 @@ export const FixturesView: React.FC = () => {
 
           <button
             onClick={() => setManualModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 min-h-[42px] text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10 cursor-pointer"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3 py-2 min-h-[42px] text-xs font-semibold text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <Plus className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>Add Match</span>

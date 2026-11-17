@@ -21,10 +21,13 @@ import {
   Trophy,
   ArrowUp,
   ArrowDown,
+  Plus,
+  Lock,
+  Calendar,
 } from 'lucide-react';
 import { useTournament, DatabaseDiagnosticResult } from '../../context/TournamentContext';
 import { ConfirmModal } from '../common/ConfirmModal';
-import { PlayoffFormat, PlayoffSettings, PlayoffTiebreakerCriterion } from '../../types/tournament';
+import { PlayoffFormat, PlayoffSettings, PlayoffTiebreakerCriterion, TournamentSeasonStatus } from '../../types/tournament';
 import {
   DEFAULT_PLAYOFF_SETTINGS,
   TIEBREAKER_LABELS,
@@ -43,7 +46,33 @@ export const SettingsView: React.FC = () => {
     clearResults,
     exportStateJSON,
     importStateJSON,
+    activeSeason,
+    seasons,
+    seasonLoading,
+    seasonError,
+    isSeasonLocked,
+    switchActiveSeason,
+    createSeason,
+    updateSeasonStatus,
   } = useTournament();
+
+  // Season Management Panel State
+  const [selectedSeasonIdOrSlug, setSelectedSeasonIdOrSlug] = useState<string>(activeSeason.seasonSlug);
+  const [isSwitchingSeason, setIsSwitchingSeason] = useState(false);
+  const [isUpdatingSeasonStatus, setIsUpdatingSeasonStatus] = useState(false);
+  const [showCreateSeasonForm, setShowCreateSeasonForm] = useState(false);
+  const [isCreatingSeason, setIsCreatingSeason] = useState(false);
+  const [newSeasonNumber, setNewSeasonNumber] = useState('');
+  const [newEditionName, setNewEditionName] = useState('');
+  const [newSeasonSlug, setNewSeasonSlug] = useState('');
+  const [newTournamentYear, setNewTournamentYear] = useState<number>(new Date().getFullYear());
+  const [newEntryFee, setNewEntryFee] = useState<number>(state.settings.entryFee ?? 500);
+  const [newMaxSlots, setNewMaxSlots] = useState<number>(state.settings.slotLimit ?? 32);
+  const [newActivateNow, setNewActivateNow] = useState<boolean>(false);
+
+  useEffect(() => {
+    setSelectedSeasonIdOrSlug(activeSeason.seasonSlug);
+  }, [activeSeason.seasonSlug]);
 
   const [testingDb, setTestingDb] = useState(false);
   const [dbTestResult, setDbTestResult] = useState<DatabaseDiagnosticResult | null>(null);
@@ -89,6 +118,12 @@ export const SettingsView: React.FC = () => {
   const handleSaveSettings = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSaving) return;
+    if (isSeasonLocked) {
+      const msg = `SPL ${activeSeason.seasonNumber} is archived (read-only). Switch to an active or upcoming season before editing settings.`;
+      setSaveError(msg);
+      showNotice(msg, 'error');
+      return;
+    }
 
     const trimmedName = (settingsForm.name || '').trim();
     if (!trimmedName) {
@@ -250,8 +285,296 @@ export const SettingsView: React.FC = () => {
           </h1>
         </div>
         <p className="mt-1 text-xs sm:text-sm text-slate-400">
-          Configure league parameters, court schedules, payment channels, and offline backups.
+          Configure league parameters, court schedules, payment channels, multi-season lifecycle, and offline backups.
         </p>
+      </div>
+
+      {/* Tournament Season Management Card */}
+      <div className="rounded-3xl glass-panel p-6 sm:p-8 border border-amber-400/20 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/10">
+          <div className="space-y-1">
+            <h3 className="font-bold text-white text-base flex items-center gap-2">
+              <Calendar className="w-4 h-4 text-amber-400" />
+              <span>Tournament Season Management</span>
+            </h3>
+            <p className="text-xs text-slate-400">
+              Switch between SPL seasons, lock archived historical editions, or initialize SPL 4.0+ without affecting previous seasons.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-400/15 border border-amber-400/35 text-amber-300">
+              SPL {activeSeason.seasonNumber}
+            </span>
+            <span
+              className={`px-2.5 py-1 rounded-full text-[11px] font-bold uppercase border ${
+                activeSeason.status === 'active'
+                  ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                  : activeSeason.status === 'archived'
+                    ? 'bg-slate-700/60 border-white/15 text-slate-300'
+                    : activeSeason.status === 'completed'
+                      ? 'bg-sky-500/15 border-sky-500/30 text-sky-300'
+                      : 'bg-amber-500/15 border-amber-500/30 text-amber-300'
+              }`}
+            >
+              {activeSeason.status}
+            </span>
+          </div>
+        </div>
+
+        {seasonError && (
+          <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-xs text-rose-300">
+            {seasonError}
+          </div>
+        )}
+
+        {isSeasonLocked && (
+          <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200 flex items-start gap-2.5">
+            <Lock className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+            <div>
+              <strong>Archived Season Read-Only Lock Active:</strong> Mutations for{' '}
+              <span className="font-semibold">SPL {activeSeason.seasonNumber} ({activeSeason.editionName})</span> are locked to protect historical records. Switch to an active or upcoming season, or change status below if an admin unlock is required.
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-end">
+          <div className="md:col-span-5">
+            <label className="block text-xs font-semibold text-slate-300 mb-1">
+              Select Season
+            </label>
+            <select
+              value={selectedSeasonIdOrSlug}
+              onChange={(e) => setSelectedSeasonIdOrSlug(e.target.value)}
+              disabled={seasonLoading || isSwitchingSeason}
+              className="w-full bg-slate-900 border border-white/10 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-amber-400"
+            >
+              {(seasons.length > 0 ? seasons : [activeSeason]).map((s) => (
+                <option key={s.id || s.seasonSlug} value={s.seasonSlug}>
+                  SPL {s.seasonNumber} · {s.editionName} ({s.status})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="md:col-span-7 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              disabled={isSwitchingSeason || seasonLoading || selectedSeasonIdOrSlug === activeSeason.seasonSlug}
+              onClick={async () => {
+                setIsSwitchingSeason(true);
+                const ok = await switchActiveSeason(selectedSeasonIdOrSlug, { persistGlobal: false });
+                setIsSwitchingSeason(false);
+                if (ok) {
+                  isDirtyRef.current = false;
+                  setIsDirty(false);
+                  showNotice(`Switched admin view to ${selectedSeasonIdOrSlug} (local session).`, 'success');
+                } else {
+                  showNotice('Could not switch season view.', 'error');
+                }
+              }}
+              className="px-3.5 py-2.5 text-xs font-semibold rounded-xl bg-white/10 hover:bg-white/15 text-white border border-white/10 disabled:opacity-50 cursor-pointer"
+            >
+              {isSwitchingSeason ? 'Switching...' : 'Preview Locally'}
+            </button>
+
+            <button
+              type="button"
+              disabled={isSwitchingSeason || seasonLoading}
+              onClick={async () => {
+                setIsSwitchingSeason(true);
+                const ok = await switchActiveSeason(selectedSeasonIdOrSlug, { persistGlobal: true });
+                setIsSwitchingSeason(false);
+                if (ok) {
+                  isDirtyRef.current = false;
+                  setIsDirty(false);
+                  showNotice(`Global active season set to ${selectedSeasonIdOrSlug}.`, 'success');
+                } else {
+                  showNotice('Failed to update global active season.', 'error');
+                }
+              }}
+              className="px-3.5 py-2.5 text-xs font-bold rounded-xl bg-amber-400 hover:bg-amber-300 text-slate-950 disabled:opacity-50 cursor-pointer"
+            >
+              Set Active Globally
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowCreateSeasonForm((prev) => !prev)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>{showCreateSeasonForm ? 'Cancel New Season' : 'Create New Season'}</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Status Transition Control */}
+        <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-white/10 text-xs">
+          <span className="text-slate-400">
+            Active Season Status (<span className="text-white font-semibold">SPL {activeSeason.seasonNumber}</span>):
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {(['upcoming', 'active', 'completed', 'archived'] as TournamentSeasonStatus[]).map((st) => (
+              <button
+                key={st}
+                type="button"
+                disabled={isUpdatingSeasonStatus || activeSeason.status === st}
+                onClick={async () => {
+                  setIsUpdatingSeasonStatus(true);
+                  const ok = await updateSeasonStatus(activeSeason.seasonSlug, st);
+                  setIsUpdatingSeasonStatus(false);
+                  if (ok) {
+                    showNotice(`SPL ${activeSeason.seasonNumber} status updated to "${st}".`, 'success');
+                  } else {
+                    showNotice('Failed to update season status.', 'error');
+                  }
+                }}
+                className={`px-2.5 py-1 rounded-lg font-bold uppercase text-[11px] border transition-colors cursor-pointer ${
+                  activeSeason.status === st
+                    ? 'bg-amber-400 text-slate-950 border-amber-300'
+                    : 'bg-white/5 hover:bg-white/10 text-slate-300 border-white/10'
+                }`}
+              >
+                {st}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Inline Create New Season Form */}
+        {showCreateSeasonForm && (
+          <div className="p-4 sm:p-5 rounded-2xl bg-slate-950/70 border border-emerald-500/25 space-y-4">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-emerald-300">
+              Initialize New SPL Season
+            </h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Season Number (e.g. 4.0)
+                </label>
+                <input
+                  type="text"
+                  value={newSeasonNumber}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setNewSeasonNumber(val);
+                    if (!newSeasonSlug) {
+                      const numeric = val.replace(/[^0-9]/g, '');
+                      if (numeric) setNewSeasonSlug(`season-${numeric.charAt(0)}`);
+                    }
+                  }}
+                  placeholder="4.0"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Edition Name
+                </label>
+                <input
+                  type="text"
+                  value={newEditionName}
+                  onChange={(e) => setNewEditionName(e.target.value)}
+                  placeholder="Season IV Championship"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Season Slug
+                </label>
+                <input
+                  type="text"
+                  value={newSeasonSlug}
+                  onChange={(e) => setNewSeasonSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                  placeholder="season-4"
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white font-mono"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Tournament Year
+                </label>
+                <input
+                  type="number"
+                  value={newTournamentYear}
+                  onChange={(e) => setNewTournamentYear(Number(e.target.value) || new Date().getFullYear())}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Default Entry Fee (INR)
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={newEntryFee}
+                  onChange={(e) => setNewEntryFee(Number(e.target.value) || 0)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white"
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-semibold text-slate-300 mb-1">
+                  Max Athlete Slots
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  value={newMaxSlots}
+                  onChange={(e) => setNewMaxSlots(Number(e.target.value) || 32)}
+                  className="w-full bg-slate-900 border border-white/10 rounded-xl px-3 py-2 text-sm text-white"
+                />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <label className="flex items-center gap-2 text-xs text-slate-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={newActivateNow}
+                  onChange={(e) => setNewActivateNow(e.target.checked)}
+                  className="rounded border-white/20 bg-slate-900 text-emerald-400"
+                />
+                <span>Activate this new season immediately upon creation</span>
+              </label>
+
+              <button
+                type="button"
+                disabled={isCreatingSeason}
+                onClick={async () => {
+                  if (!newSeasonNumber.trim() || !newEditionName.trim() || !newSeasonSlug.trim()) {
+                    showNotice('Season Number, Edition Name, and Season Slug are required.', 'error');
+                    return;
+                  }
+                  setIsCreatingSeason(true);
+                  const res = await createSeason({
+                    seasonNumber: newSeasonNumber.trim(),
+                    editionName: newEditionName.trim(),
+                    seasonSlug: newSeasonSlug.trim(),
+                    tournamentYear: newTournamentYear,
+                    entryFee: newEntryFee,
+                    maxSlots: newMaxSlots,
+                    activateNow: newActivateNow,
+                  });
+                  setIsCreatingSeason(false);
+                  if (res.success && res.season) {
+                    showNotice(`Created SPL ${res.season.seasonNumber} (${res.season.editionName}) cleanly!`, 'success');
+                    setShowCreateSeasonForm(false);
+                    setNewSeasonNumber('');
+                    setNewEditionName('');
+                    setNewSeasonSlug('');
+                  } else {
+                    showNotice(res.error || 'Failed to create season.', 'error');
+                  }
+                }}
+                className="px-4 py-2 text-xs font-bold rounded-xl bg-emerald-400 hover:bg-emerald-300 text-slate-950 disabled:opacity-50 cursor-pointer"
+              >
+                {isCreatingSeason ? 'Creating Season...' : 'Create Season'}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       <form onSubmit={handleSaveSettings} className="space-y-6">
@@ -731,11 +1054,11 @@ export const SettingsView: React.FC = () => {
 
           <button
             type="submit"
-            disabled={isSaving}
+            disabled={isSaving || isSeasonLocked}
             className="px-6 py-2.5 text-xs font-bold bg-amber-400 hover:bg-amber-300 disabled:opacity-60 disabled:cursor-not-allowed text-slate-950 rounded-xl transition-all shadow-md active:scale-95 flex items-center justify-center gap-2"
           >
             {isSaving && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
-            <span>{isSaving ? 'Saving Settings...' : 'Save All Settings'}</span>
+            <span>{isSeasonLocked ? 'Archived (Read-Only)' : isSaving ? 'Saving Settings...' : 'Save All Settings'}</span>
           </button>
         </div>
       </form>
@@ -1054,16 +1377,18 @@ export const SettingsView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
+              disabled={isSeasonLocked}
               onClick={() => setShowClearResultsConfirm(true)}
-              className="px-4 py-2 text-xs font-semibold text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/20 rounded-xl transition-colors border border-rose-500/20"
+              className="px-4 py-2 text-xs font-semibold text-rose-300 hover:text-white bg-rose-500/10 hover:bg-rose-500/20 rounded-xl transition-colors border border-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Reset Match Scores (Keep Teams)
             </button>
 
             <button
               type="button"
+              disabled={isSeasonLocked}
               onClick={() => setShowResetConfirm(true)}
-              className="px-4 py-2 text-xs font-semibold text-rose-400 hover:text-white bg-rose-500/15 hover:bg-rose-600 rounded-xl transition-colors border border-rose-500/30"
+              className="px-4 py-2 text-xs font-semibold text-rose-400 hover:text-white bg-rose-500/15 hover:bg-rose-600 rounded-xl transition-colors border border-rose-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Reset to Starter State
             </button>

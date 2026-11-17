@@ -51,9 +51,10 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     formConfig: contextFormConfig,
     isRegistrationOpen: contextRegistrationOpen,
     isRegistrationStatusHydrated,
+    activeSeason,
   } = useTournament();
 
-  const activeSeasonSlug = seasonParam || state.registrationSettings.seasonSlug || 'season-4';
+  const activeSeasonSlug = seasonParam || state.registrationSettings.seasonSlug || activeSeason.seasonSlug || 'season-3';
 
   // Form configuration loaded from server, context, or Supabase
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() => {
@@ -114,7 +115,7 @@ export const PublicRegistrationPage: React.FC<PublicRegistrationPageProps> = ({
     setTokenParam(foundToken);
 
     // 2. Fetch form config from centralized Supabase backend directly if available
-    const targetSlug = activeSeasonSlug && activeSeasonSlug !== 'undefined' ? activeSeasonSlug : 'season-4';
+    const targetSlug = activeSeasonSlug && activeSeasonSlug !== 'undefined' ? activeSeasonSlug : (activeSeason.seasonSlug || 'season-3');
 
     if (SupabaseService.isAvailable()) {
       SupabaseService.fetchFormConfig(targetSlug).then((supabaseForm) => {

@@ -158,6 +158,8 @@ export const KnockoutView: React.FC = () => {
     recalculatePlayoffStandings,
     updateSettings,
     triggerCelebration,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const playoffSettings = useMemo(
@@ -1096,7 +1098,7 @@ export const KnockoutView: React.FC = () => {
             </span>
             <div>
               <span className="text-[10px] font-mono font-black uppercase tracking-[0.2em] text-amber-400 block">
-                Smash Premier League · Championship Engine
+                Smash Premier League {activeSeason.seasonNumber} · Championship Engine
               </span>
               <h1 className="font-display text-2xl sm:text-3xl font-black text-white">
                 Knockout Control Center
@@ -1106,6 +1108,11 @@ export const KnockoutView: React.FC = () => {
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
             Configure qualifying team counts (Top 2 to Top 8 &amp; Custom), automatic or manual seeding, Eliminator &amp; Semi-Final pairings, and real-time bracket progression.
           </p>
+          {isSeasonLocked && (
+            <p className="mt-2 inline-block rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-200">
+              SPL {activeSeason.seasonNumber} is Archived (Read-Only): Knockout bracket mutations are locked.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">

@@ -65,7 +65,12 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
     isRegistrationStatusHydrated,
     publishedHeroConfig,
     youtubeLiveConfig,
+    activeSeason,
   } = useTournament();
+
+  const activeSeasonNumber = activeSeason.seasonNumber || '3.0';
+  const activeEditionName = activeSeason.editionName || 'Champion Edition';
+  const activeTournamentYear = activeSeason.tournamentYear || new Date().getFullYear();
 
   const showNavbarRegistration = isRegistrationStatusHydrated && isRegistrationOpen;
 
@@ -257,8 +262,10 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       if (state.matches.every((m) => m.status === 'completed')) return 'League Stage Complete';
       return 'League Stage';
     }
-    return state.teams.length > 0 ? 'Fixtures Pending' : 'Registration Open';
-  }, [state.knockout?.matches, state.knockout?.format, state.matches, state.teams.length]);
+    if (state.teams.length > 0) return 'Fixtures Pending';
+    if (isRegistrationOpen) return 'Registration Open';
+    return activeSeason.status === 'upcoming' ? 'To Be Announced' : 'Season Scheduled';
+  }, [state.knockout?.matches, state.knockout?.format, state.matches, state.teams.length, isRegistrationOpen, activeSeason.status]);
 
   const featuredFixture = useMemo(() => {
     return (
@@ -351,6 +358,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <SPLLogoEmblemSvg
                   className="h-9 w-9 sm:h-11 sm:w-11 shrink-0 drop-shadow-[0_4px_12px_rgba(245,158,11,0.3)] group-hover:scale-105 transition-transform"
                   include30
+                  seasonNumber={activeSeasonNumber}
                 />
               )}
               <div className="min-w-0">
@@ -505,11 +513,13 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
       {/* Main Content Sections */}
       <main className="relative z-10 space-y-14 sm:space-y-24 pb-20">
         
-        {/* 2. DYNAMIC SUPABASE-SYNCED SPL 3.0 CHAMPIONSHIP HERO SECTION */}
+        {/* 2. DYNAMIC SUPABASE-SYNCED CHAMPIONSHIP HERO SECTION */}
         <HeroSectionCanvas
           heroConfig={publishedHeroConfig}
           isRegistrationOpen={isRegistrationOpen}
           tournamentName={tournamentName}
+          seasonNumber={activeSeasonNumber}
+          editionName={activeEditionName}
           organizerLabel={organizerLabel}
           venueLabel={venueLabel}
           announcementText={announcementText}
@@ -528,7 +538,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             <div className="min-w-0">
               <div className="flex items-center gap-2 text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-amber-300/90">
                 <span className="h-px w-6 bg-gradient-to-r from-amber-400 to-rose-500" />
-                <span>SPL 3.0 Broadcast Desk · {venueLabel}</span>
+                <span>SPL {activeSeasonNumber} Broadcast Desk · {venueLabel}</span>
               </div>
               <div className="mt-1.5 flex items-center gap-2.5 flex-wrap">
                 <span
@@ -580,6 +590,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
             onGoToFixtures={handleGoToFixtures}
             youtubeLiveConfig={youtubeLiveConfig}
             onWatchLive={handleOpenLivestream}
+            seasonNumber={activeSeasonNumber}
+            editionName={activeEditionName}
           />
         </section>
 
@@ -594,9 +606,10 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           courtsListLabel={courtsListLabel}
           scoringRules={state.settings.scoringRules}
           onOpenMatchModal={handleOpenMatchModal}
+          seasonNumber={activeSeasonNumber}
         />
 
-        {/* 5. REDESIGNED SPL 3.0 TEAMS SECTION */}
+        {/* 5. REDESIGNED TEAMS SECTION */}
         <TeamsShowcaseSection
           teams={state.teams}
           players={state.players}
@@ -605,6 +618,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
           standings={standings}
           courtNames={state.settings.courtNames}
           tournamentName={tournamentName}
+          seasonNumber={activeSeasonNumber}
           registrationOpen={isRegistrationOpen}
           onOpenPublicRegister={onOpenPublicRegister}
           onSelectMatch={handleOpenMatchModal}
@@ -937,7 +951,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                   <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5">
                     <span className="text-[11px] text-slate-400 font-bold uppercase block">Official Date</span>
                     <span className="text-sm font-bold text-white mt-1 block">
-                      {state.settings.date || 'Championship Season 2026'}
+                      {state.settings.date || 'To Be Announced'}
                     </span>
                   </div>
                   <div className="p-3.5 rounded-2xl bg-white/[0.03] border border-white/5">
@@ -964,7 +978,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
                 <p className="text-xs text-slate-400 leading-relaxed">
                   {isRegistrationOpen
                     ? `Join the official athlete draft of ${tournamentName}. Open to singles and doubles competitors.`
-                    : 'Registration for Smash Premier League 3.0 is currently closed.'}
+                    : `Registration for ${tournamentName} ${activeSeasonNumber} is currently closed.`}
                 </p>
                 {isRegistrationOpen ? (
                   <button
@@ -1001,6 +1015,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
               <SPLLogoEmblemSvg
                 className="h-10 w-10 shrink-0 drop-shadow-[0_4px_12px_rgba(245,158,11,0.3)]"
                 include30
+                seasonNumber={activeSeasonNumber}
               />
               <div>
                 <span className="font-display font-black text-white text-base uppercase block">
@@ -1035,7 +1050,7 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
 
           <div className="pt-6 border-t border-white/10 flex flex-col items-center justify-center gap-1.5 text-center px-2">
             <p className="font-display font-bold uppercase tracking-[0.14em] text-slate-200 text-xs sm:text-sm leading-relaxed max-w-full">
-              © 2026 SMASH PREMIER LEAGUE
+              © {activeTournamentYear} {tournamentName.toUpperCase()}
             </p>
             <p className="flex flex-col md:flex-row items-center justify-center gap-1 md:gap-2 text-xs sm:text-sm text-slate-300 font-medium leading-relaxed md:whitespace-nowrap max-w-full">
               <span>Every Champion Deserves a Great Platform</span>
@@ -1172,6 +1187,8 @@ export const HeroHomePage: React.FC<HeroHomePageProps> = ({
         scoringRules={state.settings.scoringRules}
         realtimeStatus={realtimeStatus}
         onRetryRealtime={reconnectRealtime}
+        seasonNumber={activeSeasonNumber}
+        tournamentName={tournamentName}
       />
 
     </div>

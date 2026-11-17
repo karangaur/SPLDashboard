@@ -3,6 +3,29 @@
  * Centralized Supabase PostgreSQL Schema definitions
  */
 
+export interface DbTournamentSeason {
+  id: string;
+  league_name: string;
+  league_short_name: string;
+  season_number: string;
+  edition_name: string;
+  season_title?: string | null;
+  season_slug: string;
+  tournament_year: number;
+  status: 'upcoming' | 'active' | 'completed' | 'archived';
+  is_active: boolean;
+  is_locked: boolean;
+  entry_fee?: number | null;
+  max_slots?: number | null;
+  courts_count?: number | null;
+  venue?: string | null;
+  organizer?: string | null;
+  date?: string | null;
+  settings_json?: Record<string, any> | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface DbPlayer {
   id: string;
   name: string;
@@ -20,6 +43,8 @@ export interface DbPlayer {
 
 export interface DbTeam {
   id: string;
+  season_id?: string | null;
+  season_slug?: string | null;
   name: string;
   short_name?: string | null;
   captain_id?: string | null;
@@ -34,6 +59,7 @@ export interface DbTeam {
 
 export interface DbTeamPlayer {
   id: string;
+  season_id?: string | null;
   team_id: string;
   player_id: string;
   slot_index: number;
@@ -44,6 +70,7 @@ export interface DbTeamPlayer {
 
 export interface DbRegistration {
   id: string;
+  season_id?: string | null;
   reg_id: string;
   season_slug: string;
   player_id?: string | null;
@@ -85,6 +112,7 @@ export interface DbRegistration {
 
 export interface DbRegistrationFormConfig {
   id: string;
+  season_id?: string | null;
   season_slug: string;
   tournament_name: string;
   season_title: string;
@@ -107,6 +135,7 @@ export interface DbRegistrationFormConfig {
 
 export interface DbRegistrationFormVersion {
   id: string;
+  season_id?: string | null;
   form_config_id: string;
   season_slug: string;
   version_num: number;
@@ -117,6 +146,7 @@ export interface DbRegistrationFormVersion {
 
 export interface DbMatch {
   id: string;
+  season_id?: string | null;
   tournament_season: string;
   round: number;
   court: number;
@@ -138,6 +168,7 @@ export interface DbMatch {
 
 export interface DbPlayoffBracket {
   id: string;
+  season_id?: string | null;
   season_slug: string;
   format: 'ipl_top4' | 'top2' | 'top4' | 'top8';
   status: 'draft' | 'active' | 'completed' | 'archived';
@@ -157,6 +188,7 @@ export interface DbPlayoffBracket {
 
 export interface DbPlayoffMatch {
   id: string;
+  season_id?: string | null;
   bracket_id: string;
   season_slug: string;
   match_type: 'Q1' | 'ELIM' | 'Q2' | 'F';
@@ -187,6 +219,7 @@ export interface DbPlayoffMatch {
 
 export interface DbMatchScore {
   id: string;
+  season_id?: string | null;
   match_id: string;
   set_number: number;
   score_a: number;
@@ -199,6 +232,7 @@ export interface DbMatchScore {
 
 export interface DbTournamentStanding {
   id: string;
+  season_id?: string | null;
   season_slug: string;
   team_id: string;
   played: number;
@@ -231,6 +265,7 @@ export interface DbAdminUser {
 
 export interface DbAuditLog {
   id: string;
+  season_id?: string | null;
   action: string;
   entity_type: string;
   entity_id?: string | null;
@@ -243,6 +278,7 @@ export interface DbAuditLog {
 
 export interface DbRegistrationToken {
   id: string;
+  season_id?: string | null;
   token: string;
   season_slug: string;
   label?: string | null;
@@ -255,6 +291,11 @@ export interface DbRegistrationToken {
 export interface Database {
   public: {
     Tables: {
+      tournament_seasons: {
+        Row: DbTournamentSeason;
+        Insert: Partial<DbTournamentSeason> & { season_number: string; edition_name: string; season_slug: string };
+        Update: Partial<DbTournamentSeason>;
+      };
       players: {
         Row: DbPlayer;
         Insert: Partial<DbPlayer> & { name: string };

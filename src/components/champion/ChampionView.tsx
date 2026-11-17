@@ -8,20 +8,42 @@ import {
 import { useTournament, sportsAudio } from '../../context/TournamentContext';
 
 export const ChampionView: React.FC = () => {
-  const { state, standings, triggerCelebration } = useTournament();
+  const { state, standings, triggerCelebration, activeSeason } = useTournament();
 
   useEffect(() => {
     triggerCelebration();
   }, []);
 
+  const historicalSummary = activeSeason.historicalSummary;
+
   const championKnockout = state.knockout.matches.find(
     (m) => m.stage === 'F' && m.status === 'completed'
   );
+
+  const matchedHistChampTeam = historicalSummary?.championTeam
+    ? state.teams.find(
+        (t) => t.name.toLowerCase() === historicalSummary.championTeam!.toLowerCase()
+      )
+    : undefined;
+  const matchedHistRunnerTeam = historicalSummary?.runnerUpTeam
+    ? state.teams.find(
+        (t) => t.name.toLowerCase() === historicalSummary.runnerUpTeam!.toLowerCase()
+      )
+    : undefined;
 
   const championTeam = championKnockout?.winner
     ? state.teams.find((t) => t.id === championKnockout.winner)
     : state.knockout.championTeamId
     ? state.teams.find((t) => t.id === state.knockout.championTeamId)
+    : matchedHistChampTeam
+    ? matchedHistChampTeam
+    : historicalSummary?.champions
+    ? {
+        id: 'historical-champion',
+        name: historicalSummary.championTeam || historicalSummary.champions,
+        players: [],
+        badge: '🏆',
+      }
     : standings[0]?.team;
 
   const runnerUpTeam =
@@ -35,6 +57,15 @@ export const ChampionView: React.FC = () => {
         )
       : state.knockout.runnerUpTeamId
       ? state.teams.find((t) => t.id === state.knockout.runnerUpTeamId)
+      : matchedHistRunnerTeam
+      ? matchedHistRunnerTeam
+      : historicalSummary?.runnersUp
+      ? {
+          id: 'historical-runner-up',
+          name: historicalSummary.runnerUpTeam || historicalSummary.runnersUp,
+          players: [],
+          badge: '🥈',
+        }
       : standings[1]?.team;
 
   const thirdPlaceTeam = standings[2]?.team;
@@ -48,8 +79,10 @@ export const ChampionView: React.FC = () => {
       .join(' & ');
   };
 
-  const championPlayers = getTeamPlayerNames(championTeam?.id);
-  const runnerUpPlayers = getTeamPlayerNames(runnerUpTeam?.id);
+  const championPlayers =
+    getTeamPlayerNames(championTeam?.id) || historicalSummary?.champions || '';
+  const runnerUpPlayers =
+    getTeamPlayerNames(runnerUpTeam?.id) || historicalSummary?.runnersUp || '';
 
   const championStanding = championTeam
     ? standings.find((s) => s.team.id === championTeam.id)
@@ -67,7 +100,7 @@ export const ChampionView: React.FC = () => {
       <div className="text-center space-y-3">
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/10 text-amber-400 border border-amber-500/20">
           <Sparkles className="w-3.5 h-3.5" />
-          <span>{state.settings.season || 'SPL 3.0 Champion Edition'} · Official Award Presentation</span>
+          <span>{state.settings.season || `SPL ${activeSeason.seasonNumber} ${activeSeason.editionName}`} · Official Award Presentation</span>
         </div>
         <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-black text-white tracking-tight">
           <span className="gradient-gold-text">Champion Ceremony</span>
@@ -94,7 +127,9 @@ export const ChampionView: React.FC = () => {
 
           <div className="space-y-2">
             <span className="text-xs font-bold uppercase tracking-[0.3em] text-amber-400">
-              {championKnockout ? 'Smash Premier League Grand Final Champion' : 'League Leader & Championship Contender'}
+              {championKnockout || historicalSummary?.champions
+                ? 'Smash Premier League Grand Final Champions'
+                : 'League Leader & Championship Contender'}
             </span>
             <h2 className="font-display text-3xl sm:text-5xl font-black text-white">
               {championTeam.name}

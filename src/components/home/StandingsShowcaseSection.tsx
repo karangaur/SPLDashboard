@@ -32,6 +32,7 @@ export interface StandingsShowcaseSectionProps {
   copiedStandings: boolean;
   onCopyStandings: () => void;
   onSelectTeam?: (teamId: string) => void;
+  seasonNumber?: string;
 }
 
 type InspectSortKey = 'official' | 'won' | 'diff' | 'pointsFor';
@@ -356,6 +357,7 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
     copiedStandings,
     onCopyStandings,
     onSelectTeam,
+    seasonNumber = '3.0',
   }) => {
     const [inspectSort, setInspectSort] = useState<InspectSortKey>('official');
     const [expandedMobileIds, setExpandedMobileIds] = useState<Record<string, boolean>>({});
@@ -689,7 +691,7 @@ export const StandingsShowcaseSection: React.FC<StandingsShowcaseSectionProps> =
               <div className="space-y-2 max-w-2xl">
                 <div className="flex items-center gap-2 text-[11px] font-mono font-bold uppercase tracking-[0.2em] text-amber-300/90">
                   <span className="h-px w-6 bg-gradient-to-r from-amber-400 to-red-500" />
-                  <span>SPL 3.0 Championship Table</span>
+                  <span>SPL {seasonNumber} Championship Table</span>
                 </div>
 
                 <div className="flex items-center gap-3">

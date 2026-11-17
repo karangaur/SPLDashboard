@@ -48,7 +48,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
   onLogout,
   onViewPublicHome,
 }) => {
-  const { state, updateMatch, updateKnockoutMatch, realtimeStatus, reconnectRealtime } = useTournament();
+  const { state, updateMatch, updateKnockoutMatch, realtimeStatus, reconnectRealtime, activeSeason, isSeasonLocked } = useTournament();
 
   const [activeTab, setActiveTab] = useState<'scoring' | 'players'>('scoring');
   const [matchTypeFilter, setMatchTypeFilter] = useState<'all' | 'live' | 'upcoming' | 'completed' | 'knockout'>('all');
@@ -146,7 +146,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
   // Score adjustments
   const handleScoreChange = (team: 'A' | 'B', delta: number) => {
-    if (!activeMatch || isActiveLocked || isActiveCompleted) return;
+    if (!activeMatch || isActiveLocked || isActiveCompleted || isSeasonLocked) return;
     const isKo = (activeMatch as any).isKnockout;
     const currentScore = team === 'A' ? (activeMatch.scoreA ?? 0) : (activeMatch.scoreB ?? 0);
     const newScore = Math.max(0, currentScore + delta);
@@ -190,7 +190,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
   // Set status
   const handleSetStatus = (status: Match['status']) => {
-    if (!activeMatch || isActiveLocked) return;
+    if (!activeMatch || isActiveLocked || isSeasonLocked) return;
     if (isActiveCompleted && status === 'live') return;
     const isKo = (activeMatch as any).isKnockout;
 
@@ -218,7 +218,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
 
   // Reset current match score (two-click inline confirmation avoids iframe window.confirm blocks)
   const handleResetScores = () => {
-    if (!activeMatch) return;
+    if (!activeMatch || isSeasonLocked) return;
     if (!confirmHeaderReset) {
       setConfirmHeaderReset(true);
       window.setTimeout(() => setConfirmHeaderReset(false), 4000);
@@ -299,7 +299,7 @@ export const ScoreOperatorDashboard: React.FC<ScoreOperatorDashboardProps> = ({
                 </span>
               </div>
               <p className="text-[10px] sm:text-[11px] text-slate-400 truncate">
-                Court Scoring Console • Season IV Championship
+                Court Scoring Console • SPL {activeSeason.seasonNumber} {activeSeason.editionName}{isSeasonLocked ? ' (Archived Read-Only)' : ''}
               </p>
             </div>
           </div>

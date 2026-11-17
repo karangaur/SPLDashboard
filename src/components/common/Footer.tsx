@@ -9,7 +9,7 @@ interface FooterProps {
 }
 
 export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
-  const { state, exportStateJSON, resetToDefault } = useTournament();
+  const { state, exportStateJSON, resetToDefault, activeSeason, isSeasonLocked } = useTournament();
   const [showResetModal, setShowResetModal] = useState(false);
 
   return (
@@ -108,10 +108,12 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               </button>
               <button
                 onClick={() => setShowResetModal(true)}
-                className="inline-flex items-center gap-2 text-xs text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 px-3 py-2.5 rounded-lg transition-colors border border-white/5"
+                disabled={isSeasonLocked}
+                title={isSeasonLocked ? 'Archived season is read-only' : 'Reset to Default State'}
+                className="inline-flex items-center gap-2 text-xs text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 px-3 py-2.5 rounded-lg transition-colors border border-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <RefreshCw className="w-3.5 h-3.5 shrink-0" />
-                <span>Reset to Default State</span>
+                <span>{isSeasonLocked ? 'Archived (Read-Only)' : 'Reset to Default State'}</span>
               </button>
             </div>
           </div>
@@ -119,7 +121,7 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
 
         <div className="mt-8 border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-400 text-center sm:text-left">
           <div>
-            © {new Date().getFullYear()} {state.settings.name}. Built for professional badminton tournament operations.
+            © {activeSeason.tournamentYear || new Date().getFullYear()} {state.settings.name} · SPL {activeSeason.seasonNumber}. Built for professional badminton tournament operations.
           </div>
           <div className="flex items-center gap-4">
             <button onClick={() => onSelectTab('settings')} className="hover:text-slate-300 transition-colors">

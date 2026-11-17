@@ -13,6 +13,7 @@ import { SPLLogo } from '../common/SPLLogo';
 import {
   DEFAULT_HERO_CONFIG,
   DEFAULT_HERO_VERSION_COLOR,
+  isDefaultSpl3OriginalBranding,
   validateHeroActionDestination,
 } from '../../utils/heroDefaults';
 
@@ -33,6 +34,8 @@ export interface HeroSectionCanvasProps {
   isPreviewMode?: boolean;
   previewViewport?: 'desktop' | 'tablet' | 'mobile';
   onPreviewActionNotice?: (label: string) => void;
+  seasonNumber?: string;
+  editionName?: string;
 }
 
 function hexToRgba(hex: string, alpha: number): string {
@@ -67,6 +70,8 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
   isPreviewMode = false,
   previewViewport = 'desktop',
   onPreviewActionNotice,
+  seasonNumber = '3.0',
+  editionName = 'Champion Edition',
 }) => {
   const cfg = heroConfig || DEFAULT_HERO_CONFIG;
   const { background, logo, text, buttons, theme, animations } = cfg;
@@ -370,7 +375,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
 
   return (
     <section
-      aria-label="Smash Premier League 3.0 Championship Hero"
+      aria-label={`${tournamentName || 'Smash Premier League'} ${seasonNumber} Championship Hero`}
       style={{
         background: backgroundGradientCss,
         borderColor: hexToRgba(theme.borderColor || '#f59e0b', 0.2),
@@ -550,52 +555,80 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                     variant="hero"
                     size={isMobileViewport ? logo.mobileSize || 'md' : logo.desktopSize === 'xl' ? 'lg' : logo.desktopSize || 'md'}
                     animated={animationsActive && logo.entranceAnimation && animations.logoEntrance}
-                    subtitle={logo.subtitle || 'SPL 3.0 · CHAMPION EDITION'}
+                    subtitle={logo.subtitle || `SPL ${seasonNumber} · CHAMPION EDITION`}
+                    seasonNumber={seasonNumber}
                   />
                 )}
               </div>
             )}
 
             {/* Kicker & Tournament Committee Header */}
-            {text.kickerVisible && (text.kickerText || organizerLabel) && (
-              <div
-                className={`${getStaggerClass('heading')} w-full flex flex-col sm:flex-row sm:flex-wrap items-center ${
-                  effectiveAlign === 'center'
-                    ? 'justify-center text-center'
-                    : effectiveAlign === 'right'
-                      ? 'sm:justify-end text-center sm:text-right'
-                      : 'sm:justify-start text-center sm:text-left'
-                } gap-y-1.5 gap-x-2.5 font-display font-black uppercase leading-snug`}
-                style={{
-                  color: text.kickerColor || '#fcd34d',
-                  fontSize: 'clamp(11px, 3.1vw, 13px)',
-                }}
-              >
-                {text.kickerText && (
-                  <div className="inline-flex items-center justify-center gap-2 max-w-full">
-                    <span
-                      className="h-[2px] w-5 sm:w-7 rounded-full shrink-0"
-                      style={{
-                        background: `linear-gradient(90deg, ${theme.accentColor || '#ef4444'} 0%, ${text.kickerColor || '#fcd34d'} 100%)`,
-                      }}
-                    />
-                    <span className="tracking-[0.15em] sm:tracking-[0.24em] break-words whitespace-normal">
-                      {text.kickerText}
+            {text.kickerVisible && (text.kickerText || organizerLabel) && (() => {
+              const sb = cfg.seasonBranding;
+              const resolvedEditionColor = sb?.editionColor || text.kickerColor || '#fcd34d';
+              const badgeOpacity = sb?.editionBadgeBgOpacity ?? 0;
+              const useEditionBadge = badgeOpacity > 0;
+              const editionStyle: React.CSSProperties = {
+                color: resolvedEditionColor,
+                fontWeight: Number(sb?.editionTextWeight || 900),
+                letterSpacing: `${sb?.editionLetterSpacing ?? 0.24}em`,
+                fontStyle: sb?.editionItalic ? 'italic' : 'normal',
+                textTransform: sb?.editionUppercase === false ? 'none' : 'uppercase',
+                ...(useEditionBadge
+                  ? {
+                      backgroundColor: hexToRgba(sb?.editionBadgeBg || '#090d16', badgeOpacity / 100),
+                      border: `1px solid ${hexToRgba(sb?.editionBadgeBorderColor || resolvedEditionColor, 0.55)}`,
+                      padding: '4px 12px',
+                      borderRadius: '9999px',
+                    }
+                  : {}),
+              };
+              return (
+                <div
+                  className={`${getStaggerClass('heading')} w-full flex flex-col sm:flex-row sm:flex-wrap items-center ${
+                    effectiveAlign === 'center'
+                      ? 'justify-center text-center'
+                      : effectiveAlign === 'right'
+                        ? 'sm:justify-end text-center sm:text-right'
+                        : 'sm:justify-start text-center sm:text-left'
+                  } gap-y-1.5 gap-x-2.5 font-display font-black uppercase leading-snug`}
+                  style={{
+                    color: resolvedEditionColor,
+                    fontSize: 'clamp(11px, 3.1vw, 13px)',
+                  }}
+                >
+                  {text.kickerText && (
+                    <div className="inline-flex items-center justify-center gap-2 max-w-full">
+                      {!useEditionBadge && (
+                        <span
+                          className="h-[2px] w-5 sm:w-7 rounded-full shrink-0"
+                          style={{
+                            background: `linear-gradient(90deg, ${theme.accentColor || '#ef4444'} 0%, ${resolvedEditionColor} 100%)`,
+                          }}
+                        />
+                      )}
+                      <span
+                        data-spl-edition-badge="true"
+                        className="break-words whitespace-normal"
+                        style={editionStyle}
+                      >
+                        {text.kickerText}
+                      </span>
+                    </div>
+                  )}
+                  {text.kickerText && organizerLabel && (
+                    <span className="hidden sm:inline text-slate-500 select-none" aria-hidden="true">
+                      ·
                     </span>
-                  </div>
-                )}
-                {text.kickerText && organizerLabel && (
-                  <span className="hidden sm:inline text-slate-500 select-none" aria-hidden="true">
-                    ·
-                  </span>
-                )}
-                {organizerLabel && (
-                  <span className="text-slate-200 tracking-[0.14em] sm:tracking-[0.22em] break-words whitespace-normal max-w-full px-1 sm:px-0">
-                    {organizerLabel}
-                  </span>
-                )}
-              </div>
-            )}
+                  )}
+                  {organizerLabel && (
+                    <span className="text-slate-200 tracking-[0.14em] sm:tracking-[0.22em] break-words whitespace-normal max-w-full px-1 sm:px-0">
+                      {organizerLabel}
+                    </span>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Headings & Copy */}
             <div className={`${getStaggerClass('heading')} space-y-3 w-full min-w-0`}>
@@ -615,28 +648,89 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
                   {(() => {
                     const headingText = text.mainHeading.text;
                     const resolvedVersionColor = (text.versionColor || DEFAULT_HERO_VERSION_COLOR).toLowerCase();
-                    const isDefaultVersionColor = resolvedVersionColor === DEFAULT_HERO_VERSION_COLOR;
-                    if (!headingText.includes('3.0')) return headingText;
-                    return headingText.split(/(3\.0)/g).map((part, idx) => {
-                      if (part !== '3.0') {
+                    const sb = cfg.seasonBranding;
+                    const useExactSpl3Original = isDefaultSpl3OriginalBranding(sb, text.versionColor);
+                    const versionToken = headingText.includes(seasonNumber)
+                      ? seasonNumber
+                      : headingText.includes('3.0')
+                        ? '3.0'
+                        : '';
+                    if (!versionToken) return headingText;
+                    const escapedToken = versionToken.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    return headingText.split(new RegExp(`(${escapedToken})`, 'g')).map((part, idx) => {
+                      if (part !== versionToken) {
                         return <React.Fragment key={idx}>{part}</React.Fragment>;
                       }
-                      if (isDefaultVersionColor) {
+                      if (useExactSpl3Original || !sb) {
                         return (
                           <span
                             key={idx}
-                            data-spl-hero-version="3.0"
+                            data-spl-hero-version={versionToken}
                             className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent"
                           >
                             {part}
                           </span>
                         );
                       }
+
+                      const gradDeg =
+                        sb.gradientDirection === 'to-b'
+                          ? '180deg'
+                          : sb.gradientDirection === 'to-br'
+                            ? '135deg'
+                            : sb.gradientDirection === 'to-l'
+                              ? '270deg'
+                              : '90deg';
+                      const glowAlpha = Math.min(0.95, Math.max(0.15, (sb.glowIntensity || 35) / 100));
+                      const glowBlur = Math.max(6, Math.round((sb.glowIntensity || 35) * 0.42));
+
+                      const shadowParts: string[] = [];
+                      const filterParts: string[] = [];
+                      if (sb.textShadowEnabled) {
+                        if (sb.useGradient) {
+                          filterParts.push(`drop-shadow(0 4px ${sb.textShadowBlur || 12}px rgba(0,0,0,0.85))`);
+                        } else {
+                          shadowParts.push(`0 4px ${sb.textShadowBlur || 12}px rgba(0,0,0,0.85)`);
+                        }
+                      }
+                      if (sb.glowEnabled) {
+                        const glowRgba = hexToRgba(sb.glowColor || '#f59e0b', glowAlpha);
+                        if (sb.useGradient) {
+                          filterParts.push(`drop-shadow(0 0 ${glowBlur}px ${glowRgba})`);
+                        } else {
+                          shadowParts.push(`0 0 ${glowBlur}px ${glowRgba}`);
+                        }
+                      }
+
+                      const customStyle: React.CSSProperties = {
+                        fontWeight: Number(sb.fontWeight || 900),
+                        ...(sb.letterSpacing !== 0 ? { letterSpacing: `${sb.letterSpacing}px` } : {}),
+                        ...(sb.fontSizeDesktop !== 58 || sb.fontSizeMobile !== 34
+                          ? { fontSize: computeResponsiveFontSize(sb.fontSizeDesktop, sb.fontSizeMobile) }
+                          : {}),
+                        ...(sb.outlineThickness > 0
+                          ? { WebkitTextStroke: `${sb.outlineThickness}px ${sb.outlineColor}` }
+                          : {}),
+                        ...(sb.useGradient
+                          ? {
+                              backgroundImage: `linear-gradient(${gradDeg}, ${sb.primaryGradientColor}, ${sb.midGradientColor}, ${sb.secondaryGradientColor})`,
+                              WebkitBackgroundClip: 'text',
+                              backgroundClip: 'text',
+                              color: 'transparent',
+                              WebkitTextFillColor: 'transparent',
+                              ...(filterParts.length > 0 ? { filter: filterParts.join(' ') } : {}),
+                            }
+                          : {
+                              color: sb.textColor || resolvedVersionColor,
+                              ...(shadowParts.length > 0 ? { textShadow: shadowParts.join(', ') } : {}),
+                            }),
+                      };
+
                       return (
                         <span
                           key={idx}
-                          data-spl-hero-version="3.0"
-                          style={{ color: resolvedVersionColor }}
+                          data-spl-hero-version={versionToken}
+                          style={customStyle}
                         >
                           {part}
                         </span>
@@ -770,7 +864,7 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
             {!isRegistrationOpen && (
               <p className={`text-xs sm:text-sm text-slate-400 font-medium flex flex-wrap items-center ${alignFlexJustify} gap-2 text-center sm:text-left`}>
                 <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span>Registration for Smash Premier League 3.0 is currently closed.</span>
+                <span>Registration for {tournamentName || 'Smash Premier League'} {seasonNumber} is currently closed.</span>
               </p>
             )}
           </div>
@@ -778,7 +872,12 @@ export const HeroSectionCanvas: React.FC<HeroSectionCanvasProps> = ({
           {/* Right Column Showcase Visual */}
           {showTwoColumnGrid && (
             <div className={`lg:col-span-6 xl:col-span-5 flex items-stretch ${getStaggerClass('subtitle')}`}>
-              <BadmintonHeroVisual venue={venueLabel} />
+              <BadmintonHeroVisual
+                venue={venueLabel}
+                seasonNumber={seasonNumber}
+                editionName={editionName}
+                seasonBranding={cfg.seasonBranding}
+              />
             </div>
           )}
         </div>

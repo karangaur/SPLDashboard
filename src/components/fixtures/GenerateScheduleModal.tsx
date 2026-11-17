@@ -27,7 +27,7 @@ export const GenerateScheduleModal: React.FC<GenerateScheduleModalProps> = ({
   onSuccess,
   onOpenScheduleEditor,
 }) => {
-  const { state, generateFixtures } = useTournament();
+  const { state, generateFixtures, activeSeason } = useTournament();
 
   const initialCourts = state.settings.courts || 1;
   const [courtCount, setCourtCount] = useState<number>(initialCourts);
@@ -157,7 +157,7 @@ export const GenerateScheduleModal: React.FC<GenerateScheduleModalProps> = ({
                 Generate Match Schedule
               </h2>
               <p className="text-xs text-slate-400 truncate max-w-[260px] sm:max-w-md">
-                {state.settings.name} · {state.settings.season || 'Season IV'}
+                {state.settings.name} · {state.settings.season || activeSeason.editionName || `SPL ${activeSeason.seasonNumber}`}
               </p>
             </div>
           </div>

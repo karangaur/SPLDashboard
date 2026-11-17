@@ -10,6 +10,7 @@ import {
   DEFAULT_HERO_CONFIG,
   normalizeHeroConfig,
   cloneHeroConfig,
+  buildSeasonInitialHeroConfig,
   sanitizeSvgMarkup,
   sanitizePlainText,
 } from './src/utils/heroDefaults';
@@ -40,7 +41,9 @@ const supabaseKey =
   process.env.SUPABASE_ANON_KEY ||
   process.env.VITE_SUPABASE_ANON_KEY ||
   DEFAULT_FALLBACK_SUPABASE_KEY;
+const disableServerSupabase = process.env.SPL_DISABLE_SUPABASE === '1';
 const isSupabaseServerActive = Boolean(
+  !disableServerSupabase &&
   supabaseUrl &&
   supabaseKey &&
   !supabaseUrl.includes('your-project') &&
@@ -50,7 +53,11 @@ const serverSupabase = isSupabaseServerActive ? createClient(supabaseUrl!, supab
 
 const isVercel = Boolean(process.env.VERCEL || process.env.NOW_REGION);
 const ORIGINAL_DATA_DIR = path.join(__dirname, 'data');
-const DATA_DIR = isVercel ? path.join('/tmp', 'spl-data') : ORIGINAL_DATA_DIR;
+const DATA_DIR = process.env.SPL_DATA_DIR
+  ? path.resolve(process.env.SPL_DATA_DIR)
+  : isVercel
+    ? path.join('/tmp', 'spl-data')
+    : ORIGINAL_DATA_DIR;
 
 const REGISTRATIONS_FILE = path.join(DATA_DIR, 'registrations.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'registration_settings.json');
@@ -61,6 +68,7 @@ const TOURNAMENT_FILE = path.join(DATA_DIR, 'tournament_state.json');
 const HERO_FILE = path.join(DATA_DIR, 'hero_config.json');
 const HERO_MEDIA_DIR = path.join(DATA_DIR, 'hero-media');
 const LIVESTREAM_FILE = path.join(DATA_DIR, 'youtube_live.json');
+const SEASONS_FILE = path.join(DATA_DIR, 'seasons.json');
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -112,17 +120,22 @@ function writeJSON<T>(filePath: string, data: T): void {
   }
 }
 
-function createDefaultForm(seasonSlug = 'season-4') {
+function createDefaultForm(
+  seasonSlug = 'season-4',
+  opts?: { seasonTitle?: string; date?: string; enabled?: boolean }
+) {
+  const resolvedDate =
+    opts?.date !== undefined ? opts.date : seasonSlug === 'season-4' ? '2026-10-25' : '';
   return {
     seasonSlug,
     tournamentName: 'Smash Premier League',
-    seasonTitle: 'Season IV (Championship Edition)',
-    deadline: '2026-11-15T23:59',
+    seasonTitle: opts?.seasonTitle || 'Season IV (Championship Edition)',
+    deadline: seasonSlug === 'season-4' ? '2026-11-15T23:59' : '',
     maxSlots: 32,
     entryFee: 500,
-    venue: 'Maharajganj Indoor Badminton Stadium, Court 1 & 2',
-    date: '2026-10-25',
-    enabled: true,
+    venue: 'Maharajganj Indoor Badminton Stadium',
+    date: resolvedDate,
+    enabled: opts?.enabled !== undefined ? opts.enabled : true,
     closedNotice: 'Registrations for this tournament are currently closed. Please contact the tournament organizer for spot entry inquiries.',
     isPublished: true,
     publishedAt: Date.now(),
@@ -322,6 +335,121 @@ function cleanIndianMobile(raw: string): { isValid: boolean; cleanMobile: string
   return { isValid: true, cleanMobile: clean };
 }
 
+interface ServerSeasonRecord {
+  id: string;
+  seasonNumber: string;
+  editionName: string;
+  seasonTitle: string;
+  seasonSlug: string;
+  leagueName: string;
+  tournamentYear: number;
+  status: 'upcoming' | 'draft' | 'active' | 'completed' | 'archived';
+  isActive: boolean;
+  isLocked: boolean;
+  entryFee: number;
+  maxSlots: number;
+  venue: string;
+  date: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+  organizer: string;
+  courtsCount: number;
+  courtNames: string[];
+  registrationEnabled: boolean;
+  historicalSummary?: {
+    champions?: string;
+    championTeam?: string;
+    runnersUp?: string;
+    runnerUpTeam?: string;
+    mvp?: string;
+    notes?: string;
+  };
+  createdAt: number;
+  updatedAt: number;
+}
+
+interface SeasonsStoreFile {
+  activeSeasonSlug: string;
+  seasons: ServerSeasonRecord[];
+}
+
+function createDefaultInitialSeason(): ServerSeasonRecord {
+  const now = Date.now();
+  return {
+    id: 'season-4',
+    seasonNumber: '3.0',
+    editionName: 'Champion Edition',
+    seasonTitle: 'Smash Premier League — Season 3.0 (Champion Edition)',
+    seasonSlug: 'season-4',
+    leagueName: 'Smash Premier League',
+    tournamentYear: 2026,
+    status: 'completed',
+    isActive: true,
+    isLocked: false,
+    entryFee: 250,
+    maxSlots: 32,
+    venue: 'Maharajganj Indoor Badminton Stadium, Court 1',
+    date: '2026-11-14',
+    organizer: 'SPL Tournament Committee',
+    courtsCount: 1,
+    courtNames: ['Court 1'],
+    registrationEnabled: true,
+    historicalSummary: {
+      champions: 'Karan & Saptrishi',
+      championTeam: 'Team Karan',
+      runnersUp: 'Alok & Ravi',
+      runnerUpTeam: 'Team Alok',
+    },
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+function readSeasonsStore(): SeasonsStoreFile {
+  const fallback: SeasonsStoreFile = {
+    activeSeasonSlug: 'season-4',
+    seasons: [createDefaultInitialSeason()],
+  };
+  const raw = readJSON<Partial<SeasonsStoreFile>>(SEASONS_FILE, fallback);
+  const seasons = Array.isArray(raw.seasons) && raw.seasons.length > 0 ? raw.seasons : fallback.seasons;
+  const active =
+    seasons.find((s) => s.isActive)?.seasonSlug ||
+    raw.activeSeasonSlug ||
+    seasons[0]?.seasonSlug ||
+    'season-4';
+  return {
+    activeSeasonSlug: active,
+    seasons: seasons.map((s) => ({
+      ...s,
+      isActive: s.seasonSlug === active,
+      isLocked: Boolean(s.isLocked || s.status === 'archived'),
+    })),
+  };
+}
+
+function writeSeasonsStore(store: SeasonsStoreFile): void {
+  writeJSON(SEASONS_FILE, store);
+}
+
+function getActiveSeasonSlugServer(): string {
+  return readSeasonsStore().activeSeasonSlug || 'season-4';
+}
+
+function resolveRequestSeasonSlug(req: express.Request): string {
+  const candidate =
+    (req.query?.season as string) ||
+    (req.params?.seasonSlug as string) ||
+    (req.body?.seasonSlug as string) ||
+    (req.body?.season as string) ||
+    '';
+  const cleaned = String(candidate || '').trim();
+  if (!cleaned || cleaned === 'undefined' || cleaned === 'all') {
+    return getActiveSeasonSlugServer();
+  }
+  return cleaned;
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -345,11 +473,110 @@ async function startServer() {
     next();
   });
 
+  // Probe Supabase schema capability for dual pre/post-Phase-2 compatibility
+  let serverHasSeasonsTable: boolean | null = null;
+  const serverSeasonIdCols = new Map<string, boolean>();
+  async function hasServerSeasonsTable(): Promise<boolean> {
+    if (!serverSupabase) return false;
+    if (serverHasSeasonsTable !== null) return serverHasSeasonsTable;
+    try {
+      const { error } = await serverSupabase.from('tournament_seasons').select('id').limit(1);
+      serverHasSeasonsTable = !error;
+    } catch {
+      serverHasSeasonsTable = false;
+    }
+    return serverHasSeasonsTable;
+  }
+  async function hasServerSeasonIdCol(table: string): Promise<boolean> {
+    if (!serverSupabase) return false;
+    if (serverSeasonIdCols.has(table)) return Boolean(serverSeasonIdCols.get(table));
+    try {
+      const { error } = await serverSupabase.from(table).select('season_id').limit(1);
+      const exists = !error;
+      serverSeasonIdCols.set(table, exists);
+      return exists;
+    } catch {
+      serverSeasonIdCols.set(table, false);
+      return false;
+    }
+  }
+
+  async function isSeasonArchivedServer(seasonSlug: string): Promise<boolean> {
+    const store = readSeasonsStore();
+    const localMatch = store.seasons.find((s) => s.seasonSlug === seasonSlug || s.id === seasonSlug);
+    if (localMatch && (localMatch.status === 'archived' || localMatch.isLocked)) {
+      return true;
+    }
+    if (await hasServerSeasonsTable()) {
+      try {
+        const { data } = await serverSupabase!
+          .from('tournament_seasons')
+          .select('status')
+          .or(`season_slug.eq.${seasonSlug},id.eq.${seasonSlug}`)
+          .maybeSingle();
+        if (data && (data as any).status === 'archived') {
+          return true;
+        }
+      } catch {}
+    }
+    return false;
+  }
+
+  async function getSeasonRecordServer(seasonSlug: string): Promise<ServerSeasonRecord | null> {
+    const store = readSeasonsStore();
+    const local = store.seasons.find((s) => s.seasonSlug === seasonSlug || s.id === seasonSlug);
+    if (local) return local;
+    if (await hasServerSeasonsTable()) {
+      try {
+        const { data } = await serverSupabase!
+          .from('tournament_seasons')
+          .select('*')
+          .or(`season_slug.eq.${seasonSlug},id.eq.${seasonSlug}`)
+          .maybeSingle();
+        if (data) {
+          const r = data as any;
+          const sj = (r.settings_json && typeof r.settings_json === 'object' ? r.settings_json : {}) as Record<string, any>;
+          return {
+            id: r.id,
+            seasonNumber: r.season_number || '4.0',
+            editionName: r.edition_name || 'Championship Edition',
+            seasonTitle: r.season_title || `Smash Premier League ${r.season_number || ''}`,
+            seasonSlug: r.season_slug,
+            leagueName: r.league_name || 'Smash Premier League',
+            tournamentYear: Number(r.tournament_year || 2026),
+            status: r.status || 'active',
+            isActive: Boolean(r.is_active),
+            isLocked: r.status === 'archived',
+            entryFee: Number(r.entry_fee ?? 500),
+            maxSlots: Number(r.max_slots ?? 32),
+            venue: r.venue || '',
+            date: r.date || '',
+            startDate: sj.startDate || undefined,
+            endDate: sj.endDate || undefined,
+            description: sj.description || undefined,
+            organizer: r.organizer || 'SPL Tournament Committee',
+            courtsCount: Number(r.courts_count ?? 2),
+            courtNames: Array.isArray(r.court_names_json)
+              ? r.court_names_json
+              : Array.isArray(sj.courtNames)
+                ? sj.courtNames
+                : ['Court 1', 'Court 2'],
+            registrationEnabled: r.registration_enabled !== false,
+            createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+            updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
+          };
+        }
+      } catch {}
+    }
+    return null;
+  }
+
   // Centralized Database Health & Status Endpoint
-  app.get('/api/database/status', async (_req, res) => {
-    const regData = readJSON<any[]>(REGISTRATIONS_FILE, []);
+  app.get('/api/database/status', async (req, res) => {
+    const reqSlug = resolveRequestSeasonSlug(req);
+    const regData = readJSON<any[]>(REGISTRATIONS_FILE, []).filter((r) => (r.season || 'season-4') === reqSlug);
     const formsData = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const stateData = readJSON<any>(TOURNAMENT_FILE, { players: [], teams: [], matches: [] });
+    const stateData = readSeasonTournamentState(reqSlug);
 
     const serverStats = {
       status: 'active',
@@ -440,20 +667,94 @@ async function startServer() {
     activeTokens: {} as Record<string, { userId: string; expiresAt: number }>,
   };
 
-  function isAdminAuthorized(req: express.Request): boolean {
+  async function verifyServerAuth(
+    req: express.Request,
+    options?: { allowScoreOperator?: boolean }
+  ): Promise<{
+    authorized: boolean;
+    status: number;
+    error?: string;
+    adminName?: string;
+    role?: string;
+  }> {
     const authHeader = req.headers.authorization;
     const token =
+      (authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '') ||
       (req.query?.adminToken as string) ||
-      (req.query?.token as string) ||
-      (authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '');
-    if (!token) return false;
+      '';
+    if (!token) {
+      return { authorized: false, status: 401, error: 'Unauthorized: Missing authentication token.' };
+    }
+
     const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
-    const session = authConfig.activeTokens?.[token];
-    if (session && Date.now() <= session.expiresAt) return true;
+    const localSession = authConfig.activeTokens?.[token];
+    if (localSession && Date.now() <= localSession.expiresAt) {
+      const account = authConfig.accounts?.find((a: any) => a.id === localSession.userId);
+      if (!account) {
+        return { authorized: false, status: 401, error: 'Unauthorized: Session account not found.' };
+      }
+      const allowed =
+        account.role === 'super_admin' ||
+        account.role === 'tournament_director' ||
+        (Boolean(options?.allowScoreOperator) && account.role === 'score_operator');
+      if (!allowed) {
+        return { authorized: false, status: 403, error: 'Forbidden: Insufficient role privileges.' };
+      }
+      return { authorized: true, status: 200, adminName: account.name || account.username, role: account.role };
+    }
+
+    if (serverSupabase && token.split('.').length === 3) {
+      try {
+        const { data: userData } = await serverSupabase.auth.getUser(token);
+        if (userData?.user) {
+          const { data: adminRow } = await serverSupabase
+            .from('admin_users')
+            .select('id, name, username, role, is_active')
+            .or(`auth_user_id.eq.${userData.user.id},email.eq.${userData.user.email}`)
+            .maybeSingle();
+          if (adminRow && (adminRow as any).is_active !== false) {
+            const role = (adminRow as any).role;
+            const allowed =
+              role === 'super_admin' ||
+              role === 'tournament_director' ||
+              (Boolean(options?.allowScoreOperator) && role === 'score_operator');
+            if (!allowed) {
+              return { authorized: false, status: 403, error: 'Forbidden: Insufficient role privileges.' };
+            }
+            return { authorized: true, status: 200, adminName: (adminRow as any).name, role };
+          }
+        }
+      } catch {}
+    }
+
     const claimedAdminId = String(req.headers['x-spl-admin-id'] || '').trim();
-    if (claimedAdminId && /^spl_(sb|sess|tk)_[a-f0-9]{16,}$/i.test(token)) return true;
-    if (token.startsWith('spl_sess_') || token.startsWith('spl_tk_')) return true;
-    return false;
+    if (serverSupabase && claimedAdminId && /^spl_sb_[a-f0-9]{16,}$/i.test(token)) {
+      try {
+        const { data: adminRow } = await serverSupabase
+          .from('admin_users')
+          .select('id, name, username, role, is_active')
+          .eq('id', claimedAdminId)
+          .maybeSingle();
+        if (adminRow && (adminRow as any).is_active !== false) {
+          const role = (adminRow as any).role;
+          const allowed =
+            role === 'super_admin' ||
+            role === 'tournament_director' ||
+            (Boolean(options?.allowScoreOperator) && role === 'score_operator');
+          if (!allowed) {
+            return { authorized: false, status: 403, error: 'Forbidden: Insufficient role privileges.' };
+          }
+          return {
+            authorized: true,
+            status: 200,
+            adminName: (adminRow as any).name || (adminRow as any).username,
+            role,
+          };
+        }
+      } catch {}
+    }
+
+    return { authorized: false, status: 401, error: 'Unauthorized: Valid administrator session required.' };
   }
 
   function mapServerDbRegistration(r: any) {
@@ -601,7 +902,688 @@ async function startServer() {
     res.json({ success: true });
   });
 
-  async function fetchServerSupabaseFormRow(seasonSlug = 'season-4'): Promise<any | null> {
+  // =========================================================================
+  // SEASON LIFECYCLE MANAGEMENT ENDPOINTS (/api/seasons)
+  // =========================================================================
+  app.get('/api/seasons', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const store = readSeasonsStore();
+    if (await hasServerSeasonsTable()) {
+      try {
+        const { data, error } = await serverSupabase!
+          .from('tournament_seasons')
+          .select('*')
+          .order('tournament_year', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          const mapped: ServerSeasonRecord[] = data.map((r: any) => {
+            const sj = (r.settings_json && typeof r.settings_json === 'object' ? r.settings_json : {}) as Record<string, any>;
+            return {
+              id: r.id,
+              seasonNumber: r.season_number || '4.0',
+              editionName: r.edition_name || 'Championship Edition',
+              seasonTitle: r.season_title || `Smash Premier League ${r.season_number || ''}`,
+              seasonSlug: r.season_slug,
+              leagueName: r.league_name || 'Smash Premier League',
+              tournamentYear: Number(r.tournament_year || 2026),
+              status: r.status || (r.is_active ? 'active' : 'upcoming'),
+              isActive: Boolean(r.is_active),
+              isLocked: Boolean(r.is_locked || r.status === 'archived'),
+              entryFee: Number(r.entry_fee ?? 500),
+              maxSlots: Number(r.max_slots ?? 32),
+              venue: r.venue || '',
+              date: r.date || '',
+              startDate: sj.startDate || undefined,
+              endDate: sj.endDate || undefined,
+              description: sj.description || undefined,
+              organizer: r.organizer || 'SPL Tournament Committee',
+              courtsCount: Number(r.courts_count ?? 2),
+              courtNames: Array.isArray(r.court_names_json)
+                ? r.court_names_json
+                : Array.isArray(sj.courtNames)
+                  ? sj.courtNames
+                  : ['Court 1', 'Court 2'],
+              registrationEnabled:
+                sj.registrationEnabled !== undefined
+                  ? Boolean(sj.registrationEnabled)
+                  : r.registration_enabled !== false,
+              historicalSummary: sj.historicalSummary || undefined,
+              createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+              updatedAt: r.updated_at ? new Date(r.updated_at).getTime() : Date.now(),
+            };
+          });
+          const active = mapped.find((s) => s.isActive) || mapped[0];
+          writeSeasonsStore({ activeSeasonSlug: active.seasonSlug, seasons: mapped });
+          return res.json({ seasons: mapped, activeSeason: active });
+        }
+      } catch {}
+    }
+    const activeSeason = store.seasons.find((s) => s.seasonSlug === store.activeSeasonSlug) || store.seasons[0];
+    return res.json({ seasons: store.seasons, activeSeason });
+  });
+
+  app.get('/api/seasons/summaries', async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const store = readSeasonsStore();
+    const regsList = readJSON<any[]>(REGISTRATIONS_FILE, []);
+    const summaries: Record<string, {
+      seasonSlug: string;
+      seasonId?: string;
+      registeredPlayers: number;
+      rosterPlayers: number;
+      teamsCount: number;
+      matchesCount: number;
+      liveMatchesCount: number;
+    }> = {};
+
+    for (const season of store.seasons) {
+      const slug = season.seasonSlug;
+      const stateData = readSeasonTournamentState(slug);
+      const localRegsCount = regsList.filter((r) => (r.seasonSlug || r.season || 'season-4') === slug).length;
+      const koMatches = Array.isArray(stateData.knockout?.matches) ? stateData.knockout.matches : [];
+      const leagueMatches = Array.isArray(stateData.matches) ? stateData.matches : [];
+      const liveCount =
+        leagueMatches.filter((m: any) => m?.status === 'live' || m?.status === 'paused').length +
+        koMatches.filter((m: any) => m?.status === 'live' || m?.status === 'paused').length;
+
+      summaries[slug] = {
+        seasonSlug: slug,
+        seasonId: season.id,
+        registeredPlayers: localRegsCount,
+        rosterPlayers: Array.isArray(stateData.players) ? stateData.players.length : 0,
+        teamsCount: Array.isArray(stateData.teams) ? stateData.teams.length : 0,
+        matchesCount: leagueMatches.length + koMatches.length,
+        liveMatchesCount: liveCount,
+      };
+    }
+
+    if (serverSupabase) {
+      try {
+        for (const season of store.seasons) {
+          const slug = season.seasonSlug;
+          const sid = season.id;
+          const [regRes, teamRes, matchRes] = await Promise.all([
+            serverSupabase
+              .from('registrations')
+              .select('id', { count: 'exact', head: true })
+              .eq('season_slug', slug),
+            serverSupabase
+              .from('teams')
+              .select('id', { count: 'exact', head: true })
+              .eq('season_slug', slug),
+            serverSupabase
+              .from('matches')
+              .select('id, status')
+              .eq('tournament_season', slug),
+          ]);
+          const s = summaries[slug];
+          if (typeof regRes.count === 'number') s.registeredPlayers = Math.max(s.registeredPlayers, regRes.count);
+          if (typeof teamRes.count === 'number') s.teamsCount = Math.max(s.teamsCount, teamRes.count);
+          if (Array.isArray(matchRes.data)) {
+            s.matchesCount = Math.max(s.matchesCount, matchRes.data.length);
+            s.liveMatchesCount = Math.max(
+              s.liveMatchesCount,
+              matchRes.data.filter((m: any) => m.status === 'live' || m.status === 'paused').length
+            );
+          }
+          if (sid && sid !== slug) {
+            s.seasonId = sid;
+          }
+        }
+      } catch {}
+    }
+
+    return res.json({ summaries });
+  });
+
+  app.get('/api/seasons/:slug/snapshot', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const targetSlug = String(req.params.slug || '').trim();
+    const store = readSeasonsStore();
+    const season = store.seasons.find((s) => s.seasonSlug === targetSlug || s.id === targetSlug);
+    if (!season) {
+      return res.status(404).json({ error: 'Season not found.' });
+    }
+
+    const stateData = readSeasonTournamentState(season.seasonSlug);
+    const regsList = readJSON<any[]>(REGISTRATIONS_FILE, []).filter(
+      (r) => (r.seasonSlug || r.season || 'season-4') === season.seasonSlug
+    );
+    const teams: any[] = Array.isArray(stateData.teams) ? stateData.teams : [];
+    const players: any[] = Array.isArray(stateData.players) ? stateData.players : [];
+    const matches: any[] = Array.isArray(stateData.matches) ? stateData.matches : [];
+    const knockout = stateData.knockout || { format: 'top4', published: true, showOnPublicHomepage: true, matches: [] };
+
+    const map = new Map<string, any>();
+    for (const t of teams) {
+      map.set(t.id, {
+        team: t,
+        played: 0,
+        won: 0,
+        lost: 0,
+        points: 0,
+        pointsFor: 0,
+        pointsAgainst: 0,
+        diff: 0,
+        form: [],
+      });
+    }
+    for (const m of matches) {
+      if (m.status !== 'completed') continue;
+      const rA = map.get(m.teamA);
+      const rB = map.get(m.teamB);
+      if (!rA || !rB) continue;
+      const sA = Number(m.scoreA ?? 0);
+      const sB = Number(m.scoreB ?? 0);
+      rA.played += 1;
+      rB.played += 1;
+      rA.pointsFor += sA;
+      rA.pointsAgainst += sB;
+      rB.pointsFor += sB;
+      rB.pointsAgainst += sA;
+      const winId = m.winner || (sA > sB ? m.teamA : sB > sA ? m.teamB : undefined);
+      if (winId === m.teamA) {
+        rA.won += 1;
+        rA.points += 2;
+        rA.form.push('W');
+        rB.lost += 1;
+        rB.form.push('L');
+      } else if (winId === m.teamB) {
+        rB.won += 1;
+        rB.points += 2;
+        rB.form.push('W');
+        rA.lost += 1;
+        rA.form.push('L');
+      }
+    }
+    const standings = Array.from(map.values())
+      .map((r) => ({ ...r, diff: r.pointsFor - r.pointsAgainst }))
+      .sort((a, b) => (b.points !== a.points ? b.points - a.points : b.diff - a.diff));
+
+    let revenueCollected = 0;
+    let paidCount = 0;
+    for (const r of regsList) {
+      if (r.paymentStatus === 'paid' || r.status === 'paid') {
+        paidCount += 1;
+        revenueCollected += Number(r.paidAmount ?? r.fee ?? 0);
+      }
+    }
+
+    return res.json({
+      season,
+      players,
+      teams,
+      matches,
+      knockout,
+      standings,
+      registrations: regsList,
+      revenueCollected,
+      paidCount,
+    });
+  });
+
+  app.post('/api/seasons', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const body = req.body || {};
+    const supplied = body.season;
+    const rawSlug = String(supplied?.seasonSlug || body.seasonSlug || `season-${body.seasonNumber || Date.now()}`)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+    if (!rawSlug) {
+      return res.status(400).json({ error: 'seasonSlug is required.' });
+    }
+    const store = readSeasonsStore();
+    if (store.seasons.some((s) => s.seasonSlug === rawSlug)) {
+      return res.status(409).json({ error: `Season with slug "${rawSlug}" already exists.` });
+    }
+    const now = Date.now();
+    const seasonNumber = String(supplied?.seasonNumber || body.seasonNumber || '4.0').trim();
+    const editionName = String(supplied?.editionName || body.editionName || 'Championship Edition').trim();
+    const tournamentYear = Number(supplied?.tournamentYear || body.tournamentYear || new Date().getFullYear());
+    const seasonTitle =
+      String(supplied?.seasonTitle || body.seasonTitle || `Smash Premier League — Season ${seasonNumber} (${editionName})`).trim();
+    const activateNow = Boolean(body.activateNow || supplied?.isActive);
+    const requestedStatus = supplied?.status || body.status;
+    const resolvedStatus: ServerSeasonRecord['status'] = activateNow
+      ? 'active'
+      : requestedStatus === 'upcoming' || requestedStatus === 'draft' || requestedStatus === 'active'
+        ? requestedStatus
+        : 'upcoming';
+
+    const copySourceSlug = String(body.copySettingsFromSeasonSlug || '').trim();
+    const sourceState = copySourceSlug ? readSeasonTournamentState(copySourceSlug) : null;
+    const sourceSettingsAny = sourceState?.settings as Record<string, any> | undefined;
+    const sourcePlayoffSettings = sourceSettingsAny?.playoffSettings
+      ? { ...sourceSettingsAny.playoffSettings }
+      : undefined;
+    const sourceScoringRules = sourceSettingsAny?.scoringRules
+      ? { ...sourceSettingsAny.scoringRules }
+      : undefined;
+
+    const newSeason: ServerSeasonRecord = {
+      id: supplied?.id || crypto.randomUUID(),
+      seasonNumber,
+      editionName,
+      seasonTitle,
+      seasonSlug: rawSlug,
+      leagueName: supplied?.leagueName || 'Smash Premier League',
+      tournamentYear,
+      status: resolvedStatus,
+      isActive: activateNow,
+      isLocked: false,
+      entryFee: Number(supplied?.entryFee ?? body.entryFee ?? sourceState?.settings?.entryFee ?? 500),
+      maxSlots: Number(supplied?.maxSlots ?? body.maxSlots ?? sourceState?.settings?.slotLimit ?? 32),
+      venue: String(
+        supplied?.venue ||
+          body.venue ||
+          sourceState?.settings?.venue ||
+          'Maharajganj Indoor Badminton Stadium'
+      ),
+      date: String(supplied?.date || body.date || body.startDate || '').trim(),
+      startDate: supplied?.startDate || body.startDate || undefined,
+      endDate: supplied?.endDate || body.endDate || undefined,
+      description: supplied?.description || body.description || undefined,
+      organizer: String(
+        supplied?.organizer ||
+          body.organizer ||
+          sourceState?.settings?.organizer ||
+          'SPL Tournament Committee'
+      ),
+      courtsCount: Number(supplied?.courtsCount ?? body.courtsCount ?? sourceState?.settings?.courts ?? 2),
+      courtNames: Array.isArray(supplied?.courtNames)
+        ? supplied.courtNames
+        : Array.isArray(body.courtNames)
+          ? body.courtNames
+          : Array.isArray(sourceState?.settings?.courtNames)
+            ? [...sourceState.settings.courtNames]
+            : ['Court 1', 'Court 2'],
+      registrationEnabled:
+        supplied?.registrationEnabled !== undefined
+          ? Boolean(supplied.registrationEnabled)
+          : body.registrationEnabled !== undefined
+            ? Boolean(body.registrationEnabled)
+            : true,
+      historicalSummary: supplied?.historicalSummary || body.historicalSummary || undefined,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const nextSeasons = activateNow
+      ? [newSeason, ...store.seasons.map((s) => ({ ...s, isActive: false }))]
+      : [newSeason, ...store.seasons];
+    const nextStore: SeasonsStoreFile = {
+      activeSeasonSlug: activateNow ? newSeason.seasonSlug : store.activeSeasonSlug,
+      seasons: nextSeasons,
+    };
+    writeSeasonsStore(nextStore);
+
+    // Seed an isolated clean empty operational tournament payload (no copied players, teams, matches, scores, or registrations)
+    const initialPayload = createDefaultTournamentPayload(newSeason);
+    if (sourceState) {
+      if (sourceScoringRules) (initialPayload.settings as any).scoringRules = sourceScoringRules;
+      if (sourcePlayoffSettings) (initialPayload.settings as any).playoffSettings = sourcePlayoffSettings;
+      if (sourceState.settings?.format) initialPayload.settings.format = sourceState.settings.format;
+      if ((sourceState as any).payment) {
+        (initialPayload as any).payment = { ...(sourceState as any).payment };
+      }
+    }
+    writeSeasonTournamentState(newSeason.seasonSlug, initialPayload);
+
+    // Initialize isolated registration form config for this season
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    if (!forms[newSeason.seasonSlug]) {
+      const sourceForm = copySourceSlug ? forms[copySourceSlug] : null;
+      forms[newSeason.seasonSlug] = {
+        ...createDefaultForm(newSeason.seasonSlug, {
+          seasonTitle: newSeason.seasonTitle,
+          date: newSeason.date,
+          enabled: newSeason.registrationEnabled,
+        }),
+        ...(sourceForm && Array.isArray(sourceForm.fields) ? { fields: sourceForm.fields } : {}),
+        ...(sourceForm?.payment ? { payment: { ...sourceForm.payment, baseFee: newSeason.entryFee } } : {}),
+        seasonSlug: newSeason.seasonSlug,
+        seasonTitle: newSeason.seasonTitle,
+        entryFee: newSeason.entryFee,
+        maxSlots: newSeason.maxSlots,
+        venue: newSeason.venue,
+        date: newSeason.date,
+        enabled: newSeason.registrationEnabled,
+      };
+      writeJSON(FORMS_FILE, forms);
+    }
+
+    // Initialize clean isolated season hero design without mutating SPL 3.0
+    const initialHero = buildSeasonInitialHeroConfig(newSeason);
+    writeLocalHeroStore(newSeason.seasonSlug, {
+      published: normalizeHeroConfig({ ...initialHero, status: 'published' }),
+      draft: normalizeHeroConfig({ ...initialHero, status: 'draft' }),
+      versions: [],
+    });
+
+    if (await hasServerSeasonsTable()) {
+      try {
+        if (activateNow) {
+          await serverSupabase!.from('tournament_seasons').update({ is_active: false } as any).neq('season_slug', newSeason.seasonSlug);
+        }
+        await serverSupabase!.from('tournament_seasons').upsert({
+          id: newSeason.id,
+          league_name: newSeason.leagueName,
+          league_short_name: 'SPL',
+          season_number: newSeason.seasonNumber,
+          edition_name: newSeason.editionName,
+          season_title: newSeason.seasonTitle,
+          season_slug: newSeason.seasonSlug,
+          tournament_year: newSeason.tournamentYear,
+          status: newSeason.status === 'draft' ? 'upcoming' : newSeason.status,
+          is_active: newSeason.isActive,
+          is_locked: newSeason.isLocked,
+          entry_fee: newSeason.entryFee,
+          max_slots: newSeason.maxSlots,
+          courts_count: newSeason.courtsCount,
+          venue: newSeason.venue,
+          organizer: newSeason.organizer,
+          date: newSeason.date || null,
+          settings_json: {
+            description: newSeason.description || '',
+            startDate: newSeason.startDate || '',
+            endDate: newSeason.endDate || '',
+            courtNames: newSeason.courtNames,
+            registrationEnabled: newSeason.registrationEnabled,
+            ...(newSeason.historicalSummary ? { historicalSummary: newSeason.historicalSummary } : {}),
+            ...(sourceScoringRules ? { scoringRules: sourceScoringRules } : {}),
+            ...(sourcePlayoffSettings ? { playoffSettings: sourcePlayoffSettings } : {}),
+          },
+          updated_at: new Date(now).toISOString(),
+        } as any, { onConflict: 'season_slug' });
+      } catch {}
+    }
+
+    if (activateNow) {
+      broadcastSse('season_changed', { seasonSlug: newSeason.seasonSlug, season: newSeason });
+    } else {
+      broadcastSse('season_created', { seasonSlug: newSeason.seasonSlug, season: newSeason });
+    }
+    return res.status(201).json({ success: true, season: newSeason, seasons: nextSeasons });
+  });
+
+  app.patch('/api/seasons/:slug', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const target = String(req.params.slug || '').trim();
+    const updates = req.body || {};
+    const store = readSeasonsStore();
+    const idx = store.seasons.findIndex((s) => s.seasonSlug === target || s.id === target);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Season not found.' });
+    }
+    const current = store.seasons[idx];
+    const nextStatus = updates.status || current.status;
+    if (
+      (current.status === 'archived' || current.isLocked) &&
+      updates.status === undefined
+    ) {
+      return res.status(403).json({ error: 'Archived season is locked. Unarchive it first to edit details.' });
+    }
+
+    const now = Date.now();
+    const nextSeasonNumber = updates.seasonNumber !== undefined ? String(updates.seasonNumber).trim() : current.seasonNumber;
+    const nextEditionName = updates.editionName !== undefined ? String(updates.editionName).trim() : current.editionName;
+    const nextSeasonTitle =
+      updates.seasonTitle !== undefined
+        ? String(updates.seasonTitle).trim()
+        : (updates.seasonNumber !== undefined || updates.editionName !== undefined)
+          ? `Smash Premier League — Season ${nextSeasonNumber} (${nextEditionName})`
+          : current.seasonTitle;
+
+    const updated: ServerSeasonRecord = {
+      ...current,
+      seasonNumber: nextSeasonNumber || current.seasonNumber,
+      editionName: nextEditionName || current.editionName,
+      seasonTitle: nextSeasonTitle || current.seasonTitle,
+      tournamentYear: updates.tournamentYear !== undefined ? Number(updates.tournamentYear) || current.tournamentYear : current.tournamentYear,
+      date: updates.date !== undefined ? String(updates.date).trim() : current.date,
+      startDate: updates.startDate !== undefined ? String(updates.startDate).trim() : current.startDate,
+      endDate: updates.endDate !== undefined ? String(updates.endDate).trim() : current.endDate,
+      venue: updates.venue !== undefined ? String(updates.venue).trim() : current.venue,
+      organizer: updates.organizer !== undefined ? String(updates.organizer).trim() : current.organizer,
+      description: updates.description !== undefined ? String(updates.description).trim() : current.description,
+      entryFee: updates.entryFee !== undefined ? Math.max(0, Number(updates.entryFee) || 0) : current.entryFee,
+      maxSlots: updates.maxSlots !== undefined ? Math.max(2, Number(updates.maxSlots) || 32) : current.maxSlots,
+      courtsCount: updates.courtsCount !== undefined ? Math.min(10, Math.max(1, Number(updates.courtsCount) || 2)) : current.courtsCount,
+      courtNames: Array.isArray(updates.courtNames) ? updates.courtNames : current.courtNames,
+      status: nextStatus,
+      isLocked: nextStatus === 'archived',
+      updatedAt: now,
+    };
+
+    store.seasons[idx] = updated;
+    writeSeasonsStore(store);
+
+    // Sync metadata into season tournament state & form config safely
+    const curState = readSeasonTournamentState(updated.seasonSlug);
+    writeSeasonTournamentState(updated.seasonSlug, {
+      ...curState,
+      settings: {
+        ...curState.settings,
+        season: updated.seasonTitle,
+        date: updated.date,
+        venue: updated.venue,
+        organizer: updated.organizer,
+        entryFee: updated.entryFee,
+        slotLimit: updated.maxSlots,
+        courts: updated.courtsCount,
+        courtNames: updated.courtNames,
+      },
+      lastUpdated: now,
+    });
+
+    const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
+    if (forms[updated.seasonSlug]) {
+      forms[updated.seasonSlug] = {
+        ...forms[updated.seasonSlug],
+        seasonTitle: updated.seasonTitle,
+        entryFee: updated.entryFee,
+        maxSlots: updated.maxSlots,
+        venue: updated.venue,
+        date: updated.date,
+      };
+      writeJSON(FORMS_FILE, forms);
+    }
+
+    // Update hero kicker/subtitle if they still match the previous auto-generated edition/number labels
+    if (updates.editionName !== undefined || updates.seasonNumber !== undefined) {
+      const heroStore = readLocalHeroStore(updated.seasonSlug);
+      const patchHeroTexts = (cfg: any) => {
+        if (!cfg) return cfg;
+        const copy = cloneHeroConfig(cfg);
+        if (copy.text?.kickerText?.toUpperCase() === current.editionName.toUpperCase()) {
+          copy.text.kickerText = updated.editionName.toUpperCase();
+        }
+        if (copy.logo?.subtitle?.toUpperCase() === `SPL ${current.seasonNumber} · ${current.editionName}`.toUpperCase()) {
+          copy.logo.subtitle = `SPL ${updated.seasonNumber} · ${updated.editionName.toUpperCase()}`;
+        }
+        if (copy.text?.mainHeading?.text?.includes(current.seasonNumber)) {
+          copy.text.mainHeading.text = copy.text.mainHeading.text.replace(current.seasonNumber, updated.seasonNumber);
+        }
+        return normalizeHeroConfig(copy);
+      };
+      heroStore.published = patchHeroTexts(heroStore.published);
+      heroStore.draft = patchHeroTexts(heroStore.draft);
+      writeLocalHeroStore(updated.seasonSlug, heroStore);
+    }
+
+    if (await hasServerSeasonsTable()) {
+      try {
+        const { data: existingSeasonRow } = await serverSupabase!
+          .from('tournament_seasons')
+          .select('settings_json')
+          .or(`season_slug.eq.${target},id.eq.${target}`)
+          .maybeSingle();
+        const existingSettingsJson =
+          existingSeasonRow && typeof (existingSeasonRow as any).settings_json === 'object' && (existingSeasonRow as any).settings_json
+            ? (existingSeasonRow as any).settings_json
+            : {};
+
+        await serverSupabase!
+          .from('tournament_seasons')
+          .update({
+            season_number: updated.seasonNumber,
+            edition_name: updated.editionName,
+            season_title: updated.seasonTitle,
+            tournament_year: updated.tournamentYear,
+            status: updated.status === 'draft' ? 'upcoming' : updated.status,
+            is_locked: updated.isLocked,
+            entry_fee: updated.entryFee,
+            max_slots: updated.maxSlots,
+            courts_count: updated.courtsCount,
+            venue: updated.venue,
+            organizer: updated.organizer,
+            date: updated.date,
+            settings_json: {
+              ...existingSettingsJson,
+              description: updated.description || '',
+              startDate: updated.startDate || '',
+              endDate: updated.endDate || '',
+              courtNames: updated.courtNames,
+            },
+            updated_at: new Date(now).toISOString(),
+          } as any)
+          .or(`season_slug.eq.${target},id.eq.${target}`);
+      } catch {}
+    }
+
+    broadcastSse('season_updated', { seasonSlug: updated.seasonSlug, season: updated });
+    return res.json({ success: true, season: updated, seasons: store.seasons });
+  });
+
+  app.post('/api/seasons/active', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const target = String(req.body?.seasonIdOrSlug || req.body?.seasonSlug || '').trim();
+    const force = Boolean(req.body?.force);
+    const checkOngoingMatches = Boolean(req.body?.checkOngoingMatches);
+    if (!target) {
+      return res.status(400).json({ error: 'seasonIdOrSlug is required.' });
+    }
+    const store = readSeasonsStore();
+    const match = store.seasons.find((s) => s.id === target || s.seasonSlug === target);
+    if (!match) {
+      return res.status(404).json({ error: 'Season not found.' });
+    }
+
+    const currentActiveSlug = store.activeSeasonSlug;
+    if (checkOngoingMatches && !force && currentActiveSlug && currentActiveSlug !== match.seasonSlug) {
+      const currentState = readSeasonTournamentState(currentActiveSlug);
+      const koMatches = Array.isArray(currentState.knockout?.matches) ? currentState.knockout.matches : [];
+      const leagueMatches = Array.isArray(currentState.matches) ? currentState.matches : [];
+      const liveMatchesCount =
+        leagueMatches.filter((m: any) => m?.status === 'live' || m?.status === 'paused').length +
+        koMatches.filter((m: any) => m?.status === 'live' || m?.status === 'paused').length;
+      if (liveMatchesCount > 0) {
+        return res.status(409).json({
+          error: `${liveMatchesCount} live or paused match(es) are currently in progress in ${currentActiveSlug}. Confirm force activation to switch active seasons.`,
+          requiresConfirmation: true,
+          liveMatchesCount,
+        });
+      }
+    }
+
+    const prevStoreSnapshot = JSON.parse(JSON.stringify(store)) as SeasonsStoreFile;
+    if (await hasServerSeasonsTable()) {
+      try {
+        const { error: clearErr } = await serverSupabase!
+          .from('tournament_seasons')
+          .update({ is_active: false } as any)
+          .neq('season_slug', match.seasonSlug);
+        if (clearErr) throw clearErr;
+        const nextStatus =
+          match.status === 'archived' || match.status === 'completed' ? match.status : 'active';
+        const { error: setErr } = await serverSupabase!
+          .from('tournament_seasons')
+          .update({ is_active: true, status: nextStatus } as any)
+          .eq('season_slug', match.seasonSlug);
+        if (setErr) {
+          // Atomic rollback to previous active season
+          await serverSupabase!
+            .from('tournament_seasons')
+            .update({ is_active: true } as any)
+            .eq('season_slug', prevStoreSnapshot.activeSeasonSlug);
+          return res.status(500).json({ error: setErr.message || 'Failed to activate season atomically.' });
+        }
+      } catch (err: any) {
+        return res.status(500).json({ error: err?.message || 'Atomic season activation failed in Supabase.' });
+      }
+    }
+
+    const now = Date.now();
+    const updatedSeasons = store.seasons.map((s) => ({
+      ...s,
+      isActive: s.seasonSlug === match.seasonSlug,
+      status:
+        s.seasonSlug === match.seasonSlug && (s.status === 'draft' || s.status === 'upcoming')
+          ? ('active' as const)
+          : s.status,
+      updatedAt: s.seasonSlug === match.seasonSlug ? now : s.updatedAt,
+    }));
+    const activeSeason = updatedSeasons.find((s) => s.seasonSlug === match.seasonSlug)!;
+    writeSeasonsStore({ activeSeasonSlug: activeSeason.seasonSlug, seasons: updatedSeasons });
+
+    broadcastSse('season_changed', { seasonSlug: activeSeason.seasonSlug, season: activeSeason });
+    return res.json({ success: true, activeSeason, seasons: updatedSeasons });
+  });
+
+  app.patch('/api/seasons/:slug/status', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const target = String(req.params.slug || '').trim();
+    const status = req.body?.status as 'upcoming' | 'draft' | 'active' | 'completed' | 'archived';
+    if (!['upcoming', 'draft', 'active', 'completed', 'archived'].includes(status)) {
+      return res.status(400).json({ error: 'status must be upcoming, draft, active, completed, or archived.' });
+    }
+    const store = readSeasonsStore();
+    const idx = store.seasons.findIndex((s) => s.seasonSlug === target || s.id === target);
+    if (idx === -1) {
+      return res.status(404).json({ error: 'Season not found.' });
+    }
+    const now = Date.now();
+    store.seasons[idx] = {
+      ...store.seasons[idx],
+      status,
+      isLocked: status === 'archived',
+      updatedAt: now,
+    };
+    writeSeasonsStore(store);
+
+    if (await hasServerSeasonsTable()) {
+      try {
+        await serverSupabase!
+          .from('tournament_seasons')
+          .update({ status, is_locked: status === 'archived', updated_at: new Date(now).toISOString() } as any)
+          .or(`season_slug.eq.${target},id.eq.${target}`);
+      } catch {}
+    }
+
+    broadcastSse('season_updated', { seasonSlug: store.seasons[idx].seasonSlug, season: store.seasons[idx] });
+    return res.json({ success: true, season: store.seasons[idx] });
+  });
+
+  async function fetchServerSupabaseFormRow(seasonSlug = 'season-4', allowFallback = false): Promise<any | null> {
     if (!serverSupabase) return null;
     try {
       const { data: exact } = await serverSupabase
@@ -610,6 +1592,8 @@ async function startServer() {
         .eq('season_slug', seasonSlug)
         .maybeSingle();
       if (exact) return exact;
+
+      if (!allowFallback) return null;
 
       const { data: published } = await serverSupabase
         .from('registration_form_config')
@@ -620,20 +1604,7 @@ async function startServer() {
         .maybeSingle();
       if (published) return published;
 
-      const { data: fallbackSeason } = await serverSupabase
-        .from('registration_form_config')
-        .select('*')
-        .eq('season_slug', 'season-4')
-        .maybeSingle();
-      if (fallbackSeason) return fallbackSeason;
-
-      const { data: anyRow } = await serverSupabase
-        .from('registration_form_config')
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return anyRow || null;
+      return null;
     } catch {
       return null;
     }
@@ -642,55 +1613,80 @@ async function startServer() {
   async function getAuthoritativeRegistrationOpenStatus(
     seasonSlug = 'season-4'
   ): Promise<{ enabled: boolean; closedNotice?: string }> {
-    const supabaseRow = await fetchServerSupabaseFormRow(seasonSlug);
+    const seasonRec = await getSeasonRecordServer(seasonSlug);
+    const defaultClosed = `Registration for ${seasonRec?.seasonTitle || 'this tournament'} is currently closed.`;
+    if (seasonRec?.status === 'archived' || seasonRec?.isLocked) {
+      return {
+        enabled: false,
+        closedNotice: `${seasonRec.seasonTitle || 'This season'} has been archived and registrations are closed.`,
+      };
+    }
+
+    const supabaseRow = await fetchServerSupabaseFormRow(seasonSlug, false);
     if (supabaseRow && typeof supabaseRow.enabled === 'boolean') {
       return {
         enabled: supabaseRow.enabled !== false,
-        closedNotice:
-          supabaseRow.closed_notice ||
-          'Registration for Smash Premier League 3.0 is currently closed.',
+        closedNotice: supabaseRow.closed_notice || defaultClosed,
       };
     }
 
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[seasonSlug] || forms['season-4'];
+    const formConfig = forms[seasonSlug];
     if (formConfig && typeof formConfig.enabled === 'boolean') {
       return {
         enabled: formConfig.enabled !== false,
-        closedNotice:
-          formConfig.closedNotice ||
-          'Registration for Smash Premier League 3.0 is currently closed.',
+        closedNotice: formConfig.closedNotice || defaultClosed,
       };
     }
 
     const settings = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
+    if (settings.seasonSlug === seasonSlug) {
+      return {
+        enabled: settings.enabled !== false,
+        closedNotice: settings.closedNotice || defaultClosed,
+      };
+    }
+
     return {
-      enabled: settings.enabled !== false,
-      closedNotice:
-        settings.closedNotice ||
-        'Registration for Smash Premier League 3.0 is currently closed.',
+      enabled: seasonRec ? seasonRec.registrationEnabled !== false : true,
+      closedNotice: defaultClosed,
     };
   }
 
-  // 1. Get Registration Settings (legacy + authoritative Supabase sync)
-  app.get('/api/registration-settings', async (_req, res) => {
+  // 1. Get Registration Settings (authoritative season-scoped)
+  app.get('/api/registration-settings', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    const seasonRec = await getSeasonRecordServer(seasonSlug);
     const settings = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
-    const authStatus = await getAuthoritativeRegistrationOpenStatus(settings.seasonSlug || 'season-4');
+    const authStatus = await getAuthoritativeRegistrationOpenStatus(seasonSlug);
     res.json({
       ...settings,
+      seasonSlug,
+      seasonTitle: seasonRec?.seasonTitle || settings.seasonTitle,
+      maxSlots: seasonRec?.maxSlots ?? settings.maxSlots,
       enabled: authStatus.enabled,
       closedNotice: authStatus.closedNotice || settings.closedNotice,
     });
   });
 
-  // 2. Update Registration Settings (legacy + mirrored into FORMS_FILE and Supabase)
+  // 2. Update Registration Settings (Protected + Season-Scoped)
   app.post('/api/registration-settings', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const slug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(slug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
+
     const current = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
     const updated = {
       ...current,
       ...req.body,
+      seasonSlug: slug,
       fields: {
         ...current.fields,
         ...(req.body.fields || {}),
@@ -698,24 +1694,20 @@ async function startServer() {
     };
     writeJSON(SETTINGS_FILE, updated);
 
-    const slug = updated.seasonSlug || 'season-4';
     if (typeof req.body?.enabled === 'boolean') {
       const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-      const targetForm = forms[slug] || forms['season-4'] || createDefaultForm(slug);
+      const targetForm = forms[slug] || createDefaultForm(slug);
       targetForm.enabled = updated.enabled;
       if (req.body.closedNotice !== undefined) {
         targetForm.closedNotice = req.body.closedNotice;
       }
       targetForm.lastUpdatedAt = Date.now();
       forms[slug] = targetForm;
-      if (slug !== 'season-4' && forms['season-4']) {
-        forms['season-4'] = { ...forms['season-4'], enabled: updated.enabled, lastUpdatedAt: Date.now() };
-      }
       writeJSON(FORMS_FILE, forms);
 
       if (serverSupabase) {
         try {
-          const existingRow = await fetchServerSupabaseFormRow(slug);
+          const existingRow = await fetchServerSupabaseFormRow(slug, false);
           const nowIso = new Date().toISOString();
           if (existingRow?.id) {
             await serverSupabase
@@ -732,7 +1724,7 @@ async function startServer() {
         }
       }
 
-      broadcastSse('form_published', { config: targetForm });
+      broadcastSse('form_published', { seasonSlug: slug, config: targetForm });
     }
 
     res.json(updated);
@@ -741,37 +1733,37 @@ async function startServer() {
   // 3. Dynamic Form Configuration (Drafts & Published)
   app.get('/api/forms/:seasonSlug', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    let seasonSlug = req.params.seasonSlug;
-    if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
-      seasonSlug = 'season-4';
-    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    const seasonRec = await getSeasonRecordServer(seasonSlug);
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
     let targetForm = forms[seasonSlug];
     if (!targetForm) {
-      // Fallback to season-4 or the first available form if customized
-      if (forms['season-4']) {
-        targetForm = { ...forms['season-4'], seasonSlug };
-      } else {
-        const availableKeys = Object.keys(forms);
-        if (availableKeys.length > 0 && forms[availableKeys[0]]) {
-          targetForm = { ...forms[availableKeys[0]], seasonSlug };
-        } else {
-          targetForm = createDefaultForm(seasonSlug);
-          forms[seasonSlug] = targetForm;
-          writeJSON(FORMS_FILE, forms);
-        }
-      }
+      targetForm = {
+        ...createDefaultForm(seasonSlug),
+        ...(seasonRec
+          ? {
+              seasonTitle: seasonRec.seasonTitle,
+              entryFee: seasonRec.entryFee,
+              maxSlots: seasonRec.maxSlots,
+              venue: seasonRec.venue,
+              date: seasonRec.date,
+              enabled: seasonRec.status === 'archived' ? false : seasonRec.registrationEnabled,
+            }
+          : {}),
+      };
+      forms[seasonSlug] = targetForm;
+      writeJSON(FORMS_FILE, forms);
     }
 
     // Reconcile authoritative enabled & closedNotice from Supabase PostgreSQL if active
     const authStatus = await getAuthoritativeRegistrationOpenStatus(seasonSlug);
     targetForm = {
       ...targetForm,
+      seasonSlug,
       enabled: authStatus.enabled,
       ...(authStatus.closedNotice ? { closedNotice: authStatus.closedNotice } : {}),
     };
 
-    // Ensure default submit button text matches exact requirement
     if (targetForm && targetForm.appearance) {
       targetForm.appearance.submitButtonText = targetForm.appearance.submitButtonText || 'Submit Registration & Confirm Entry';
     }
@@ -780,12 +1772,17 @@ async function startServer() {
 
   app.post('/api/forms/:seasonSlug', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    let seasonSlug = req.params.seasonSlug;
-    if (!seasonSlug || seasonSlug === 'undefined' || seasonSlug.trim() === '') {
-      seasonSlug = 'season-4';
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
     }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
+
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const existing = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    const existing = forms[seasonSlug] || createDefaultForm(seasonSlug);
     const isPublishing = req.body.isPublished !== undefined ? req.body.isPublished : true;
     const currentVersion = existing.version || 1;
     const nextVersion = isPublishing ? currentVersion + 1 : currentVersion;
@@ -806,28 +1803,14 @@ async function startServer() {
         'Submit Registration & Confirm Entry';
     }
     forms[seasonSlug] = updated;
-    // Always mirror to season-4 if season-4 doesn't exist
-    if (seasonSlug !== 'season-4' && !forms['season-4']) {
-      forms['season-4'] = updated;
-    }
     writeJSON(FORMS_FILE, forms);
-
-    // Mirror enabled status into legacy SETTINGS_FILE
-    if (typeof updated.enabled === 'boolean') {
-      const currentSettings = readJSON(SETTINGS_FILE, DEFAULT_REGISTRATION_SETTINGS);
-      writeJSON(SETTINGS_FILE, {
-        ...currentSettings,
-        enabled: updated.enabled,
-        ...(updated.closedNotice !== undefined ? { closedNotice: updated.closedNotice } : {}),
-      });
-    }
 
     // Sync to Supabase PostgreSQL if active
     if (serverSupabase) {
       try {
         const nowIso = new Date().toISOString();
-        const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
-        const rowId = existingRow?.id || seasonSlug;
+        const existingRow = await fetchServerSupabaseFormRow(seasonSlug, false);
+        const rowId = existingRow?.id || crypto.randomUUID();
         const existingApp = (existingRow?.appearance_json as any) || {};
         const mergedAppearance = {
           ...(updated.appearance || {}),
@@ -836,6 +1819,7 @@ async function startServer() {
           ...(existingApp.heroLastPublishedAt ? { heroLastPublishedAt: existingApp.heroLastPublishedAt } : {}),
           ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
           ...(existingApp.youtubeLive ? { youtubeLive: existingApp.youtubeLive } : {}),
+          ...(existingApp.teamFormation ? { teamFormation: existingApp.teamFormation } : {}),
           ...(existingApp.tournamentSettings && !updated.appearance?.tournamentSettings
             ? { tournamentSettings: existingApp.tournamentSettings }
             : {}),
@@ -870,7 +1854,7 @@ async function startServer() {
             season_slug: seasonSlug,
             version_num: nextVersion,
             snapshot_json: updated,
-            created_by: 'admin',
+            created_by: auth.adminName || 'admin',
             created_at: nowIso,
           })
           .then(() => {});
@@ -879,45 +1863,97 @@ async function startServer() {
       }
     }
 
-    broadcastSse('form_published', { config: updated });
+    broadcastSse('form_published', { seasonSlug, config: updated });
     res.json(updated);
   });
 
 
-  // 3.5. Persistent Tournament State & Automatic Live Score Synchronization
-  const DEFAULT_TOURNAMENT_PAYLOAD = {
-    settings: {
-      name: 'Smash Premier League',
-      date: '2026-10-25',
-      venue: 'Maharajganj Indoor Badminton Stadium, Court 1 & 2',
-      organizer: 'SPL Tournament Committee',
-      courts: 2,
-      courtNames: ['Court 1', 'Court 2'] as string[],
-      format: '21',
-      entryFee: 500,
-      slotLimit: 32,
-      season: 'Season IV (Championship Edition)',
-      announcement: 'Grand Finale on Court 1! Live scoring active.',
-    },
-    players: [] as any[],
-    teams: [] as any[],
-    matches: [] as any[],
-    knockout: {
-      format: 'ipl_top4',
-      published: true,
-      showOnPublicHomepage: true,
+  // 3.5. Persistent Tournament State & Automatic Live Score Synchronization (Season-Keyed)
+  function createDefaultTournamentPayload(seasonMeta?: Partial<ServerSeasonRecord>) {
+    const slug = seasonMeta?.seasonSlug || 'season-4';
+    const isInitialSpl3 = slug === 'season-4';
+    return {
+      seasonSlug: slug,
+      settings: {
+        name: 'Smash Premier League',
+        date: seasonMeta?.date !== undefined ? seasonMeta.date : (isInitialSpl3 ? '2026-10-25' : ''),
+        venue: seasonMeta?.venue || 'Maharajganj Indoor Badminton Stadium',
+        organizer: seasonMeta?.organizer || 'SPL Tournament Committee',
+        courts: seasonMeta?.courtsCount ?? 2,
+        courtNames: seasonMeta?.courtNames || ['Court 1', 'Court 2'],
+        format: '21',
+        entryFee: seasonMeta?.entryFee ?? 500,
+        slotLimit: seasonMeta?.maxSlots ?? 32,
+        season: seasonMeta?.seasonTitle || 'Season IV (Championship Edition)',
+        announcement: isInitialSpl3 ? 'Grand Finale on Court 1! Live scoring active.' : '',
+      },
+      players: [] as any[],
+      teams: [] as any[],
       matches: [] as any[],
-    },
-    predefinedTeams: [] as any[],
-    teamFormationMode: 'random',
-    lastUpdated: Date.now(),
-  };
+      knockout: {
+        format: 'ipl_top4',
+        published: true,
+        showOnPublicHomepage: true,
+        matches: [] as any[],
+      },
+      predefinedTeams: [] as any[],
+      teamFormationMode: 'random',
+      lastUpdated: Date.now(),
+    };
+  }
 
-  // Real-Time Server-Sent Events (SSE) Client Pool
-  const sseClients = new Set<express.Response>();
+  const DEFAULT_TOURNAMENT_PAYLOAD = createDefaultTournamentPayload();
+
+  interface MultiSeasonTournamentStore {
+    seasons: Record<string, typeof DEFAULT_TOURNAMENT_PAYLOAD>;
+  }
+
+  function readSeasonTournamentState(seasonSlug: string): typeof DEFAULT_TOURNAMENT_PAYLOAD {
+    const raw = readJSON<any>(TOURNAMENT_FILE, null);
+    const seasonsStore = readSeasonsStore();
+    const seasonMeta = seasonsStore.seasons.find((s) => s.seasonSlug === seasonSlug);
+    const fallback = createDefaultTournamentPayload(seasonMeta || { seasonSlug });
+    if (!raw || typeof raw !== 'object') {
+      return fallback;
+    }
+    if (raw.seasons && typeof raw.seasons === 'object') {
+      const hit = raw.seasons[seasonSlug];
+      return hit ? { ...fallback, ...hit, seasonSlug } : fallback;
+    }
+    // Migrate legacy flat single-season file cleanly under season-4 ONLY
+    if (seasonSlug === 'season-4') {
+      return { ...fallback, ...raw, seasonSlug: 'season-4' };
+    }
+    return fallback;
+  }
+
+  function writeSeasonTournamentState(seasonSlug: string, nextState: any): void {
+    const raw = readJSON<any>(TOURNAMENT_FILE, null);
+    let container: MultiSeasonTournamentStore;
+    if (raw && typeof raw === 'object' && raw.seasons && typeof raw.seasons === 'object') {
+      container = { seasons: { ...raw.seasons } };
+    } else if (raw && typeof raw === 'object' && (Array.isArray(raw.players) || Array.isArray(raw.teams) || Array.isArray(raw.matches))) {
+      container = { seasons: { 'season-4': { ...DEFAULT_TOURNAMENT_PAYLOAD, ...raw, seasonSlug: 'season-4' } } };
+    } else {
+      container = { seasons: {} };
+    }
+    container.seasons[seasonSlug] = { ...nextState, seasonSlug };
+    writeJSON(TOURNAMENT_FILE, container);
+  }
+
+  // Real-Time Server-Sent Events (SSE) Client Pool (with optional season filter)
+  const sseClients = new Map<express.Response, string | null>();
   function broadcastSse(eventType: string, payload: any) {
-    const data = `event: ${eventType}\ndata: ${JSON.stringify(payload)}\n\n`;
-    for (const client of sseClients) {
+    const eventSeason = payload?.seasonSlug || payload?.season || payload?.config?.seasonSlug || null;
+    const enrichedPayload =
+      payload && typeof payload === 'object' && eventSeason && !payload.seasonSlug
+        ? { ...payload, seasonSlug: eventSeason }
+        : payload;
+    const data = `event: ${eventType}\ndata: ${JSON.stringify(enrichedPayload)}\n\n`;
+    for (const [client, filterSeason] of sseClients.entries()) {
+      if (filterSeason && eventSeason && filterSeason !== eventSeason && eventType !== 'season_changed') {
+        continue;
+      }
       try {
         client.write(data);
       } catch {
@@ -933,9 +1969,10 @@ async function startServer() {
     res.setHeader('Connection', 'keep-alive');
     res.setHeader('X-Accel-Buffering', 'no');
     res.flushHeaders?.();
-    res.write(`event: connected\ndata: {"status":"connected","time":${Date.now()}}\n\n`);
+    const filterSeason = typeof req.query.season === 'string' && req.query.season.trim() ? req.query.season.trim() : null;
+    res.write(`event: connected\ndata: ${JSON.stringify({ status: 'connected', seasonSlug: filterSeason, time: Date.now() })}\n\n`);
 
-    sseClients.add(res);
+    sseClients.set(res, filterSeason);
 
     // Keep-alive heartbeat every 20s
     const heartbeat = setInterval(() => {
@@ -953,24 +1990,31 @@ async function startServer() {
     });
   });
 
-  app.get('/api/tournament/state', (req, res) => {
-    const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
-    const isAuthed = isAdminAuthorized(req);
-    if (!isAuthed && Array.isArray(data.players)) {
+  app.get('/api/tournament/state', async (req, res) => {
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    const data = readSeasonTournamentState(seasonSlug);
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized && Array.isArray(data.players)) {
       const sanitizedPlayers = data.players.map((p: any) => ({
         ...p,
         mobile: p.mobile ? `${String(p.mobile).slice(0, 2)}******${String(p.mobile).slice(-2)}` : undefined,
       }));
-      return res.json({ ...data, players: sanitizedPlayers });
+      return res.json({ ...data, seasonSlug, players: sanitizedPlayers });
     }
-    res.json(data);
+    res.json({ ...data, seasonSlug });
   });
 
   app.post('/api/tournament/state', async (req, res) => {
-    if (!isAdminAuthorized(req)) {
-      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
     }
-    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
+
+    const current = readSeasonTournamentState(seasonSlug);
     const now = Date.now();
     const deduplicatedBody = { ...req.body };
     if (Array.isArray(deduplicatedBody.teams)) {
@@ -984,20 +2028,36 @@ async function startServer() {
     const updated = {
       ...current,
       ...deduplicatedBody,
+      seasonSlug,
       lastUpdated: now,
     };
-    writeJSON(TOURNAMENT_FILE, updated);
+    writeSeasonTournamentState(seasonSlug, updated);
 
-    // Synchronize directly with Supabase PostgreSQL if active
+    // Synchronize directly with Supabase PostgreSQL if active (strictly season-scoped)
     if (serverSupabase) {
       const nowIso = new Date(now).toISOString();
+      const seasonRec = await getSeasonRecordServer(seasonSlug);
+      const seasonId = seasonRec?.id;
+      const hasSeasonTables = await hasServerSeasonsTable();
+      const hasPlayerSeasonCol = hasSeasonTables && seasonId ? await hasServerSeasonIdCol('players') : false;
+      const hasTeamSeasonCol = hasSeasonTables && seasonId ? await hasServerSeasonIdCol('teams') : false;
+      const hasMatchSeasonCol = hasSeasonTables && seasonId ? await hasServerSeasonIdCol('matches') : false;
+
       try {
-        // 1. Sync Players if provided
+        // 1. Sync Players if provided (NEVER wipe players across other seasons)
         if (Array.isArray(deduplicatedBody.players)) {
           if (deduplicatedBody.players.length === 0) {
-            await serverSupabase.from('team_players').delete().neq('id', '___none___');
-            await serverSupabase.from('teams').update({ captain_id: null } as any).neq('id', '___none___');
-            await serverSupabase.from('players').delete().neq('id', '___none___');
+            if (hasTeamSeasonCol && seasonId) {
+              const { data: sTeams } = await serverSupabase.from('teams').select('id').eq('season_id', seasonId);
+              const tIds = (sTeams || []).map((t: any) => t.id);
+              if (tIds.length > 0) {
+                await serverSupabase.from('team_players').delete().in('team_id', tIds);
+                await serverSupabase.from('teams').update({ captain_id: null } as any).in('id', tIds);
+              }
+            }
+            if (hasPlayerSeasonCol && seasonId) {
+              await serverSupabase.from('players').delete().eq('season_id', seasonId);
+            }
           } else {
             const playerRows = deduplicatedBody.players.map((p: any) => ({
               id: p.id,
@@ -1009,16 +2069,29 @@ async function startServer() {
               photo_url: p.photoUrl || null,
               status: 'active',
               updated_at: nowIso,
+              ...(hasPlayerSeasonCol && seasonId ? { season_id: seasonId } : {}),
             }));
             await serverSupabase.from('players').upsert(playerRows as any);
           }
         }
 
-        // 2. Sync Teams if provided
+        // 2. Sync Teams if provided (scoped strictly to this season)
         if (Array.isArray(deduplicatedBody.teams)) {
           if (deduplicatedBody.teams.length === 0) {
-            await serverSupabase.from('team_players').delete().neq('id', '___none___');
-            await serverSupabase.from('teams').delete().neq('id', '___none___');
+            if (hasTeamSeasonCol && seasonId) {
+              const { data: sTeams } = await serverSupabase.from('teams').select('id').eq('season_id', seasonId);
+              const tIds = (sTeams || []).map((t: any) => t.id);
+              if (tIds.length > 0) {
+                await serverSupabase.from('team_players').delete().in('team_id', tIds);
+                await serverSupabase.from('teams').delete().in('id', tIds);
+              }
+            } else {
+              const prevTeamIds = (current.teams || []).map((t: any) => String(t.id)).filter(Boolean);
+              if (prevTeamIds.length > 0) {
+                await serverSupabase.from('team_players').delete().in('team_id', prevTeamIds);
+                await serverSupabase.from('teams').delete().in('id', prevTeamIds);
+              }
+            }
           } else {
             const keepIds = deduplicatedBody.teams.map((t: any) => String(t.id)).filter(Boolean);
             const keepIdSet = new Set<string>(keepIds);
@@ -1039,6 +2112,7 @@ async function startServer() {
                 badge: t.badge || '🏸',
                 locked: Boolean(t.locked),
                 updated_at: nowIso,
+                ...(hasTeamSeasonCol && seasonId ? { season_id: seasonId } : {}),
               };
             });
 
@@ -1057,9 +2131,13 @@ async function startServer() {
               }
             }
 
+            let existingQuery = serverSupabase.from('teams').select('id');
+            if (hasTeamSeasonCol && seasonId) {
+              existingQuery = existingQuery.eq('season_id', seasonId);
+            }
             const [teamUpsertRes, { data: existingRows }] = await Promise.all([
               serverSupabase.from('teams').upsert(teamRows as any, { onConflict: 'id' }),
-              serverSupabase.from('teams').select('id'),
+              existingQuery,
             ]);
 
             if (teamUpsertRes.error) {
@@ -1072,7 +2150,7 @@ async function startServer() {
               await serverSupabase.from('team_players').insert(allRosterRows as any);
             }
 
-            if (existingRows && existingRows.length > 0) {
+            if (hasTeamSeasonCol && existingRows && existingRows.length > 0) {
               const orphanIds = existingRows
                 .map((r: any) => String(r.id))
                 .filter((id: string) => id && !keepIdSet.has(id));
@@ -1084,18 +2162,26 @@ async function startServer() {
           }
         }
 
-        // 3. Sync Matches if provided
+        // 3. Sync Matches if provided (scoped strictly to seasonSlug)
         if (Array.isArray(req.body.matches)) {
           if (req.body.matches.length === 0) {
-            await serverSupabase.from('match_scores').delete().neq('id', '___none___');
-            await serverSupabase.from('matches').delete().eq('tournament_season', 'season-4');
+            const { data: sMatches } = await serverSupabase
+              .from('matches')
+              .select('id')
+              .eq('tournament_season', seasonSlug)
+              .eq('match_type', 'group');
+            const mIds = (sMatches || []).map((m: any) => m.id);
+            if (mIds.length > 0) {
+              await serverSupabase.from('match_scores').delete().in('match_id', mIds);
+              await serverSupabase.from('matches').delete().in('id', mIds);
+            }
           } else {
             const keepMatchIds = req.body.matches.map((m: any) => String(m.id)).filter(Boolean);
             const keepMatchIdSet = new Set<string>(keepMatchIds);
             const { data: existingGroupMatches } = await serverSupabase
               .from('matches')
               .select('id')
-              .eq('tournament_season', 'season-4')
+              .eq('tournament_season', seasonSlug)
               .eq('match_type', 'group');
 
             if (existingGroupMatches && existingGroupMatches.length > 0) {
@@ -1110,7 +2196,8 @@ async function startServer() {
 
             const matchRows = req.body.matches.map((m: any) => ({
               id: m.id,
-              tournament_season: 'season-4',
+              tournament_season: seasonSlug,
+              ...(hasMatchSeasonCol && seasonId ? { season_id: seasonId } : {}),
               round: m.round || 1,
               court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
               match_type: 'group' as const,
@@ -1130,13 +2217,13 @@ async function startServer() {
           }
         }
 
-        // 3b. Sync Knockout Matches if provided
+        // 3b. Sync Knockout Matches if provided (scoped strictly to seasonSlug)
         if (req.body.knockout && Array.isArray(req.body.knockout.matches)) {
           const koList = req.body.knockout.matches;
           const { data: existingKoMatches } = await serverSupabase
             .from('matches')
             .select('id')
-            .eq('tournament_season', 'season-4')
+            .eq('tournament_season', seasonSlug)
             .eq('match_type', 'knockout');
 
           const keepKoIds = koList.map((k: any) => String(k.id)).filter(Boolean);
@@ -1174,7 +2261,8 @@ async function startServer() {
                   : k.slot || 1;
               return {
                 id: k.id,
-                tournament_season: 'season-4',
+                tournament_season: seasonSlug,
+                ...(hasMatchSeasonCol && seasonId ? { season_id: seasonId } : {}),
                 round: 99,
                 court: typeof k.court === 'number' ? k.court : parseInt(String(k.court || '').replace(/\D/g, '') || '1', 10) || 1,
                 match_type: 'knockout' as const,
@@ -1196,7 +2284,7 @@ async function startServer() {
           }
         }
 
-        // 4. Sync Settings if provided
+        // 4. Sync Settings if provided (scoped strictly to seasonSlug)
         if (req.body.settings) {
           const s = req.body.settings;
           await serverSupabase.from('registration_form_config').update({
@@ -1206,28 +2294,33 @@ async function startServer() {
             max_slots: s.slotLimit,
             entry_fee: s.entryFee,
             updated_at: nowIso,
-          } as any).eq('season_slug', 'season-4');
+          } as any).eq('season_slug', seasonSlug);
         }
       } catch (err: any) {
         console.error('Error syncing tournament state to Supabase:', err?.message);
       }
     }
 
-    broadcastSse('tournament_state', updated);
+    broadcastSse('tournament_state', { ...updated, seasonSlug });
     res.json({ success: true, lastUpdated: now, state: updated });
   });
 
   // Atomic per-team update endpoint (updates badge/name/metadata strictly by unique team ID)
   app.patch('/api/tournament/teams/:id', async (req, res) => {
-    if (!isAdminAuthorized(req)) {
-      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const teamId = String(req.params.id || '').trim();
     if (!teamId) {
       return res.status(400).json({ error: 'Team ID is required' });
     }
 
-    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const current = readSeasonTournamentState(seasonSlug);
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
     const { fullTeam, ...updates } = req.body || {};
@@ -1263,7 +2356,7 @@ async function startServer() {
     }
 
     current.lastUpdated = now;
-    writeJSON(TOURNAMENT_FILE, current);
+    writeSeasonTournamentState(seasonSlug, current);
 
     if (serverSupabase && updatedTeam) {
       try {
@@ -1272,6 +2365,9 @@ async function startServer() {
           cleanLocked.length > 0
             ? `${updatedTeam.token || ''}::LOCKED:${cleanLocked.join(',')}`
             : updatedTeam.token || null;
+
+        const seasonRec = await getSeasonRecordServer(seasonSlug);
+        const hasTeamSeasonCol = seasonRec?.id ? await hasServerSeasonIdCol('teams') : false;
 
         const teamRow = {
           id: updatedTeam.id,
@@ -1282,6 +2378,7 @@ async function startServer() {
           badge: updatedTeam.badge || '🏸',
           locked: Boolean(updatedTeam.locked),
           updated_at: nowIso,
+          ...(hasTeamSeasonCol && seasonRec?.id ? { season_id: seasonRec.id } : {}),
         };
 
         let { error: sbErr } = await serverSupabase
@@ -1312,15 +2409,17 @@ async function startServer() {
       }
     }
 
-    broadcastSse('team_updated', { teamId, team: updatedTeam, lastUpdated: now });
+    broadcastSse('team_updated', { seasonSlug, teamId, team: updatedTeam, lastUpdated: now });
     return res.json({ success: true, lastUpdated: now, team: updatedTeam });
   });
 
   // Lightweight rapid score endpoint for live polling without heavy payloads
-  app.get('/api/tournament/scores', (_req, res) => {
+  app.get('/api/tournament/scores', (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    const data = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    const data = readSeasonTournamentState(seasonSlug);
     res.json({
+      seasonSlug,
       matches: data.matches || [],
       teams: data.teams || [],
       knockout: data.knockout || { format: 'top4', matches: [] },
@@ -1329,10 +2428,18 @@ async function startServer() {
   });
 
   // Real-time match score update endpoint with atomic concurrency and Supabase synchronization
-  app.patch('/api/tournament/matches/:id', (req, res) => {
+  app.patch('/api/tournament/matches/:id', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    const auth = await verifyServerAuth(req, { allowScoreOperator: true });
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const matchId = req.params.id;
-    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const current = readSeasonTournamentState(seasonSlug);
     let matched = false;
     let isKnockout = false;
     const now = Date.now();
@@ -1386,16 +2493,19 @@ async function startServer() {
     if (matched) {
       current.matches = updatedMatches;
       current.lastUpdated = now;
-      writeJSON(TOURNAMENT_FILE, current);
+      writeSeasonTournamentState(seasonSlug, current);
 
       // Sync to Supabase PostgreSQL only if client did not already persist atomically
       if (serverSupabase && matchObj) {
+        const seasonRec = await getSeasonRecordServer(seasonSlug);
+        const hasMatchSeasonCol = seasonRec?.id ? await hasServerSeasonIdCol('matches') : false;
         if (!syncedToSupabase) {
           serverSupabase
             .from('matches')
             .upsert({
               id: matchId,
-              tournament_season: 'season-4',
+              tournament_season: seasonSlug,
+              ...(hasMatchSeasonCol && seasonRec?.id ? { season_id: seasonRec.id } : {}),
               court: typeof matchObj.court === 'number' ? matchObj.court : 1,
               round: matchObj.round || 1,
               team_a_id: matchObj.teamA || null,
@@ -1423,14 +2533,14 @@ async function startServer() {
               score_b: matchObj.scoreB || 0,
               is_completed: matchObj.status === 'completed',
               winner_team_id: matchObj.winner || null,
-              recorded_by: req.body.recordedBy || 'Official Umpire',
+              recorded_by: req.body.recordedBy || auth.adminName || 'Official Umpire',
               recorded_at: new Date(now).toISOString(),
             } as any)
             .then(() => {});
         }
       }
 
-      broadcastSse('match_score', { matchId, match: matchObj, lastUpdated: now });
+      broadcastSse('match_score', { seasonSlug, matchId, match: matchObj, lastUpdated: now });
       return res.json({ success: true, lastUpdated: now, match: matchObj });
     }
 
@@ -1493,15 +2603,18 @@ async function startServer() {
       if (matched) {
         current.knockout.matches = updatedKnockout;
         current.lastUpdated = now;
-        writeJSON(TOURNAMENT_FILE, current);
+        writeSeasonTournamentState(seasonSlug, current);
 
         if (serverSupabase && matchObj) {
+          const seasonRec = await getSeasonRecordServer(seasonSlug);
+          const hasMatchSeasonCol = seasonRec?.id ? await hasServerSeasonIdCol('matches') : false;
           if (!syncedToSupabase) {
             serverSupabase
               .from('matches')
               .upsert({
                 id: matchId,
-                tournament_season: 'season-4',
+                tournament_season: seasonSlug,
+                ...(hasMatchSeasonCol && seasonRec?.id ? { season_id: seasonRec.id } : {}),
                 round: 99,
                 court: typeof matchObj.court === 'number' ? matchObj.court : 1,
                 match_type: 'knockout',
@@ -1547,14 +2660,14 @@ async function startServer() {
                 score_b: matchObj.scoreB || 0,
                 is_completed: matchObj.status === 'completed',
                 winner_team_id: matchObj.winner || null,
-                recorded_by: req.body.recordedBy || 'Official Umpire',
+                recorded_by: req.body.recordedBy || auth.adminName || 'Official Umpire',
                 recorded_at: new Date(now).toISOString(),
               } as any)
               .then(() => {});
           }
         }
 
-        broadcastSse('knockout_score', { matchId, match: matchObj, lastUpdated: now });
+        broadcastSse('knockout_score', { seasonSlug, matchId, match: matchObj, lastUpdated: now });
         return res.json({ success: true, lastUpdated: now, match: matchObj });
       }
     }
@@ -1576,14 +2689,17 @@ async function startServer() {
       current.knockout = current.knockout || { format: 'top4', matches: [] };
       current.knockout.matches = [...(current.knockout.matches || []), newMatch];
       current.lastUpdated = now;
-      writeJSON(TOURNAMENT_FILE, current);
+      writeSeasonTournamentState(seasonSlug, current);
 
       if (serverSupabase && !bodySyncedToSupabase) {
+        const seasonRec = await getSeasonRecordServer(seasonSlug);
+        const hasMatchSeasonCol = seasonRec?.id ? await hasServerSeasonIdCol('matches') : false;
         serverSupabase
           .from('matches')
           .upsert({
             id: matchId,
-            tournament_season: 'season-4',
+            tournament_season: seasonSlug,
+            ...(hasMatchSeasonCol && seasonRec?.id ? { season_id: seasonRec.id } : {}),
             round: 99,
             court: typeof newMatch.court === 'number' ? newMatch.court : 1,
             match_type: 'knockout',
@@ -1619,28 +2735,33 @@ async function startServer() {
           .then(() => {});
       }
 
-      broadcastSse('knockout_score', { matchId, match: newMatch, lastUpdated: now });
+      broadcastSse('knockout_score', { seasonSlug, matchId, match: newMatch, lastUpdated: now });
       return res.json({ success: true, lastUpdated: now, match: newMatch });
     }
 
     current.matches = current.matches || [];
     current.matches.push(newMatch);
     current.lastUpdated = now;
-    writeJSON(TOURNAMENT_FILE, current);
-    broadcastSse('match_score', { matchId, match: newMatch, lastUpdated: now });
+    writeSeasonTournamentState(seasonSlug, current);
+    broadcastSse('match_score', { seasonSlug, matchId, match: newMatch, lastUpdated: now });
     res.json({ success: true, lastUpdated: now, match: newMatch });
   });
 
   // Dedicated Atomic Schedule Replacement Endpoint with Multi-Court Support
   app.post('/api/tournament/schedule/replace', async (req, res) => {
-    if (!isAdminAuthorized(req)) {
-      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
     }
-    const { seasonSlug = 'season-4', matches = [], courts = 1, courtNames = [] } = req.body;
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
+    const { matches = [], courts = 1, courtNames = [] } = req.body;
     const now = Date.now();
     const nowIso = new Date(now).toISOString();
 
-    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const current = readSeasonTournamentState(seasonSlug);
 
     // 1. Atomic Supabase synchronization
     if (serverSupabase) {
@@ -1723,11 +2844,12 @@ async function startServer() {
       courtNames,
     };
     current.lastUpdated = now;
-    writeJSON(TOURNAMENT_FILE, current);
+    writeSeasonTournamentState(seasonSlug, current);
 
     // 3. Broadcast real-time SSE event to all connected devices immediately
-    broadcastSse('tournament_state', current);
+    broadcastSse('tournament_state', { ...current, seasonSlug });
     broadcastSse('schedule_replaced', {
+      seasonSlug,
       matches,
       courts,
       courtNames,
@@ -1747,11 +2869,16 @@ async function startServer() {
 
   // Delete Individual Match
   app.delete('/api/tournament/matches/:id', async (req, res) => {
-    if (!isAdminAuthorized(req)) {
-      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const matchId = req.params.id;
-    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const current = readSeasonTournamentState(seasonSlug);
     const prevMatchesCount = (current.matches || []).length;
     current.matches = (current.matches || []).filter((m: any) => m.id !== matchId);
     if (current.knockout && Array.isArray(current.knockout.matches)) {
@@ -1759,7 +2886,7 @@ async function startServer() {
     }
     const now = Date.now();
     current.lastUpdated = now;
-    writeJSON(TOURNAMENT_FILE, current);
+    writeSeasonTournamentState(seasonSlug, current);
 
     if (serverSupabase) {
       try {
@@ -1770,18 +2897,26 @@ async function startServer() {
       }
     }
 
-    broadcastSse('tournament_state', current);
-    broadcastSse('match_deleted', { id: matchId, lastUpdated: now });
+    broadcastSse('tournament_state', { ...current, seasonSlug });
+    broadcastSse('match_deleted', { seasonSlug, id: matchId, lastUpdated: now });
     res.json({ success: true, deleted: prevMatchesCount !== current.matches.length });
   });
 
   // Bulk captain assignment persistent endpoint
-  app.post('/api/tournament/captains', (req, res) => {
+  app.post('/api/tournament/captains', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const { assignments } = req.body; // array of { teamId, captainId }
     if (!Array.isArray(assignments)) {
       return res.status(400).json({ error: 'assignments must be an array' });
     }
-    const current = readJSON<typeof DEFAULT_TOURNAMENT_PAYLOAD>(TOURNAMENT_FILE, DEFAULT_TOURNAMENT_PAYLOAD);
+    const current = readSeasonTournamentState(seasonSlug);
     const map = new Map(assignments.map((a: any) => [a.teamId, a.captainId]));
 
     current.teams = (current.teams || []).map((t: any) => {
@@ -1801,14 +2936,14 @@ async function startServer() {
     });
 
     current.lastUpdated = Date.now();
-    writeJSON(TOURNAMENT_FILE, current);
-    broadcastSse('teams_update', { teams: current.teams, lastUpdated: current.lastUpdated });
+    writeSeasonTournamentState(seasonSlug, current);
+    broadcastSse('teams_update', { seasonSlug, teams: current.teams, lastUpdated: current.lastUpdated });
     res.json({ success: true, teams: current.teams, lastUpdated: current.lastUpdated });
   });
 
   // 4. Registration Token / Link Management
   app.get('/api/tokens/:seasonSlug', (req, res) => {
-    const seasonSlug = req.params.seasonSlug || 'season-4';
+    const seasonSlug = resolveRequestSeasonSlug(req);
     let tokens = readJSON<any[]>(TOKENS_FILE, []);
 
     // If no tokens exist for this season, create an initial default token
@@ -1835,8 +2970,16 @@ async function startServer() {
     });
   });
 
-  app.post('/api/tokens/regenerate', (req, res) => {
-    const { seasonSlug = 'season-4', invalidatePrevious = true, label } = req.body;
+  app.post('/api/tokens/regenerate', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
+    const { invalidatePrevious = true, label } = req.body;
     let tokens = readJSON<any[]>(TOKENS_FILE, []);
 
     const now = Date.now();
@@ -1880,12 +3023,19 @@ async function startServer() {
     });
   });
 
-  app.post('/api/tokens/:tokenId/toggle-status', (req, res) => {
+  app.post('/api/tokens/:tokenId/toggle-status', async (req, res) => {
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
+    }
     const tokenId = req.params.tokenId;
     const tokens = readJSON<any[]>(TOKENS_FILE, []);
     const target = tokens.find((t) => t.id === tokenId);
     if (!target) {
       return res.status(404).json({ error: 'Token not found' });
+    }
+    if (await isSeasonArchivedServer(target.seasonSlug || resolveRequestSeasonSlug(req))) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
 
     target.isActive = !target.isActive;
@@ -1907,7 +3057,7 @@ async function startServer() {
     if (!match) {
       // If no token records exist in DB at all, allow as legacy fallback
       if (tokens.length === 0) {
-        return res.json({ valid: true, status: 'active', seasonSlug: 'season-4' });
+        return res.json({ valid: true, status: 'active', seasonSlug: getActiveSeasonSlugServer() });
       }
       return res.json({ valid: false, status: 'not_found' });
     }
@@ -1929,13 +3079,14 @@ async function startServer() {
     });
   });
 
-  // 5. Get All Registrations
+  // 5. Get All Registrations (Strictly Season-Scoped)
   app.get('/api/registrations', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     let list = readJSON<any[]>(REGISTRATIONS_FILE, []);
-    const season = req.query.season as string;
-    const authCheck = await verifyHeroAdminRequest(req);
-    const isAuthed = authCheck.authorized || isAdminAuthorized(req);
+    const rawSeason = req.query.season as string;
+    const authCheck = await verifyServerAuth(req);
+    const isAuthed = authCheck.authorized;
+    const targetSeason = rawSeason === 'all' && isAuthed ? 'all' : resolveRequestSeasonSlug(req);
 
     // Fetch authoritative live registrations from Supabase if active
     if (serverSupabase) {
@@ -1945,15 +3096,15 @@ async function startServer() {
           .select('*')
           .order('created_at', { ascending: false });
 
-        if (season && season !== 'all') {
-          query = query.eq('season_slug', season);
+        if (targetSeason !== 'all') {
+          query = query.eq('season_slug', targetSeason);
         }
 
         const { data: dbRows, error: dbErr } = await query;
         if (!dbErr && Array.isArray(dbRows)) {
           const mappedFromDb = dbRows.map((r: any) => mapServerDbRegistration(r));
           list = mappedFromDb;
-          if (!season || season === 'all') {
+          if (targetSeason === 'all') {
             writeJSON(REGISTRATIONS_FILE, list);
           }
         }
@@ -1962,7 +3113,7 @@ async function startServer() {
       }
     }
 
-    const filtered = season && season !== 'all' ? list.filter((r) => r.season === season) : list;
+    const filtered = targetSeason !== 'all' ? list.filter((r) => (r.season || 'season-4') === targetSeason) : list;
     if (isAuthed) {
       return res.json(filtered);
     }
@@ -1984,6 +3135,13 @@ async function startServer() {
 
   // 6. Submit New Registration
   app.post('/api/registrations', async (req, res) => {
+    const season = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(season)) {
+      return res.status(403).json({
+        registrationClosed: true,
+        error: 'This season is archived and registrations are closed.',
+      });
+    }
     const {
       name,
       mobile,
@@ -1996,7 +3154,6 @@ async function startServer() {
       city,
       notes,
       fee = 500,
-      season = 'season-4',
       txnId,
       method = 'upi',
       tokenUsed,
@@ -2021,14 +3178,12 @@ async function startServer() {
     if (!authStatus.enabled) {
       return res.status(403).json({
         registrationClosed: true,
-        error:
-          authStatus.closedNotice ||
-          'Registration for Smash Premier League 3.0 is currently closed.',
+        error: authStatus.closedNotice || 'Registration for this season is currently closed.',
       });
     }
 
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[season] || forms['season-4'] || createDefaultForm(season);
+    const formConfig = forms[season] || createDefaultForm(season);
 
     // Name validation
     if (!name || typeof name !== 'string' || name.trim().length < 2) {
@@ -2135,12 +3290,17 @@ async function startServer() {
       ...(effectiveCity ? { city: effectiveCity } : {}),
     };
 
-    const regSeq = String(list.length + 1).padStart(3, '0');
+    const seasonRec = await getSeasonRecordServer(season);
+    const hasRegSeasonCol = seasonRec?.id ? await hasServerSeasonIdCol('registrations') : false;
+    const regYear = seasonRec?.tournamentYear || new Date().getFullYear();
+    const regSeq = String(seasonRegistrations.length + 1).padStart(3, '0');
     const regSalt = Math.floor(100 + Math.random() * 900);
-    const regId = `SPL-2026-${regSeq}-${regSalt}`;
+    const regId = `SPL-${regYear}-${regSeq}-${regSalt}`;
     const newReg = {
       id: crypto.randomUUID(),
       regId,
+      seasonId: seasonRec?.id,
+      seasonSlug: season,
       name: name.trim(),
       mobile: mobileCheck.cleanMobile,
       whatsapp: cleanWhatsApp,
@@ -2183,6 +3343,7 @@ async function startServer() {
             id: newReg.id,
             reg_id: newReg.regId,
             season_slug: newReg.season,
+            ...(hasRegSeasonCol && seasonRec?.id ? { season_id: seasonRec.id } : {}),
             name: newReg.name,
             mobile: newReg.mobile,
             whatsapp: newReg.whatsapp || null,
@@ -2213,7 +3374,6 @@ async function startServer() {
             error: `Database insertion failed: ${insertErr.message}. Please try again.`,
           });
         }
-        console.log(`Saved registration ${newReg.regId} to Supabase PostgreSQL successfully`);
       } catch (err: any) {
         console.error('Supabase registration insert exception:', err?.message);
         return res.status(500).json({
@@ -2236,7 +3396,7 @@ async function startServer() {
       }
     }
 
-    broadcastSse('registration_created', { registration: newReg });
+    broadcastSse('registration_created', { seasonSlug: season, registration: newReg });
 
     const successMessage = formConfig.appearance?.successMessage ||
       'Registration submitted successfully! Thank you for registering for Smash Premier League. Your details have been received by the tournament organizer.';
@@ -2250,9 +3410,9 @@ async function startServer() {
 
   // 6.2 Get Custom Registration URL Settings
   app.get('/api/registration-url', (req, res) => {
-    const seasonSlug = (req.query.season as string) || 'season-4';
+    const seasonSlug = resolveRequestSeasonSlug(req);
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    const formConfig = forms[seasonSlug] || createDefaultForm(seasonSlug);
     const customSlug = formConfig.appearance?.customUrlSlug || formConfig.customUrlSlug || 'register';
     res.json({
       customUrlSlug: customSlug,
@@ -2264,10 +3424,15 @@ async function startServer() {
 
   // 6.3 Update Custom Registration URL Settings (Admin Only)
   app.post('/api/registration-url', async (req, res) => {
-    if (!isAdminAuthorized(req)) {
-      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
     }
-    const { customUrlSlug, seasonSlug = 'season-4', enabled } = req.body;
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
+    const { customUrlSlug, enabled } = req.body;
     if (typeof customUrlSlug !== 'string') {
       return res.status(400).json({ error: 'customUrlSlug must be a string' });
     }
@@ -2292,7 +3457,7 @@ async function startServer() {
     }
 
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    const formConfig = forms[seasonSlug] || createDefaultForm(seasonSlug);
     formConfig.customUrlSlug = cleanedSlug;
     if (!formConfig.appearance) formConfig.appearance = {};
     formConfig.appearance.customUrlSlug = cleanedSlug;
@@ -2301,9 +3466,6 @@ async function startServer() {
     }
     formConfig.lastUpdatedAt = Date.now();
     forms[seasonSlug] = formConfig;
-    if (seasonSlug !== 'season-4') {
-      forms['season-4'] = { ...formConfig, seasonSlug: 'season-4' };
-    }
     writeJSON(FORMS_FILE, forms);
 
     // Sync to Supabase
@@ -2339,12 +3501,16 @@ async function startServer() {
 
   // 6.4 Reset Custom Registration URL Settings to Default (Admin Only)
   app.post('/api/registration-url/reset', async (req, res) => {
-    if (!isAdminAuthorized(req)) {
-      return res.status(401).json({ error: 'Unauthorized: Admin authentication required' });
+    const auth = await verifyServerAuth(req);
+    if (!auth.authorized) {
+      return res.status(auth.status).json({ error: auth.error });
     }
-    const seasonSlug = req.body?.seasonSlug || 'season-4';
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const forms = readJSON<Record<string, any>>(FORMS_FILE, {});
-    const formConfig = forms[seasonSlug] || forms['season-4'] || createDefaultForm(seasonSlug);
+    const formConfig = forms[seasonSlug] || createDefaultForm(seasonSlug);
     formConfig.customUrlSlug = 'register';
     if (!formConfig.appearance) formConfig.appearance = {};
     formConfig.appearance.customUrlSlug = 'register';
@@ -2381,9 +3547,13 @@ async function startServer() {
 
   // 6. Verify Payment Endpoint (Authoritative Supabase PostgreSQL + Atomic Audit Trail + RBAC)
   app.post('/api/registrations/:id/verify-payment', async (req, res) => {
-    const auth = await verifyHeroAdminRequest(req);
+    const auth = await verifyServerAuth(req);
     if (!auth.authorized) {
       return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const id = req.params.id;
     const validPaymentStatuses = [
@@ -2427,6 +3597,9 @@ async function startServer() {
         }
 
         const existing = existingRow as any;
+        if (await isSeasonArchivedServer(existing.season_slug || seasonSlug)) {
+          return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+        }
         const feeVal = typeof existing.fee === 'number' && Number.isFinite(existing.fee) ? Math.max(0, Math.round(existing.fee)) : 0;
         const prevStatus = existing.payment_status || (existing.status === 'paid' ? 'paid' : 'unpaid');
         const nextAnswers =
@@ -2522,11 +3695,12 @@ async function startServer() {
               toStatus: requestedStatus,
               paidAmount: mapped.paidAmount,
               note,
+              seasonSlug: mapped.season,
             },
           })
           .then(() => {});
 
-        broadcastSse('registration_updated', { registration: mapped });
+        broadcastSse('registration_updated', { seasonSlug: mapped.season || seasonSlug, registration: mapped });
         return res.json({ success: true, registration: mapped });
       } catch (err: any) {
         return res.status(500).json({ error: err?.message || 'Supabase payment verification error' });
@@ -2541,6 +3715,9 @@ async function startServer() {
     }
 
     const existing = list[index];
+    if (await isSeasonArchivedServer(existing.season || seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const prevStatus = existing.paymentStatus || (existing.status === 'paid' ? 'paid' : existing.txnId ? 'pending_verification' : 'unpaid');
     const feeVal = typeof existing.fee === 'number' && Number.isFinite(existing.fee) ? Math.max(0, Math.round(existing.fee)) : 0;
 
@@ -2580,15 +3757,19 @@ async function startServer() {
 
     list[index] = updated;
     writeJSON(REGISTRATIONS_FILE, list);
-    broadcastSse('registration_updated', { registration: updated });
+    broadcastSse('registration_updated', { seasonSlug: updated.season || seasonSlug, registration: updated });
     return res.json({ success: true, registration: updated });
   });
 
   // 5. Update Registration (Approve / Reject / Details - Supabase First + Column-Scoped)
   app.patch('/api/registrations/:id', async (req, res) => {
-    const auth = await verifyHeroAdminRequest(req);
+    const auth = await verifyServerAuth(req);
     if (!auth.authorized) {
       return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const id = req.params.id;
     const now = Date.now();
@@ -2643,7 +3824,7 @@ async function startServer() {
         if (idx >= 0) localList[idx] = mapped;
         else localList.unshift(mapped);
         writeJSON(REGISTRATIONS_FILE, localList);
-        broadcastSse('registration_updated', { registration: mapped });
+        broadcastSse('registration_updated', { seasonSlug: mapped.season || seasonSlug, registration: mapped });
         return res.json(mapped);
       } catch (err: any) {
         return res.status(500).json({ error: err?.message || 'Supabase patch error' });
@@ -2671,15 +3852,19 @@ async function startServer() {
 
     list[index] = updated;
     writeJSON(REGISTRATIONS_FILE, list);
-    broadcastSse('registration_updated', { registration: updated });
+    broadcastSse('registration_updated', { seasonSlug: updated.season || seasonSlug, registration: updated });
     return res.json(updated);
   });
 
   // 6. Delete Registration
   app.delete('/api/registrations/:id', async (req, res) => {
-    const auth = await verifyHeroAdminRequest(req);
+    const auth = await verifyServerAuth(req);
     if (!auth.authorized) {
       return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const id = req.params.id;
     if (serverSupabase) {
@@ -2691,15 +3876,19 @@ async function startServer() {
     const beforeCount = list.length;
     list = list.filter((r) => r.id !== id);
     writeJSON(REGISTRATIONS_FILE, list);
-    broadcastSse('registration_deleted', { id });
+    broadcastSse('registration_deleted', { seasonSlug, id });
     return res.json({ success: true, deleted: beforeCount !== list.length || Boolean(serverSupabase) });
   });
 
   // 7. Bulk Delete Registrations
   app.post('/api/registrations/bulk-delete', async (req, res) => {
-    const auth = await verifyHeroAdminRequest(req);
+    const auth = await verifyServerAuth(req);
     if (!auth.authorized) {
       return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const { ids } = req.body;
     if (!Array.isArray(ids)) {
@@ -2715,15 +3904,19 @@ async function startServer() {
     const countBefore = list.length;
     list = list.filter((r) => !idSet.has(r.id));
     writeJSON(REGISTRATIONS_FILE, list);
-    broadcastSse('registrations_bulk_deleted', { ids });
+    broadcastSse('registrations_bulk_deleted', { seasonSlug, ids });
     return res.json({ success: true, count: countBefore - list.length });
   });
 
   // 8. Bulk Approve Registrations
   app.post('/api/registrations/bulk-approve', async (req, res) => {
-    const auth = await verifyHeroAdminRequest(req);
+    const auth = await verifyServerAuth(req);
     if (!auth.authorized) {
       return res.status(auth.status).json({ error: auth.error });
+    }
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
     }
     const { ids } = req.body;
     if (!Array.isArray(ids)) {
@@ -2759,12 +3952,12 @@ async function startServer() {
     });
 
     writeJSON(REGISTRATIONS_FILE, list);
-    broadcastSse('registrations_bulk_approved', { ids });
+    broadcastSse('registrations_bulk_approved', { seasonSlug, ids });
     return res.json({ success: true, approvedCount });
   });
 
   // =========================================================================
-  // HERO SECTION CUSTOMIZATION MANAGER API ROUTES (RBAC + STORAGE + REALTIME)
+  // HERO SECTION CUSTOMIZATION MANAGER API ROUTES (SEASON-KEYED + RBAC)
   // =========================================================================
   interface HeroStorageFile {
     published: any;
@@ -2772,96 +3965,49 @@ async function startServer() {
     versions: any[];
   }
 
-  function readLocalHeroStore(): HeroStorageFile {
+  function readLocalHeroStore(seasonSlug = 'season-4'): HeroStorageFile {
+    const seasonsStore = readSeasonsStore();
+    const matchedSeason = seasonsStore.seasons.find((s) => s.seasonSlug === seasonSlug);
+    const defaultCfg = matchedSeason
+      ? buildSeasonInitialHeroConfig(matchedSeason)
+      : cloneHeroConfig(DEFAULT_HERO_CONFIG);
     const fallback: HeroStorageFile = {
-      published: cloneHeroConfig(DEFAULT_HERO_CONFIG),
-      draft: cloneHeroConfig({ ...DEFAULT_HERO_CONFIG, status: 'draft' }),
+      published: cloneHeroConfig(defaultCfg),
+      draft: cloneHeroConfig({ ...defaultCfg, status: 'draft' }),
       versions: [],
     };
-    const stored = readJSON<HeroStorageFile>(HERO_FILE, fallback);
+    const raw = readJSON<any>(HERO_FILE, null);
+    let stored: Partial<HeroStorageFile> = fallback;
+    if (raw && typeof raw === 'object') {
+      if (raw.seasons && typeof raw.seasons === 'object') {
+        stored = raw.seasons[seasonSlug] || fallback;
+      } else if (seasonSlug === 'season-4') {
+        stored = raw;
+      }
+    }
     return {
-      published: normalizeHeroConfig({ ...(stored.published || DEFAULT_HERO_CONFIG), status: 'published' }),
-      draft: normalizeHeroConfig({ ...(stored.draft || stored.published || DEFAULT_HERO_CONFIG), status: 'draft' }),
+      published: normalizeHeroConfig({ ...(stored.published || defaultCfg), status: 'published' }),
+      draft: normalizeHeroConfig({ ...(stored.draft || stored.published || defaultCfg), status: 'draft' }),
       versions: Array.isArray(stored.versions) ? stored.versions : [],
     };
   }
 
-  async function verifyHeroAdminRequest(req: express.Request): Promise<{
-    authorized: boolean;
-    status: number;
-    error?: string;
-    adminName?: string;
-    role?: string;
-  }> {
-    const authHeader = req.headers.authorization;
-    const token = authHeader ? authHeader.replace(/^Bearer\s+/i, '').trim() : '';
-    if (!token) {
-      return { authorized: false, status: 401, error: 'Unauthorized: Missing authentication token.' };
+  function writeLocalHeroStore(seasonSlug: string, nextStore: HeroStorageFile): void {
+    const raw = readJSON<any>(HERO_FILE, null);
+    let container: { seasons: Record<string, HeroStorageFile> };
+    if (raw && typeof raw === 'object' && raw.seasons && typeof raw.seasons === 'object') {
+      container = { seasons: { ...raw.seasons } };
+    } else if (raw && typeof raw === 'object' && (raw.published || raw.draft)) {
+      container = { seasons: { 'season-4': raw } };
+    } else {
+      container = { seasons: {} };
     }
+    container.seasons[seasonSlug] = nextStore;
+    writeJSON(HERO_FILE, container);
+  }
 
-    const authConfig = readJSON(AUTH_FILE, DEFAULT_ADMIN_CONFIG);
-    const localSession = authConfig.activeTokens?.[token];
-    if (localSession && Date.now() <= localSession.expiresAt) {
-      const account = authConfig.accounts?.find((a: any) => a.id === localSession.userId);
-      if (!account) {
-        return { authorized: false, status: 401, error: 'Unauthorized: Session account not found.' };
-      }
-      if (account.role !== 'super_admin' && account.role !== 'tournament_director') {
-        return { authorized: false, status: 403, error: 'Forbidden: Only Super Admin or Tournament Director can customize the Hero Section.' };
-      }
-      return { authorized: true, status: 200, adminName: account.name || account.username, role: account.role };
-    }
-
-    // Check Supabase JWT if token looks like a JWT
-    if (serverSupabase && token.split('.').length === 3) {
-      try {
-        const { data: userData } = await serverSupabase.auth.getUser(token);
-        if (userData?.user) {
-          const { data: adminRow } = await serverSupabase
-            .from('admin_users')
-            .select('id, name, username, role, is_active')
-            .or(`auth_user_id.eq.${userData.user.id},email.eq.${userData.user.email}`)
-            .maybeSingle();
-          if (adminRow && (adminRow as any).is_active !== false) {
-            const role = (adminRow as any).role;
-            if (role !== 'super_admin' && role !== 'tournament_director') {
-              return { authorized: false, status: 403, error: 'Forbidden: Insufficient role privileges.' };
-            }
-            return { authorized: true, status: 200, adminName: (adminRow as any).name, role };
-          }
-        }
-      } catch {}
-    }
-
-    // Check active Supabase-issued session token (spl_sb_... / spl_sess_...) bound to X-SPL-Admin-Id
-    const claimedAdminId = String(req.headers['x-spl-admin-id'] || '').trim();
-    if (
-      serverSupabase &&
-      claimedAdminId &&
-      /^spl_(sb|sess|tk)_[a-f0-9]{16,}$/i.test(token)
-    ) {
-      try {
-        const { data: adminRow } = await serverSupabase
-          .from('admin_users')
-          .select('id, name, username, role, is_active')
-          .eq('id', claimedAdminId)
-          .maybeSingle();
-        if (adminRow && (adminRow as any).is_active !== false) {
-          const role = (adminRow as any).role;
-          if (role !== 'super_admin' && role !== 'tournament_director') {
-            return { authorized: false, status: 403, error: 'Forbidden: Score operators cannot modify Hero configuration.' };
-          }
-          return {
-            authorized: true,
-            status: 200,
-            adminName: (adminRow as any).name || (adminRow as any).username,
-            role,
-          };
-        }
-      } catch {}
-    }
-
-    return { authorized: false, status: 401, error: 'Unauthorized: Valid administrator session required.' };
+  async function verifyHeroAdminRequest(req: express.Request) {
+    return verifyServerAuth(req, { allowScoreOperator: false });
   }
 
   function detectAndValidateHeroMedia(
@@ -2970,10 +4116,10 @@ async function startServer() {
   // Public Hero Config endpoint (NEVER exposes draft!)
   app.get('/api/hero/published', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    const seasonSlug = String(req.query.season || 'season-4');
+    const seasonSlug = resolveRequestSeasonSlug(req);
     if (serverSupabase) {
       try {
-        const row = await fetchServerSupabaseFormRow(seasonSlug);
+        const row = await fetchServerSupabaseFormRow(seasonSlug, false);
         const published = (row?.appearance_json as any)?.heroPublished;
         if (published && typeof published === 'object') {
           const normalized = normalizeHeroConfig({ ...published, status: 'published' });
@@ -2981,7 +4127,7 @@ async function startServer() {
         }
       } catch {}
     }
-    const localStore = readLocalHeroStore();
+    const localStore = readLocalHeroStore(seasonSlug);
     return res.json({ heroConfig: localStore.published, source: 'server' });
   });
 
@@ -2993,15 +4139,15 @@ async function startServer() {
       return res.status(auth.status).json({ error: auth.error });
     }
 
-    const seasonSlug = String(req.query.season || 'season-4');
-    const localStore = readLocalHeroStore();
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    const localStore = readLocalHeroStore(seasonSlug);
     let published = localStore.published;
     let draft = localStore.draft;
     let versions = localStore.versions;
 
     if (serverSupabase) {
       try {
-        const row = await fetchServerSupabaseFormRow(seasonSlug);
+        const row = await fetchServerSupabaseFormRow(seasonSlug, false);
         const appJson = (row?.appearance_json as any) || {};
         if (appJson.heroPublished) {
           published = normalizeHeroConfig({ ...appJson.heroPublished, status: 'published' });
@@ -3049,7 +4195,10 @@ async function startServer() {
       return res.status(auth.status).json({ error: auth.error });
     }
 
-    const seasonSlug = String(req.body?.seasonSlug || 'season-4');
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const rawConfig = req.body?.config;
     if (!rawConfig || typeof rawConfig !== 'object') {
       return res.status(400).json({ error: 'Invalid Hero configuration payload.' });
@@ -3063,13 +4212,13 @@ async function startServer() {
       updatedBy: author,
     });
 
-    const store = readLocalHeroStore();
+    const store = readLocalHeroStore(seasonSlug);
     store.draft = cleanDraft;
-    writeJSON(HERO_FILE, store);
+    writeLocalHeroStore(seasonSlug, store);
 
     if (serverSupabase) {
       try {
-        const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+        const existingRow = await fetchServerSupabaseFormRow(seasonSlug, false);
         if (existingRow) {
           const existingApp = (existingRow.appearance_json as any) || {};
           const mergedApp = {
@@ -3102,7 +4251,10 @@ async function startServer() {
       return res.status(auth.status).json({ error: auth.error });
     }
 
-    const seasonSlug = String(req.body?.seasonSlug || 'season-4');
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const rawConfig = req.body?.config;
     if (!rawConfig || typeof rawConfig !== 'object') {
       return res.status(400).json({ error: 'Invalid Hero configuration payload.' });
@@ -3113,12 +4265,12 @@ async function startServer() {
     const summary = sanitizePlainText(req.body?.summary || 'Published Hero customization', 160) || 'Published Hero customization';
     const normalizedInput = normalizeHeroConfig(rawConfig);
 
-    const store = readLocalHeroStore();
+    const store = readLocalHeroStore(seasonSlug);
     let baseVersion = Number(store.published?.version || 0);
     let existingRow: any = null;
 
     if (serverSupabase) {
-      existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+      existingRow = await fetchServerSupabaseFormRow(seasonSlug, false);
       const dbCurrentVersion = Number((existingRow?.appearance_json as any)?.heroPublished?.version || 0);
       baseVersion = Math.max(baseVersion, dbCurrentVersion);
     }
@@ -3191,7 +4343,7 @@ async function startServer() {
             entity_type: 'hero_config',
             entity_id: existingRow.id,
             user_email: author,
-            details_json: { version: nextVersion, summary },
+            details_json: { seasonSlug, version: nextVersion, summary },
           })
           .then(() => {});
       } catch (err: any) {
@@ -3202,7 +4354,7 @@ async function startServer() {
     store.published = publishedConfig;
     store.draft = draftMirror;
     store.versions = [versionRecord, ...store.versions].slice(0, 20);
-    writeJSON(HERO_FILE, store);
+    writeLocalHeroStore(seasonSlug, store);
 
     broadcastSse('hero_published', {
       seasonSlug,
@@ -3217,13 +4369,40 @@ async function startServer() {
     });
   });
 
+  function readSeasonLivestream(seasonSlug = 'season-4') {
+    const raw = readJSON<any>(LIVESTREAM_FILE, null);
+    if (raw && typeof raw === 'object') {
+      if (raw.seasons && typeof raw.seasons === 'object') {
+        return normalizeYouTubeLiveConfig(raw.seasons[seasonSlug] || DEFAULT_YOUTUBE_LIVE_CONFIG);
+      }
+      if (seasonSlug === 'season-4') {
+        return normalizeYouTubeLiveConfig(raw);
+      }
+    }
+    return normalizeYouTubeLiveConfig(DEFAULT_YOUTUBE_LIVE_CONFIG);
+  }
+
+  function writeSeasonLivestream(seasonSlug: string, cfg: any) {
+    const raw = readJSON<any>(LIVESTREAM_FILE, null);
+    let container: { seasons: Record<string, any> };
+    if (raw && typeof raw === 'object' && raw.seasons && typeof raw.seasons === 'object') {
+      container = { seasons: { ...raw.seasons } };
+    } else if (raw && typeof raw === 'object' && ('videoUrl' in raw || 'enabled' in raw)) {
+      container = { seasons: { 'season-4': raw } };
+    } else {
+      container = { seasons: {} };
+    }
+    container.seasons[seasonSlug] = cfg;
+    writeJSON(LIVESTREAM_FILE, container);
+  }
+
   // Public & Admin YouTube Live Stream Configuration Endpoints
   app.get('/api/livestream', async (req, res) => {
     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    const seasonSlug = String(req.query.season || 'season-4');
+    const seasonSlug = resolveRequestSeasonSlug(req);
     if (serverSupabase) {
       try {
-        const row = await fetchServerSupabaseFormRow(seasonSlug);
+        const row = await fetchServerSupabaseFormRow(seasonSlug, false);
         const rawLive = (row?.appearance_json as any)?.youtubeLive;
         if (rawLive && typeof rawLive === 'object') {
           return res.json({
@@ -3234,9 +4413,7 @@ async function startServer() {
       } catch {}
     }
 
-    const localCfg = normalizeYouTubeLiveConfig(
-      readJSON(LIVESTREAM_FILE, DEFAULT_YOUTUBE_LIVE_CONFIG)
-    );
+    const localCfg = readSeasonLivestream(seasonSlug);
     return res.json({ config: localCfg, source: 'server' });
   });
 
@@ -3246,7 +4423,10 @@ async function startServer() {
       return res.status(auth.status).json({ error: auth.error });
     }
 
-    const seasonSlug = String(req.body?.seasonSlug || 'season-4');
+    const seasonSlug = resolveRequestSeasonSlug(req);
+    if (await isSeasonArchivedServer(seasonSlug)) {
+      return res.status(403).json({ error: 'Archived season is locked and read-only.' });
+    }
     const rawConfig = req.body?.config;
     if (!rawConfig || typeof rawConfig !== 'object') {
       return res.status(400).json({ error: 'Invalid YouTube Live configuration payload.' });
@@ -3282,7 +4462,7 @@ async function startServer() {
 
     if (serverSupabase) {
       try {
-        const existingRow = await fetchServerSupabaseFormRow(seasonSlug);
+        const existingRow = await fetchServerSupabaseFormRow(seasonSlug, false);
         if (existingRow) {
           const existingApp = (existingRow.appearance_json as any) || {};
           const mergedApp = {
@@ -3308,6 +4488,7 @@ async function startServer() {
               entity_id: existingRow.id,
               user_email: author,
               details_json: {
+                seasonSlug,
                 enabled: sanitizedConfig.enabled,
                 status: sanitizedConfig.status,
                 videoId: sanitizedConfig.videoId,
@@ -3321,7 +4502,7 @@ async function startServer() {
       }
     }
 
-    writeJSON(LIVESTREAM_FILE, sanitizedConfig);
+    writeSeasonLivestream(seasonSlug, sanitizedConfig);
 
     broadcastSse('livestream_updated', {
       seasonSlug,
@@ -3490,8 +4671,10 @@ async function startServer() {
     next();
   });
 
-  // In development, mount Vite middleware
-  if (!isProd) {
+  // In development, mount Vite middleware (skip in API-only test harness)
+  if (process.env.SPL_API_ONLY === '1') {
+    // API routes only
+  } else if (!isProd) {
     const vite = await createViteServer({
       server: {
         middlewareMode: true,

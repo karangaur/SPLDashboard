@@ -26,6 +26,7 @@ export interface TeamsShowcaseSectionProps {
   onSelectMatch?: (match: Match) => void;
   selectedTeamId?: string | null;
   onSelectTeamChange?: (teamId: string | null) => void;
+  seasonNumber?: string;
 }
 
 type TeamTournamentStatus = 'CHAMPION' | 'QUALIFIED' | 'ELIMINATED' | 'ACTIVE';
@@ -803,6 +804,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
   onSelectMatch,
   selectedTeamId: controlledSelectedTeamId,
   onSelectTeamChange,
+  seasonNumber = '3.0',
 }) => {
   const [internalSelectedTeamId, setInternalSelectedTeamId] = useState<string | null>(null);
   const selectedTeamId = controlledSelectedTeamId !== undefined ? controlledSelectedTeamId : internalSelectedTeamId;
@@ -947,7 +949,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
   return (
     <section
       id="teams-roster"
-      aria-label="Smash Premier League 3.0 Teams"
+      aria-label={`${tournamentName} ${seasonNumber} Teams`}
       className="relative overflow-hidden bg-[#05060b] border-y border-white/10 py-14 sm:py-20 scroll-mt-20"
     >
       {/* Atmospheric Arena Glows & Subtle Badminton Court Floor Geometry */}
@@ -984,7 +986,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
           <h2 className="text-[clamp(1.9rem,4vw,3.25rem)] font-black text-white font-display uppercase tracking-tight leading-[1.06] text-balance">
             SMASH PREMIER LEAGUE{' '}
             <span className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
-              3.0
+              {seasonNumber}
             </span>
           </h2>
 
@@ -1015,7 +1017,7 @@ export const TeamsShowcaseSection: React.FC<TeamsShowcaseSectionProps> = ({
             <p className="text-xs sm:text-sm text-slate-400 mt-2 leading-relaxed">
               {registrationOpen
                 ? `Official championship squads for ${tournamentName} are being finalized. Register now to enter the athlete draft.`
-                : `Official championship squads for ${tournamentName} are being finalized. Registration for Smash Premier League 3.0 is currently closed.`}
+                : `Official championship squads for ${tournamentName} are being finalized. Registration for ${tournamentName} ${seasonNumber} is currently closed.`}
             </p>
             {registrationOpen ? (
               <button

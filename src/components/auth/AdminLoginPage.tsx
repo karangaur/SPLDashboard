@@ -30,7 +30,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
   onGoToPublicRegister,
   onBackToHome,
 }) => {
-  const { isRegistrationOpen } = useTournament();
+  const { isRegistrationOpen, activeSeason } = useTournament();
   const [identifier, setIdentifier] = useState('admin');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -157,7 +157,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
             <div className="space-y-4">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-lime-500/10 border border-lime-500/30 text-lime-400 text-xs font-bold tracking-wide uppercase">
                 <Zap className="w-3.5 h-3.5 animate-pulse shrink-0" />
-                <span>Season IV Championship Portal</span>
+                <span>SPL {activeSeason.seasonNumber} {activeSeason.editionName}</span>
               </div>
 
               <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black font-display tracking-tight text-white uppercase leading-[1.08]">
@@ -235,7 +235,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
                     <p className="text-xs text-slate-400">
                       {isRegistrationOpen
                         ? 'No admin account needed. Open the public player entry form.'
-                        : 'Registration for Smash Premier League 3.0 is currently closed.'}
+                        : `Registration for Smash Premier League ${activeSeason.seasonNumber} is currently closed.`}
                     </p>
                   </div>
                 </div>
@@ -444,7 +444,7 @@ export const AdminLoginPage: React.FC<AdminLoginPageProps> = ({
         <div className="flex items-center gap-2">
           <span>🏸 Smash Premier League Official System</span>
           <span>•</span>
-          <span>Season IV Edition</span>
+          <span>SPL {activeSeason.seasonNumber} · {activeSeason.editionName}</span>
         </div>
         <div className="flex items-center gap-4">
           <button

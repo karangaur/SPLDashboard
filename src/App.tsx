@@ -54,6 +54,9 @@ const UserManagementView = lazy(() =>
 const HeroSectionManagerView = lazy(() =>
   import('./components/hero-admin/HeroSectionManagerView').then((m) => ({ default: m.HeroSectionManagerView }))
 );
+const SeasonManagementView = lazy(() =>
+  import('./components/seasons/SeasonManagementView').then((m) => ({ default: m.SeasonManagementView }))
+);
 const YouTubeLiveManagerView = lazy(() =>
   import('./components/admin/YouTubeLiveManagerView').then((m) => ({ default: m.YouTubeLiveManagerView }))
 );
@@ -103,6 +106,9 @@ const RESERVED_PATHS = new Set([
   'champion',
   'hero',
   'hero-manager',
+  'seasons',
+  'season-management',
+  'previous-seasons',
   'livestream',
   'youtube-live',
   'settings',
@@ -124,6 +130,9 @@ const VALID_ADMIN_TABS: Record<string, NavTab> = {
   champion: 'champion',
   hero: 'hero',
   'hero-manager': 'hero',
+  seasons: 'seasons',
+  'season-management': 'seasons',
+  'previous-seasons': 'previous-seasons',
   livestream: 'livestream',
   'youtube-live': 'livestream',
   settings: 'settings',
@@ -340,6 +349,10 @@ export default function App() {
         return <ChampionView />;
       case 'hero':
         return <HeroSectionManagerView />;
+      case 'seasons':
+        return <SeasonManagementView initialSubTab="dashboard" onSelectTab={handleSelectAdminTab} />;
+      case 'previous-seasons':
+        return <SeasonManagementView initialSubTab="previous-seasons" onSelectTab={handleSelectAdminTab} />;
       case 'livestream':
         return <YouTubeLiveManagerView />;
       case 'settings':

@@ -16,6 +16,8 @@ import {
   User,
   Palette,
   Tv,
+  Layers,
+  Archive,
 } from 'lucide-react';
 import { useTournament } from '../../context/TournamentContext';
 import { AuthService } from '../../services/authService';
@@ -34,6 +36,8 @@ export type NavTab =
   | 'statistics'
   | 'champion'
   | 'hero'
+  | 'seasons'
+  | 'previous-seasons'
   | 'livestream'
   | 'settings'
   | 'users';
@@ -46,7 +50,7 @@ interface HeaderProps {
 }
 
 export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogout, onViewPublicHome }) => {
-  const { state, youtubeLiveConfig } = useTournament();
+  const { state, youtubeLiveConfig, activeSeason, isSeasonLocked } = useTournament();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [moreDropdownOpen, setMoreDropdownOpen] = useState(false);
   const [accountModalOpen, setAccountModalOpen] = useState(false);
@@ -90,11 +94,21 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               className="h-8 sm:h-10 w-auto object-contain shrink-0 drop-shadow group-hover:scale-105 transition-transform"
             />
             <div className="min-w-0">
-              <span className="block font-display text-sm sm:text-base md:text-lg font-black tracking-tight text-white truncate">
-                {state.settings.name || 'Smash Premier League'}
-              </span>
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="block font-display text-sm sm:text-base md:text-lg font-black tracking-tight text-white truncate">
+                  {state.settings.name || 'Smash Premier League'}
+                </span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-amber-400/15 border border-amber-400/35 text-amber-300 text-[10px] font-mono font-bold uppercase shrink-0">
+                  SPL {activeSeason.seasonNumber}
+                </span>
+                {isSeasonLocked && (
+                  <span className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded bg-slate-800 border border-white/15 text-slate-300 text-[9px] font-bold uppercase shrink-0">
+                    {activeSeason.status === 'completed' ? 'Completed · Read-Only' : 'Read-Only'}
+                  </span>
+                )}
+              </div>
               <span className="block text-[10px] sm:text-[11px] font-medium text-slate-400 truncate -mt-0.5">
-                {state.settings.season || 'Maharajganj Tournament Central'}
+                {state.settings.season || activeSeason.editionName || 'Maharajganj Tournament Central'}
               </span>
             </div>
           </button>
@@ -180,7 +194,7 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
               aria-expanded={moreDropdownOpen}
               aria-haspopup="true"
               className={`px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1 ${
-                ['tokens', 'registered', 'statistics', 'champion', 'hero', 'livestream', 'settings', 'users'].includes(currentTab)
+                ['tokens', 'registered', 'statistics', 'champion', 'seasons', 'previous-seasons', 'hero', 'livestream', 'settings', 'users'].includes(currentTab)
                   ? 'bg-white/10 text-amber-400 font-semibold'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
@@ -232,6 +246,28 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                     <span>Champion Ceremony</span>
                   </button>
                   <div className="my-1 border-t border-white/10" />
+                  {canManageTournament && (
+                    <button
+                      onClick={() => handleNav('seasons')}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-slate-200 hover:text-white flex items-center gap-2.5 ${
+                        currentTab === 'seasons' ? 'bg-amber-400/20 text-amber-300 font-semibold' : 'hover:bg-white/10'
+                      }`}
+                    >
+                      <Layers className="w-4 h-4 text-amber-400" />
+                      <span>Season Management</span>
+                    </button>
+                  )}
+                  {canManageTournament && (
+                    <button
+                      onClick={() => handleNav('previous-seasons')}
+                      className={`w-full text-left px-3 py-2 rounded-lg text-slate-200 hover:text-white flex items-center gap-2.5 ${
+                        currentTab === 'previous-seasons' ? 'bg-amber-400/20 text-amber-300 font-semibold' : 'hover:bg-white/10'
+                      }`}
+                    >
+                      <Archive className="w-4 h-4 text-amber-400" />
+                      <span>Previous Seasons</span>
+                    </button>
+                  )}
                   {canManageTournament && (
                     <button
                       onClick={() => handleNav('hero')}
@@ -464,6 +500,28 @@ export const Header: React.FC<HeaderProps> = ({ currentTab, onSelectTab, onLogou
                 <span>Champion Ceremony</span>
                 <Trophy className="w-4 h-4 text-amber-400" />
               </button>
+              {canManageTournament && (
+                <button
+                  onClick={() => handleNav('seasons')}
+                  className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm font-semibold ${
+                    currentTab === 'seasons' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'hover:bg-white/5 text-slate-200'
+                  }`}
+                >
+                  <span>Season Management</span>
+                  <Layers className="w-4 h-4 text-amber-400" />
+                </button>
+              )}
+              {canManageTournament && (
+                <button
+                  onClick={() => handleNav('previous-seasons')}
+                  className={`w-full flex items-center justify-between p-3 min-h-[44px] rounded-xl transition-all active:scale-98 text-sm font-semibold ${
+                    currentTab === 'previous-seasons' ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'hover:bg-white/5 text-slate-200'
+                  }`}
+                >
+                  <span>Previous Seasons</span>
+                  <Archive className="w-4 h-4 text-amber-400" />
+                </button>
+              )}
               {canManageTournament && (
                 <button
                   onClick={() => handleNav('hero')}

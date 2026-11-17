@@ -43,6 +43,8 @@ export const TokensView: React.FC = () => {
     saveManualTeamEdit,
     generateFixtures,
     triggerCelebration,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const prefersReducedMotion = useReducedMotion();
@@ -474,8 +476,13 @@ export const TokensView: React.FC = () => {
             </h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            Official doubles team draw, captain selection, pre-decided pairs locking, and live lottery token allocation.
+            Official doubles team draw, captain selection, pre-decided pairs locking, and live lottery token allocation for SPL {activeSeason.seasonNumber}.
           </p>
+          {isSeasonLocked && (
+            <p className="mt-2 inline-block rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-200">
+              SPL {activeSeason.seasonNumber} is Archived (Read-Only): Token lottery draws and team formation changes are locked.
+            </p>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
@@ -510,7 +517,8 @@ export const TokensView: React.FC = () => {
               </button>
               <button
                 onClick={() => setShowClearConfirm(true)}
-                className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5"
+                disabled={isSeasonLocked}
+                className="p-2 text-slate-400 hover:text-rose-400 bg-white/5 hover:bg-rose-500/10 rounded-xl transition-colors border border-white/5 disabled:opacity-50 disabled:cursor-not-allowed"
                 title="Clear Teams"
                 aria-label="Clear Teams"
               >

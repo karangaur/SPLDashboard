@@ -128,6 +128,8 @@ export interface Player {
   category?: string;
   style?: string;
   photoUrl?: string;
+  seasonId?: string;
+  seasonSlug?: string;
 }
 
 export interface Team {
@@ -140,6 +142,8 @@ export interface Team {
   avatarColor?: string;
   badge?: string;
   token?: string;
+  seasonId?: string;
+  seasonSlug?: string;
 }
 
 export interface MatchSet {
@@ -173,6 +177,8 @@ export interface Match {
   playoffRound?: PlayoffRoundType;
   slot?: number;
   stageLabel?: string;
+  seasonId?: string;
+  seasonSlug?: string;
 }
 
 export interface KnockoutMatch {
@@ -209,6 +215,8 @@ export interface KnockoutMatch {
   sets?: MatchSet[];
   mvpPlayerId?: string;
   version?: number;
+  seasonId?: string;
+  seasonSlug?: string;
 }
 
 export interface CustomKnockoutMatchDraft {
@@ -276,6 +284,8 @@ export interface KnockoutData {
   auditLogs?: PlayoffAuditEntry[];
   versionHistory?: KnockoutBracketSnapshot[];
   matches: KnockoutMatch[];
+  seasonId?: string;
+  seasonSlug?: string;
 }
 
 export type FormFieldType =
@@ -454,6 +464,8 @@ export interface Registration {
   photoUrl?: string;
   tokenUsed?: string;
   formVersion?: number;
+  seasonId?: string;
+  seasonSlug?: string;
 }
 
 
@@ -487,7 +499,167 @@ export interface StandingsRecord {
   form: ('W' | 'L')[];
 }
 
+export type TournamentSeasonStatus = 'upcoming' | 'active' | 'completed' | 'archived';
+
+export interface SeasonSummaryCounts {
+  seasonSlug: string;
+  seasonId?: string;
+  registeredPlayers: number;
+  rosterPlayers: number;
+  teamsCount: number;
+  matchesCount: number;
+  liveMatchesCount: number;
+}
+
+export interface SeasonHistoricalSummary {
+  champions?: string;
+  championTeam?: string;
+  runnersUp?: string;
+  runnerUpTeam?: string;
+  mvp?: string;
+  notes?: string;
+}
+
+export interface SeasonActivationCheckResult {
+  ready: boolean;
+  dbMigrationReady: boolean;
+  historicalDataVerified: boolean;
+  zeroLiveMatches: boolean;
+  liveMatchesCount: number;
+  designConfigReady: boolean;
+  seasonIsolationReady: boolean;
+  blockers: string[];
+  warnings: string[];
+  targetSeasonExists: boolean;
+  currentActiveSlug: string;
+  spl3Summary?: {
+    players: number;
+    teams: number;
+    matches: number;
+    registrations: number;
+    revenue: number;
+  };
+}
+
+export interface SeasonArchiveSnapshot {
+  season: TournamentSeason;
+  players: Player[];
+  teams: Team[];
+  matches: Match[];
+  knockout: KnockoutData;
+  standings: StandingsRecord[];
+  registrations: Registration[];
+  revenueCollected: number;
+  paidCount: number;
+}
+
+export interface TournamentSeason {
+  id: string;
+  leagueName: string;
+  leagueShortName: string;
+  seasonNumber: string;
+  editionName: string;
+  seasonTitle: string;
+  seasonSlug: string;
+  tournamentYear: number;
+  status: TournamentSeasonStatus;
+  isActive: boolean;
+  isLocked: boolean;
+  entryFee: number;
+  maxSlots: number;
+  courtsCount: number;
+  courtNames?: string[];
+  venue?: string;
+  organizer?: string;
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+  announcement?: string;
+  scoringRules?: BadmintonScoringRules;
+  playoffSettings?: PlayoffSettings;
+  registrationEnabled?: boolean;
+  historicalSummary?: SeasonHistoricalSummary;
+  createdAt?: number;
+  updatedAt?: number;
+}
+
+export interface CreateSeasonInput {
+  seasonNumber: string;
+  editionName: string;
+  seasonSlug: string;
+  seasonTitle?: string;
+  tournamentYear?: number;
+  entryFee?: number;
+  maxSlots?: number;
+  courtsCount?: number;
+  courtNames?: string[];
+  venue?: string;
+  organizer?: string;
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+  status?: TournamentSeasonStatus;
+  activateNow?: boolean;
+  copySettingsFromSeasonSlug?: string;
+  registrationEnabled?: boolean;
+  historicalSummary?: SeasonHistoricalSummary;
+}
+
+export interface UpdateSeasonInput {
+  seasonNumber?: string;
+  editionName?: string;
+  seasonTitle?: string;
+  tournamentYear?: number;
+  entryFee?: number;
+  maxSlots?: number;
+  courtsCount?: number;
+  courtNames?: string[];
+  venue?: string;
+  organizer?: string;
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+  description?: string;
+  status?: TournamentSeasonStatus;
+  registrationEnabled?: boolean;
+  historicalSummary?: SeasonHistoricalSummary;
+}
+
+export interface ActivateSeasonResult {
+  success: boolean;
+  activeSeason?: TournamentSeason;
+  requiresConfirmation?: boolean;
+  liveMatchesCount?: number;
+  error?: string;
+}
+
+export interface ActiveSeasonContextValue {
+  activeSeason: TournamentSeason;
+  seasons: TournamentSeason[];
+  seasonSummaries: Record<string, SeasonSummaryCounts>;
+  seasonId: string;
+  seasonSlug: string;
+  seasonNumber: string;
+  editionName: string;
+  seasonStatus: TournamentSeasonStatus;
+  tournamentYear: number;
+  isSeasonLocked: boolean;
+  seasonLoading: boolean;
+  seasonError: string | null;
+  refreshSeason: () => Promise<void>;
+  refreshSeasonSummaries: () => Promise<Record<string, SeasonSummaryCounts>>;
+  switchActiveSeason: (seasonIdOrSlug: string, options?: { persistGlobal?: boolean }) => Promise<boolean>;
+  activateSeasonSafely: (seasonIdOrSlug: string, options?: { force?: boolean }) => Promise<ActivateSeasonResult>;
+  createSeason: (input: CreateSeasonInput) => Promise<{ success: boolean; season?: TournamentSeason; error?: string }>;
+  updateSeason: (seasonIdOrSlug: string, updates: UpdateSeasonInput) => Promise<{ success: boolean; season?: TournamentSeason; error?: string }>;
+  updateSeasonStatus: (seasonIdOrSlug: string, status: TournamentSeasonStatus) => Promise<boolean>;
+}
+
 export interface TournamentState {
+  seasonId?: string;
+  seasonSlug?: string;
   settings: TournamentSettings;
   registrationSettings: RegistrationSettings;
   players: Player[];
@@ -655,6 +827,45 @@ export interface HeroAnimationConfig {
   spotlightEffects: boolean;
 }
 
+export type SeasonDesignPresetId =
+  | 'spl-3-original'
+  | 'championship-gold'
+  | 'electric-red'
+  | 'royal-purple'
+  | 'ice-blue'
+  | 'custom';
+
+export type SeasonGradientDirection = 'to-r' | 'to-br' | 'to-b' | 'to-l';
+
+export interface SeasonBrandingConfig {
+  presetId: SeasonDesignPresetId;
+  useGradient: boolean;
+  textColor: string;
+  primaryGradientColor: string;
+  midGradientColor: string;
+  secondaryGradientColor: string;
+  gradientDirection: SeasonGradientDirection;
+  fontSizeDesktop: number;
+  fontSizeMobile: number;
+  fontWeight: '500' | '600' | '700' | '800' | '900';
+  letterSpacing: number; // px (-2 to 12)
+  textShadowEnabled: boolean;
+  textShadowBlur: number; // px (0 to 24)
+  glowEnabled: boolean;
+  glowColor: string;
+  glowIntensity: number; // 0 to 100
+  outlineColor: string;
+  outlineThickness: number; // px (0 to 4)
+  editionColor: string;
+  editionBadgeBg: string;
+  editionBadgeBgOpacity: number; // 0 to 100
+  editionBadgeBorderColor: string;
+  editionTextWeight: '600' | '700' | '800' | '900';
+  editionLetterSpacing: number; // em (0.05 to 0.35)
+  editionItalic: boolean;
+  editionUppercase: boolean;
+}
+
 export interface HeroConfig {
   version: number;
   status: 'draft' | 'published';
@@ -668,6 +879,7 @@ export interface HeroConfig {
   buttons: HeroButtonsLayoutConfig;
   theme: HeroThemeConfig;
   animations: HeroAnimationConfig;
+  seasonBranding?: SeasonBrandingConfig;
 }
 
 export interface HeroVersionRecord {

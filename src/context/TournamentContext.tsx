@@ -25,9 +25,17 @@ import {
   HeroConfig,
   HeroVersionRecord,
   YouTubeLiveConfig,
+  TournamentSeason,
+  TournamentSeasonStatus,
+  SeasonSummaryCounts,
+  CreateSeasonInput,
+  UpdateSeasonInput,
+  ActivateSeasonResult,
+  ActiveSeasonContextValue,
 } from '../types/tournament';
 import {
   STORAGE_KEY,
+  getSeasonStorageKey,
   DEFAULT_STATE,
   DEFAULT_REGISTRATION_SETTINGS,
   createDefaultFormConfig,
@@ -61,6 +69,7 @@ import {
   normalizeHeroConfig,
   cloneHeroConfig,
   sanitizeHexColor,
+  buildSeasonInitialHeroConfig,
 } from '../utils/heroDefaults';
 import {
   DEFAULT_YOUTUBE_LIVE_CONFIG,
@@ -107,6 +116,21 @@ export type RealtimeConnectionStatus = 'connecting' | 'connected' | 'reconnectin
 interface TournamentContextType {
   state: TournamentState;
   standings: ReturnType<typeof calculateStandings>;
+
+  // Active Season Context
+  activeSeason: TournamentSeason;
+  seasons: TournamentSeason[];
+  seasonSummaries: Record<string, SeasonSummaryCounts>;
+  seasonLoading: boolean;
+  seasonError: string | null;
+  isSeasonLocked: boolean;
+  refreshSeason: () => Promise<void>;
+  refreshSeasonSummaries: (seasonsList?: TournamentSeason[]) => Promise<Record<string, SeasonSummaryCounts>>;
+  switchActiveSeason: (seasonIdOrSlug: string, options?: { persistGlobal?: boolean }) => Promise<boolean>;
+  activateSeasonSafely: (seasonIdOrSlug: string, options?: { force?: boolean }) => Promise<ActivateSeasonResult>;
+  createSeason: (input: CreateSeasonInput) => Promise<{ success: boolean; season?: TournamentSeason; error?: string }>;
+  updateSeason: (seasonIdOrSlug: string, updates: UpdateSeasonInput) => Promise<{ success: boolean; season?: TournamentSeason; error?: string }>;
+  updateSeasonStatus: (seasonIdOrSlug: string, status: TournamentSeasonStatus) => Promise<boolean>;
 
   // Centralized Database & Realtime Status
   isCentralizedDbConnected: boolean;
@@ -269,20 +293,32 @@ interface TournamentContextType {
   deleteRegistrationsBulk: (ids: string[]) => void;
   bulkApproveRegistrations: (ids: string[]) => void;
   
-  // Hero Section Customization Manager
+  // Hero Section Customization & Season Design Studio Actions
   publishedHeroConfig: HeroConfig;
   fetchAdminHeroState: () => Promise<{ published: HeroConfig; draft: HeroConfig; versions: HeroVersionRecord[] }>;
+  fetchHeroStateForSeason: (seasonSlug?: string) => Promise<{ published: HeroConfig; draft: HeroConfig; versions: HeroVersionRecord[] }>;
   saveHeroDraft: (draft: HeroConfig) => Promise<{ success: boolean; draft?: HeroConfig; error?: string }>;
+  saveHeroDraftForSeason: (draft: HeroConfig, seasonSlug?: string) => Promise<{ success: boolean; draft?: HeroConfig; error?: string }>;
   publishHeroConfig: (
     config: HeroConfig,
     summary?: string,
     action?: 'publish' | 'restore'
+  ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
+  publishHeroConfigForSeason: (
+    config: HeroConfig,
+    summary?: string,
+    action?: 'publish' | 'restore',
+    seasonSlug?: string
   ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
   saveHeroVersionColor: (
     versionColor: string
   ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
   restoreHeroVersion: (
     versionRecord: HeroVersionRecord
+  ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
+  restoreHeroVersionForSeason: (
+    versionRecord: HeroVersionRecord,
+    seasonSlug?: string
   ) => Promise<{ success: boolean; published?: HeroConfig; version?: HeroVersionRecord; error?: string }>;
 
   // YouTube Live Streaming Integration
@@ -301,6 +337,38 @@ interface TournamentContextType {
 }
 
 const TournamentContext = createContext<TournamentContextType | null>(null);
+const ActiveSeasonContext = createContext<ActiveSeasonContextValue | null>(null);
+
+const SEASON_OVERRIDE_STORAGE_KEY = 'spl_active_season_override';
+
+function buildSeasonDefaultState(season: TournamentSeason): TournamentState {
+  const isSpl3 = season.seasonSlug === 'season-4' || season.seasonNumber === '3.0';
+  return {
+    ...DEFAULT_STATE,
+    settings: {
+      ...DEFAULT_STATE.settings,
+      name: 'Smash Premier League',
+      season: season.seasonTitle || `Season ${season.seasonNumber} (${season.editionName})`,
+      date: season.date ?? (isSpl3 ? DEFAULT_STATE.settings.date : ''),
+      venue: season.venue || DEFAULT_STATE.settings.venue,
+      organizer: season.organizer || DEFAULT_STATE.settings.organizer,
+      courts: season.courtsCount || DEFAULT_STATE.settings.courts,
+      courtNames: season.courtNames || DEFAULT_STATE.settings.courtNames,
+      entryFee: season.entryFee ?? DEFAULT_STATE.settings.entryFee,
+      slotLimit: season.maxSlots ?? DEFAULT_STATE.settings.slotLimit,
+      announcement: season.announcement ?? (isSpl3 ? DEFAULT_STATE.settings.announcement : ''),
+      scoringRules: season.scoringRules || DEFAULT_STATE.settings.scoringRules,
+      playoffSettings: season.playoffSettings || DEFAULT_STATE.settings.playoffSettings,
+    },
+    registrationSettings: {
+      ...DEFAULT_REGISTRATION_SETTINGS,
+      seasonSlug: season.seasonSlug,
+      seasonTitle: season.seasonTitle || `Smash Premier League — Season ${season.seasonNumber}`,
+      maxSlots: season.maxSlots ?? DEFAULT_REGISTRATION_SETTINGS.maxSlots,
+      enabled: season.registrationEnabled !== false,
+    },
+  };
+}
 
 // Audio synthesizer using shared lazy Web Audio API context (prevents AudioContext leaks across long matches)
 let sharedAudioContext: AudioContext | null = null;
@@ -395,14 +463,59 @@ export const sportsAudio = {
 };
 
 export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [state, setState] = useState<TournamentState>(DEFAULT_STATE);
+  const fallbackSeason = useMemo(() => SupabaseService.getDefaultFallbackSeason(), []);
+  const [seasons, setSeasons] = useState<TournamentSeason[]>([fallbackSeason]);
+  const [activeSeason, setActiveSeason] = useState<TournamentSeason>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const params = new URLSearchParams(window.location.search);
+        const urlSlug = params.get('season');
+        if (urlSlug) {
+          return { ...fallbackSeason, seasonSlug: urlSlug };
+        }
+        const savedSlug = sessionStorage.getItem(SEASON_OVERRIDE_STORAGE_KEY);
+        if (savedSlug) {
+          return { ...fallbackSeason, seasonSlug: savedSlug };
+        }
+      }
+    } catch {}
+    return fallbackSeason;
+  });
+  const [seasonSummaries, setSeasonSummaries] = useState<Record<string, SeasonSummaryCounts>>({});
+  const [seasonLoading, setSeasonLoading] = useState<boolean>(true);
+  const [seasonError, setSeasonError] = useState<string | null>(null);
+  const seasonsRef = useRef<TournamentSeason[]>(seasons);
+  seasonsRef.current = seasons;
+  const activeSeasonRef = useRef<TournamentSeason>(activeSeason);
+  activeSeasonRef.current = activeSeason;
+  const globalActiveSeason = useMemo(
+    () => seasons.find((s) => s.isActive) || activeSeason,
+    [seasons, activeSeason]
+  );
+  const isInspectingHistorical = Boolean(
+    seasons.length > 0 && activeSeason.seasonSlug !== globalActiveSeason.seasonSlug
+  );
+  const isSeasonLocked = Boolean(
+    activeSeason.isLocked ||
+      activeSeason.status === 'archived' ||
+      activeSeason.status === 'completed' ||
+      isInspectingHistorical
+  );
+
+  const [state, setState] = useState<TournamentState>(() => buildSeasonDefaultState(activeSeason));
 
   const [formConfig, setFormConfig] = useState<RegistrationFormConfig>(() =>
-    createDefaultFormConfig()
+    createDefaultFormConfig(
+      activeSeason.seasonSlug,
+      activeSeason.leagueName || 'Smash Premier League',
+      activeSeason.seasonTitle
+    )
   );
   const [publishedHeroConfig, setPublishedHeroConfig] = useState<HeroConfig>(() => {
     try {
-      const cached = localStorage.getItem('spl_hero_published_cache_season-4');
+      const cached = localStorage.getItem(
+        getSeasonStorageKey('spl_hero_published_cache', activeSeason.seasonSlug)
+      );
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === 'object') {
@@ -410,22 +523,31 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
       }
     } catch {}
-    return cloneHeroConfig(DEFAULT_HERO_CONFIG);
+    return buildSeasonInitialHeroConfig(activeSeason);
   });
   const heroPublishGuardRef = useRef<number>(0);
 
-  const applyPublishedHeroConfig = useCallback((rawConfig: Partial<HeroConfig> | null | undefined) => {
-    if (!rawConfig || typeof rawConfig !== 'object') return;
-    const normalized = normalizeHeroConfig({ ...rawConfig, status: 'published' });
-    setPublishedHeroConfig(normalized);
-    try {
-      localStorage.setItem('spl_hero_published_cache_season-4', JSON.stringify(normalized));
-    } catch {}
-  }, []);
+  const applyPublishedHeroConfig = useCallback(
+    (rawConfig: Partial<HeroConfig> | null | undefined, targetSlug?: string) => {
+      if (!rawConfig || typeof rawConfig !== 'object') return;
+      const slug = targetSlug || activeSeasonRef.current.seasonSlug || 'season-4';
+      const normalized = normalizeHeroConfig({ ...rawConfig, status: 'published' });
+      setPublishedHeroConfig(normalized);
+      try {
+        localStorage.setItem(
+          getSeasonStorageKey('spl_hero_published_cache', slug),
+          JSON.stringify(normalized)
+        );
+      } catch {}
+    },
+    []
+  );
 
   const [youtubeLiveConfig, setYoutubeLiveConfig] = useState<YouTubeLiveConfig>(() => {
     try {
-      const cached = localStorage.getItem('spl_youtube_live_cache_season-4');
+      const cached = localStorage.getItem(
+        getSeasonStorageKey('spl_youtube_live_cache', activeSeason.seasonSlug)
+      );
       if (cached) {
         const parsed = JSON.parse(cached);
         if (parsed && typeof parsed === 'object') {
@@ -437,14 +559,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   });
   const youtubeGuardRef = useRef<number>(0);
 
-  const applyYoutubeLiveConfig = useCallback((rawConfig: Partial<YouTubeLiveConfig> | null | undefined) => {
-    if (!rawConfig || typeof rawConfig !== 'object') return;
-    const normalized = normalizeYouTubeLiveConfig(rawConfig);
-    setYoutubeLiveConfig(normalized);
-    try {
-      localStorage.setItem('spl_youtube_live_cache_season-4', JSON.stringify(normalized));
-    } catch {}
-  }, []);
+  const applyYoutubeLiveConfig = useCallback(
+    (rawConfig: Partial<YouTubeLiveConfig> | null | undefined, targetSlug?: string) => {
+      if (!rawConfig || typeof rawConfig !== 'object') return;
+      const slug = targetSlug || activeSeasonRef.current.seasonSlug || 'season-4';
+      const normalized = normalizeYouTubeLiveConfig(rawConfig);
+      setYoutubeLiveConfig(normalized);
+      try {
+        localStorage.setItem(
+          getSeasonStorageKey('spl_youtube_live_cache', slug),
+          JSON.stringify(normalized)
+        );
+      } catch {}
+    },
+    []
+  );
   const [isRegistrationStatusHydrated, setIsRegistrationStatusHydrated] = useState<boolean>(false);
   const [isRegistrationsLoading, setIsRegistrationsLoading] = useState<boolean>(true);
   const [registrationsSyncError, setRegistrationsSyncError] = useState<string | null>(null);
@@ -477,9 +606,454 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const isRegistrationOpen =
     formConfig.enabled !== false && state.registrationSettings.enabled !== false;
 
+  const applySeasonReset = useCallback((targetSeason: TournamentSeason) => {
+    const prevSlug = activeSeasonRef.current.seasonSlug;
+    activeSeasonRef.current = targetSeason;
+    setActiveSeason(targetSeason);
+
+    if (prevSlug !== targetSeason.seasonSlug) {
+      localMatchGuardRef.current.clear();
+      lastServerScoreTime.current = 0;
+      lastLocalTeamMutationTime.current = 0;
+      setState(buildSeasonDefaultState(targetSeason));
+      setTokens([]);
+      setActiveToken(null);
+      setIsRegistrationsLoading(true);
+      setIsRegistrationStatusHydrated(false);
+      setRegistrationsSyncError(null);
+
+      try {
+        const cachedForm = localStorage.getItem(
+          getSeasonStorageKey('spl_forms_cache', targetSeason.seasonSlug)
+        );
+        if (cachedForm) {
+          const parsedForm = JSON.parse(cachedForm);
+          if (parsedForm && Array.isArray(parsedForm.fields)) {
+            setFormConfig(parsedForm);
+          } else {
+            setFormConfig(
+              createDefaultFormConfig(
+                targetSeason.seasonSlug,
+                targetSeason.leagueName || 'Smash Premier League',
+                targetSeason.seasonTitle
+              )
+            );
+          }
+        } else {
+          setFormConfig(
+            createDefaultFormConfig(
+              targetSeason.seasonSlug,
+              targetSeason.leagueName || 'Smash Premier League',
+              targetSeason.seasonTitle
+            )
+          );
+        }
+      } catch {
+        setFormConfig(
+          createDefaultFormConfig(
+            targetSeason.seasonSlug,
+            targetSeason.leagueName || 'Smash Premier League',
+            targetSeason.seasonTitle
+          )
+        );
+      }
+
+      try {
+        const cachedHero = localStorage.getItem(
+          getSeasonStorageKey('spl_hero_published_cache', targetSeason.seasonSlug)
+        );
+        setPublishedHeroConfig(
+          cachedHero
+            ? normalizeHeroConfig({ ...JSON.parse(cachedHero), status: 'published' })
+            : buildSeasonInitialHeroConfig(targetSeason)
+        );
+      } catch {
+        setPublishedHeroConfig(buildSeasonInitialHeroConfig(targetSeason));
+      }
+
+      try {
+        const cachedYt = localStorage.getItem(
+          getSeasonStorageKey('spl_youtube_live_cache', targetSeason.seasonSlug)
+        );
+        setYoutubeLiveConfig(
+          cachedYt
+            ? normalizeYouTubeLiveConfig(JSON.parse(cachedYt))
+            : { ...DEFAULT_YOUTUBE_LIVE_CONFIG }
+        );
+      } catch {
+        setYoutubeLiveConfig({ ...DEFAULT_YOUTUBE_LIVE_CONFIG });
+      }
+    } else {
+      setState((prev) => ({
+        ...prev,
+        registrationSettings: {
+          ...prev.registrationSettings,
+          seasonSlug: targetSeason.seasonSlug,
+          seasonTitle: targetSeason.seasonTitle || prev.registrationSettings.seasonTitle,
+        },
+      }));
+    }
+  }, []);
+
+  const refreshSeason = useCallback(async () => {
+    setSeasonLoading(true);
+    setSeasonError(null);
+    try {
+      let urlSeason: string | null = null;
+      let storedPreviewSlug: string | null = null;
+      if (typeof window !== 'undefined') {
+        try {
+          urlSeason = new URLSearchParams(window.location.search).get('season');
+          storedPreviewSlug = sessionStorage.getItem(SEASON_OVERRIDE_STORAGE_KEY);
+        } catch {}
+      }
+
+      if (SupabaseService.isAvailable()) {
+        const [allSeasons, dbActive] = await Promise.all([
+          SupabaseService.fetchSeasons(),
+          SupabaseService.fetchActiveSeason(),
+        ]);
+        const list = allSeasons && allSeasons.length > 0 ? allSeasons : [dbActive];
+        setSeasons(list);
+        const preferredSlug = urlSeason || storedPreviewSlug;
+        const resolved =
+          (preferredSlug &&
+            list.find((s) => s.seasonSlug === preferredSlug || s.id === preferredSlug)) ||
+          dbActive;
+        applySeasonReset(resolved);
+      } else {
+        const res = await fetch(`/api/seasons?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+        if (res && res.ok) {
+          const data = await res.json().catch(() => null);
+          const list: TournamentSeason[] =
+            Array.isArray(data?.seasons) && data.seasons.length > 0
+              ? data.seasons
+              : [fallbackSeason];
+          setSeasons(list);
+          const preferredSlug = urlSeason || storedPreviewSlug;
+          const resolved =
+            (preferredSlug &&
+              list.find((s) => s.seasonSlug === preferredSlug || s.id === preferredSlug)) ||
+            list.find((s) => s.isActive) ||
+            data?.activeSeason ||
+            list[0];
+          if (resolved) {
+            applySeasonReset(resolved);
+          }
+        }
+      }
+    } catch (err: any) {
+      setSeasonError(err?.message || 'Unable to load tournament seasons.');
+    } finally {
+      setSeasonLoading(false);
+    }
+  }, [applySeasonReset, fallbackSeason]);
+
+  const refreshSeasonSummaries = useCallback(
+    async (seasonsList?: TournamentSeason[]): Promise<Record<string, SeasonSummaryCounts>> => {
+      try {
+        const targetList = seasonsList && seasonsList.length > 0 ? seasonsList : seasonsRef.current;
+        const map = await SupabaseService.fetchSeasonSummaries(targetList);
+        if (map && Object.keys(map).length > 0) {
+          setSeasonSummaries(map);
+        }
+        return map || {};
+      } catch {
+        return {};
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    void refreshSeason();
+  }, [refreshSeason]);
+
+  useEffect(() => {
+    if (seasons.length > 0) {
+      void refreshSeasonSummaries(seasons);
+    }
+  }, [seasons, refreshSeasonSummaries]);
+
+  const switchActiveSeason = useCallback(
+    async (seasonIdOrSlug: string, options?: { persistGlobal?: boolean }): Promise<boolean> => {
+      if (!seasonIdOrSlug) return false;
+      try {
+        setSeasonLoading(true);
+        setSeasonError(null);
+        let resolved: TournamentSeason | null =
+          seasons.find((s) => s.id === seasonIdOrSlug || s.seasonSlug === seasonIdOrSlug) || null;
+
+        if (options?.persistGlobal) {
+          if (SupabaseService.isAvailable()) {
+            const globalSwitched = await SupabaseService.switchGlobalActiveSeason(seasonIdOrSlug);
+            if (globalSwitched) resolved = globalSwitched;
+          }
+          await fetch('/api/seasons/active', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+            body: JSON.stringify({ seasonIdOrSlug: resolved?.seasonSlug || seasonIdOrSlug, force: true }),
+          }).catch(() => {});
+          try {
+            sessionStorage.removeItem(SEASON_OVERRIDE_STORAGE_KEY);
+          } catch {}
+        } else {
+          if (!resolved && SupabaseService.isAvailable()) {
+            resolved = await SupabaseService.resolveSeasonContext(seasonIdOrSlug);
+          }
+          if (resolved && typeof window !== 'undefined') {
+            try {
+              sessionStorage.setItem(SEASON_OVERRIDE_STORAGE_KEY, resolved.seasonSlug);
+            } catch {}
+          }
+        }
+
+        if (!resolved) {
+          setSeasonError('Selected tournament season not found.');
+          return false;
+        }
+
+        const updatedList = SupabaseService.isAvailable()
+          ? await SupabaseService.fetchSeasons()
+          : seasons.map((s) =>
+              options?.persistGlobal
+                ? { ...s, isActive: s.seasonSlug === resolved!.seasonSlug }
+                : s
+            );
+        setSeasons(updatedList);
+        applySeasonReset(resolved);
+        void refreshSeasonSummaries(updatedList);
+        return true;
+      } catch (err: any) {
+        setSeasonError(err?.message || 'Failed to switch active season.');
+        return false;
+      } finally {
+        setSeasonLoading(false);
+      }
+    },
+    [applySeasonReset, seasons, refreshSeasonSummaries]
+  );
+
+  const activateSeasonSafely = useCallback(
+    async (
+      seasonIdOrSlug: string,
+      options?: { force?: boolean }
+    ): Promise<ActivateSeasonResult> => {
+      if (!seasonIdOrSlug) {
+        return { success: false, error: 'Target season is required.' };
+      }
+      setSeasonLoading(true);
+      setSeasonError(null);
+      try {
+        // Also check in-memory live matches in case local state has an unpersisted live match
+        if (!options?.force) {
+          const liveLocalCount =
+            stateRef.current.matches.filter((m) => m.status === 'live' || m.status === 'paused').length +
+            stateRef.current.knockout.matches.filter((m) => m.status === 'live' || m.status === 'paused').length;
+          const currentlyActive = seasonsRef.current.find((s) => s.isActive);
+          if (
+            liveLocalCount > 0 &&
+            currentlyActive &&
+            currentlyActive.seasonSlug === activeSeasonRef.current.seasonSlug &&
+            currentlyActive.seasonSlug !== seasonIdOrSlug &&
+            currentlyActive.id !== seasonIdOrSlug
+          ) {
+            return {
+              success: false,
+              requiresConfirmation: true,
+              liveMatchesCount: liveLocalCount,
+              error: `${liveLocalCount} live or paused match(es) are currently in progress in SPL ${currentlyActive.seasonNumber}.`,
+            };
+          }
+        }
+
+        const res = await SupabaseService.activateSeasonSafely(seasonIdOrSlug, {
+          checkOngoingMatches: true,
+          force: Boolean(options?.force),
+        });
+        if (!res.success) {
+          if (res.error && !res.requiresConfirmation) setSeasonError(res.error);
+          return res;
+        }
+
+        try {
+          sessionStorage.removeItem(SEASON_OVERRIDE_STORAGE_KEY);
+        } catch {}
+
+        let updatedList: TournamentSeason[] = seasonsRef.current;
+        if (SupabaseService.isAvailable()) {
+          updatedList = await SupabaseService.fetchSeasons();
+        } else {
+          const sRes = await fetch(`/api/seasons?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null);
+          if (sRes?.ok) {
+            const sData = await sRes.json().catch(() => null);
+            if (Array.isArray(sData?.seasons)) updatedList = sData.seasons;
+          }
+        }
+
+        const nextActive =
+          res.activeSeason ||
+          updatedList.find((s) => s.isActive || s.seasonSlug === seasonIdOrSlug || s.id === seasonIdOrSlug);
+
+        setSeasons(updatedList);
+        if (nextActive) {
+          applySeasonReset(nextActive);
+        }
+        void refreshSeasonSummaries(updatedList);
+        return { success: true, activeSeason: nextActive };
+      } catch (err: any) {
+        const msg = err?.message || 'Failed to activate selected season.';
+        setSeasonError(msg);
+        return { success: false, error: msg };
+      } finally {
+        setSeasonLoading(false);
+      }
+    },
+    [applySeasonReset, refreshSeasonSummaries]
+  );
+
+  const createSeason = useCallback(
+    async (input: CreateSeasonInput): Promise<{ success: boolean; season?: TournamentSeason; error?: string }> => {
+      try {
+        setSeasonError(null);
+        if (SupabaseService.isAvailable()) {
+          const res = await SupabaseService.createSeason(input);
+          if (!res.success || !res.season) {
+            setSeasonError(res.error || 'Failed to create season.');
+            return res;
+          }
+          await fetch('/api/seasons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+            body: JSON.stringify({ ...input, season: res.season }),
+          }).catch(() => {});
+          const allSeasons = await SupabaseService.fetchSeasons();
+          setSeasons(allSeasons);
+          void refreshSeasonSummaries(allSeasons);
+          if (input.activateNow) {
+            try {
+              sessionStorage.removeItem(SEASON_OVERRIDE_STORAGE_KEY);
+            } catch {}
+            applySeasonReset(res.season);
+          }
+          return res;
+        }
+
+        const apiRes = await fetch('/api/seasons', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify(input),
+        });
+        const data = await apiRes.json().catch(() => ({}));
+        if (!apiRes.ok || !data?.season) {
+          return { success: false, error: data?.error || 'Failed to create season.' };
+        }
+        if (Array.isArray(data.seasons)) {
+          setSeasons(data.seasons);
+          void refreshSeasonSummaries(data.seasons);
+        }
+        if (input.activateNow) {
+          try {
+            sessionStorage.removeItem(SEASON_OVERRIDE_STORAGE_KEY);
+          } catch {}
+          applySeasonReset(data.season);
+        }
+        return { success: true, season: data.season };
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Error creating season.' };
+      }
+    },
+    [applySeasonReset, refreshSeasonSummaries]
+  );
+
+  const updateSeason = useCallback(
+    async (
+      seasonIdOrSlug: string,
+      updates: UpdateSeasonInput
+    ): Promise<{ success: boolean; season?: TournamentSeason; error?: string }> => {
+      try {
+        setSeasonError(null);
+        const res = await SupabaseService.updateSeason(seasonIdOrSlug, updates);
+        if (!res.success || !res.season) {
+          if (res.error) setSeasonError(res.error);
+          return res;
+        }
+        const updated = res.season;
+        setSeasons((prev) =>
+          prev.map((s) =>
+            s.id === updated.id || s.seasonSlug === updated.seasonSlug ? updated : s
+          )
+        );
+        if (
+          activeSeasonRef.current.id === updated.id ||
+          activeSeasonRef.current.seasonSlug === updated.seasonSlug
+        ) {
+          setActiveSeason(updated);
+          setState((prev) => ({
+            ...prev,
+            settings: {
+              ...prev.settings,
+              season: updated.seasonTitle,
+              date: updated.date !== undefined ? updated.date : prev.settings.date,
+              venue: updated.venue || prev.settings.venue,
+              organizer: updated.organizer || prev.settings.organizer,
+              entryFee: updated.entryFee,
+              slotLimit: updated.maxSlots,
+              courts: updated.courtsCount,
+              courtNames: updated.courtNames || prev.settings.courtNames,
+            },
+          }));
+        }
+        return res;
+      } catch (err: any) {
+        return { success: false, error: err?.message || 'Error updating season.' };
+      }
+    },
+    []
+  );
+
+  const updateSeasonStatus = useCallback(
+    async (seasonIdOrSlug: string, status: TournamentSeasonStatus): Promise<boolean> => {
+      try {
+        let ok = false;
+        if (SupabaseService.isAvailable()) {
+          ok = await SupabaseService.updateSeasonStatus(seasonIdOrSlug, status);
+        }
+        const serverRes = await fetch(`/api/seasons/${encodeURIComponent(seasonIdOrSlug)}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ status }),
+        }).catch(() => null);
+        if (serverRes?.ok) ok = true;
+
+        if (ok) {
+          const isLocked = status === 'archived';
+          setSeasons((prev) =>
+            prev.map((s) =>
+              s.id === seasonIdOrSlug || s.seasonSlug === seasonIdOrSlug
+                ? { ...s, status, isLocked }
+                : s
+            )
+          );
+          if (
+            activeSeasonRef.current.id === seasonIdOrSlug ||
+            activeSeasonRef.current.seasonSlug === seasonIdOrSlug
+          ) {
+            setActiveSeason((prev) => ({ ...prev, status, isLocked }));
+          }
+        }
+        return ok;
+      } catch {
+        return false;
+      }
+    },
+    []
+  );
+
   const syncRegistrationEnabledState = useCallback(
-    (enabled: boolean, closedNotice?: string, markHydrated = true) => {
+    (enabled: boolean, closedNotice?: string, markHydrated = true, targetSlug?: string) => {
       const normalizedEnabled = Boolean(enabled);
+      const fallbackSlug = targetSlug || activeSeasonRef.current.seasonSlug || 'season-4';
       setFormConfig((prev) => {
         const next: RegistrationFormConfig = {
           ...prev,
@@ -487,8 +1061,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ...(closedNotice !== undefined ? { closedNotice } : {}),
         };
         try {
-          const slug = next.seasonSlug || 'season-4';
-          localStorage.setItem(`spl_forms_cache_${slug}`, JSON.stringify(next));
+          const slug = next.seasonSlug || fallbackSlug;
+          localStorage.setItem(getSeasonStorageKey('spl_forms_cache', slug), JSON.stringify(next));
         } catch {}
         return next;
       });
@@ -511,21 +1085,33 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     reconnectTriggerRef.current?.();
   }, []);
 
-  const broadcastRegistrationsSync = useCallback((action: 'upsert' | 'delete' | 'bulk_delete' | 'refresh', payload?: any) => {
-    if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-      try {
-        const ch = new BroadcastChannel('spl_registrations_channel');
-        ch.postMessage({ type: 'REGISTRATION_SYNC', action, payload, at: Date.now() });
-        ch.close();
-      } catch {}
-    }
-  }, []);
+  const broadcastRegistrationsSync = useCallback(
+    (action: 'upsert' | 'delete' | 'bulk_delete' | 'refresh', payload?: any) => {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        try {
+          const ch = new BroadcastChannel('spl_registrations_channel');
+          ch.postMessage({
+            type: 'REGISTRATION_SYNC',
+            seasonSlug: activeSeasonRef.current.seasonSlug,
+            seasonId: activeSeasonRef.current.id,
+            action,
+            payload,
+            at: Date.now(),
+          });
+          ch.close();
+        } catch {}
+      }
+    },
+    []
+  );
 
   const refreshRegistrations = useCallback(async () => {
+    const seasonSlug = activeSeasonRef.current.seasonSlug || 'season-4';
+    const seasonId = activeSeasonRef.current.id;
     try {
       setIsRegistrationsLoading(true);
       if (SupabaseService.isAvailable()) {
-        const regs = await SupabaseService.fetchRegistrations('all');
+        const regs = await SupabaseService.fetchRegistrations(seasonSlug, seasonId);
         if (regs !== null) {
           setState((prev) => ({ ...prev, registrations: regs }));
           setRegistrationsSyncError(null);
@@ -533,10 +1119,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           setRegistrationsSyncError('Unable to fetch latest payment & registration records from Supabase.');
         }
       } else {
-        const res = await fetch(`/api/registrations?season=all&t=${Date.now()}`, {
-          cache: 'no-store',
-          headers: { ...AuthService.getAuthHeader() },
-        });
+        const res = await fetch(
+          `/api/registrations?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`,
+          {
+            cache: 'no-store',
+            headers: { ...AuthService.getAuthHeader() },
+          }
+        );
         if (res.ok) {
           const data = await res.json();
           if (Array.isArray(data)) {
@@ -610,7 +1199,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   // Sync with persistent backend & Supabase on startup and setup automated live score synchronization
   // Master Real-Time Synchronization (Supabase Realtime + SSE Stream + Tab Reconciliation)
   useEffect(() => {
-    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    const seasonSlug = activeSeason.seasonSlug || 'season-4';
+    const seasonId = activeSeason.id;
     let isDisposed = false;
     let unsubMaster: (() => void) | undefined;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -639,7 +1229,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (SupabaseService.isAvailable()) {
             // Immediately kick off authoritative registration_form_config fetch in parallel with connection check
             // so registration open/closed status hydrates from Supabase without waiting on other tables
-            const earlyFormConfigPromise = SupabaseService.fetchFormConfig(seasonSlug).then((earlyCfg) => {
+            const earlyFormConfigPromise = SupabaseService.fetchFormConfig(seasonSlug, false).then((earlyCfg) => {
               if (!isDisposed && earlyCfg !== null) {
                 const isRegGuardActiveEarly = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
                 const earlyEnabled = isRegGuardActiveEarly
@@ -648,7 +1238,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 if (Array.isArray(earlyCfg.fields) && earlyCfg.fields.length > 0) {
                   setFormConfig({ ...earlyCfg, enabled: earlyEnabled });
                 }
-                syncRegistrationEnabledState(earlyEnabled, earlyCfg.closedNotice, true);
+                syncRegistrationEnabledState(earlyEnabled, earlyCfg.closedNotice, true, seasonSlug);
               }
               return earlyCfg;
             });
@@ -658,12 +1248,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setIsCentralizedDbConnected(testRes.connected);
             setIsSupabaseConnected(testRes.connected);
 
-            // Fetch Players, Teams, Matches, Registrations, FormConfig, Tokens in parallel where safe
+            // Fetch Players, Teams, Matches, Registrations, FormConfig, Tokens strictly scoped to active season
             const [players, teams, matchData, regs, cfg, tokData] = await Promise.all([
-              SupabaseService.fetchPlayers(),
-              SupabaseService.fetchTeams(),
-              SupabaseService.fetchMatches(seasonSlug),
-              SupabaseService.fetchRegistrations('all'),
+              SupabaseService.fetchPlayers(seasonSlug, seasonId),
+              SupabaseService.fetchTeams(seasonSlug, seasonId),
+              SupabaseService.fetchMatches(seasonSlug, seasonId),
+              SupabaseService.fetchRegistrations(seasonSlug, seasonId),
               earlyFormConfigPromise,
               SupabaseService.fetchTokens(seasonSlug),
             ]);
@@ -678,26 +1268,27 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             setIsRegistrationsLoading(false);
 
             const extractedFromSupabase = SupabaseService.extractTournamentSettingsFromConfig(cfg);
+            const extractedFormation = SupabaseService.extractTeamFormationFromConfig(cfg);
             const isHeroGuardActive = Date.now() - heroPublishGuardRef.current < 2500;
             if (!isHeroGuardActive && (cfg?.appearance as any)?.heroPublished) {
-              applyPublishedHeroConfig((cfg?.appearance as any).heroPublished);
+              applyPublishedHeroConfig((cfg?.appearance as any).heroPublished, seasonSlug);
             } else if (!isHeroGuardActive && !cfg) {
-              fetch(`/api/hero/published?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+              fetch(`/api/hero/published?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, { cache: 'no-store' })
                 .then((r) => (r.ok ? r.json() : null))
                 .then((d) => {
-                  if (d?.heroConfig && !isDisposed) applyPublishedHeroConfig(d.heroConfig);
+                  if (d?.heroConfig && !isDisposed) applyPublishedHeroConfig(d.heroConfig, seasonSlug);
                 })
                 .catch(() => {});
             }
 
             const isYoutubeGuardActive = Date.now() - youtubeGuardRef.current < 2500;
             if (!isYoutubeGuardActive && (cfg?.appearance as any)?.youtubeLive) {
-              applyYoutubeLiveConfig((cfg?.appearance as any).youtubeLive);
+              applyYoutubeLiveConfig((cfg?.appearance as any).youtubeLive, seasonSlug);
             } else if (!isYoutubeGuardActive && !cfg) {
-              fetch(`/api/livestream?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+              fetch(`/api/livestream?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, { cache: 'no-store' })
                 .then((r) => (r.ok ? r.json() : null))
                 .then((d) => {
-                  if (d?.config && !isDisposed) applyYoutubeLiveConfig(d.config);
+                  if (d?.config && !isDisposed) applyYoutubeLiveConfig(d.config, seasonSlug);
                 })
                 .catch(() => {});
             }
@@ -715,10 +1306,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               setFormConfig(nextCfg);
               setIsRegistrationStatusHydrated(true);
               try {
-                localStorage.setItem(`spl_forms_cache_${seasonSlug}`, JSON.stringify(nextCfg));
+                localStorage.setItem(
+                  getSeasonStorageKey('spl_forms_cache', seasonSlug),
+                  JSON.stringify(nextCfg)
+                );
               } catch {}
             } else if (cfg !== null && resolvedEnabled !== undefined) {
-              syncRegistrationEnabledState(resolvedEnabled, cfg.closedNotice, true);
+              syncRegistrationEnabledState(resolvedEnabled, cfg.closedNotice, true, seasonSlug);
             }
             if (tokData !== null) {
               setTokens(tokData.tokens);
@@ -875,11 +1469,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                     }
                   : prev.settings,
                 payment: dbPayment ? { ...prev.payment, ...dbPayment } : prev.payment,
+                predefinedTeams: extractedFormation.predefinedTeams ?? prev.predefinedTeams,
+                teamFormationMode: extractedFormation.teamFormationMode ?? prev.teamFormationMode,
               };
             });
 
             // Reconcile predefinedTeams & teamFormationMode from backend state (and hydrate legacy fields if not yet in Supabase)
-            fetch(`/api/tournament/state?t=${Date.now()}`, { cache: 'no-store' })
+            fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, { cache: 'no-store' })
               .then(async (res) => {
                 if (!res.ok) return null;
                 const text = await res.text().catch(() => '');
@@ -888,6 +1484,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               .then((serverState) => {
                 if (serverState && !isDisposed) {
                   const hasEmbeddedSettings = Boolean((cfg?.appearance as any)?.tournamentSettings);
+                  const hasEmbeddedFormation = Boolean((cfg?.appearance as any)?.teamFormation);
                   const dbSettings = extractedFromSupabase.settings;
                   const dbPayment = extractedFromSupabase.payment;
                   setState((prev) => ({
@@ -912,15 +1509,23 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                         : serverState.payment
                         ? { ...prev.payment, ...serverState.payment }
                         : prev.payment,
-                    predefinedTeams: Array.isArray(serverState.predefinedTeams) ? serverState.predefinedTeams : prev.predefinedTeams,
-                    teamFormationMode: serverState.teamFormationMode || prev.teamFormationMode,
+                    predefinedTeams:
+                      hasEmbeddedFormation && Array.isArray(extractedFormation.predefinedTeams)
+                        ? extractedFormation.predefinedTeams
+                        : Array.isArray(serverState.predefinedTeams)
+                        ? serverState.predefinedTeams
+                        : prev.predefinedTeams,
+                    teamFormationMode:
+                      (hasEmbeddedFormation && extractedFormation.teamFormationMode) ||
+                      serverState.teamFormationMode ||
+                      prev.teamFormationMode,
                   }));
                 }
               })
               .catch(() => {});
 
             if (!cfg) {
-              fetch(`/api/forms/${seasonSlug}?t=${Date.now()}`, { cache: 'no-store' })
+              fetch(`/api/forms/${encodeURIComponent(seasonSlug)}?t=${Date.now()}`, { cache: 'no-store' })
                 .then(async (res) => {
                   if (!res.ok) return null;
                   const text = await res.text().catch(() => '');
@@ -937,6 +1542,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                       ...prev,
                       registrationSettings: {
                         ...prev.registrationSettings,
+                        seasonSlug,
                         enabled: effectiveEnabled,
                         ...(serverForm.closedNotice !== undefined ? { closedNotice: serverForm.closedNotice } : {}),
                       },
@@ -950,7 +1556,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }
           } else {
             // Fallback to local server state only if Supabase is not configured
-            fetch(`/api/tournament/state?t=${Date.now()}`, { cache: 'no-store' })
+            fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, { cache: 'no-store' })
               .then(async (res) => {
                 if (!res.ok) return null;
                 const text = await res.text().catch(() => '');
@@ -976,7 +1582,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               })
               .catch(() => {});
 
-            fetch(`/api/registrations?season=all&t=${Date.now()}`, {
+            fetch(`/api/registrations?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, {
               cache: 'no-store',
               headers: { ...AuthService.getAuthHeader() },
             })
@@ -992,25 +1598,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 if (!isDisposed) setIsRegistrationsLoading(false);
               });
 
-            fetch(`/api/hero/published?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+            fetch(`/api/hero/published?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, { cache: 'no-store' })
               .then((res) => (res.ok ? res.json() : null))
               .then((data) => {
                 if (data?.heroConfig && !isDisposed && Date.now() - heroPublishGuardRef.current >= 2500) {
-                  applyPublishedHeroConfig(data.heroConfig);
+                  applyPublishedHeroConfig(data.heroConfig, seasonSlug);
                 }
               })
               .catch(() => {});
 
-            fetch(`/api/livestream?season=${seasonSlug}&t=${Date.now()}`, { cache: 'no-store' })
+            fetch(`/api/livestream?season=${encodeURIComponent(seasonSlug)}&t=${Date.now()}`, { cache: 'no-store' })
               .then((res) => (res.ok ? res.json() : null))
               .then((data) => {
                 if (data?.config && !isDisposed && Date.now() - youtubeGuardRef.current >= 2500) {
-                  applyYoutubeLiveConfig(data.config);
+                  applyYoutubeLiveConfig(data.config, seasonSlug);
                 }
               })
               .catch(() => {});
 
-            fetch(`/api/forms/${seasonSlug}?t=${Date.now()}`, { cache: 'no-store' })
+            fetch(`/api/forms/${encodeURIComponent(seasonSlug)}?t=${Date.now()}`, { cache: 'no-store' })
               .then(async (res) => {
                 if (!res.ok) return null;
                 const text = await res.text().catch(() => '');
@@ -1027,6 +1633,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                     ...prev,
                     registrationSettings: {
                       ...prev.registrationSettings,
+                      seasonSlug,
                       enabled: effectiveEnabled,
                       ...(serverForm.closedNotice !== undefined ? { closedNotice: serverForm.closedNotice } : {}),
                     },
@@ -1128,7 +1735,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
 
       unsubMaster = SupabaseService.subscribeTournamentMaster({
+        seasonSlug,
+        seasonId,
+        onSeasonChange: () => {
+          if (!isDisposed) {
+            void refreshSeason();
+          }
+        },
         onMatchChange: (payload) => {
+          const eventRow = payload.new || payload.old;
+          if (eventRow?.tournament_season && eventRow.tournament_season !== seasonSlug) {
+            return;
+          }
+          if (eventRow?.season_id && seasonId && eventRow.season_id !== seasonId) {
+            return;
+          }
+
           if (payload.eventType === 'INSERT' && payload.new) {
             const m = payload.new;
             const nextStatus = normalizeStatus(m.status);
@@ -1166,6 +1788,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 winner: m.winner_id || undefined,
                 sets: m.sets_json || undefined,
                 mvpPlayerId: m.mvp_player_id || undefined,
+                seasonId: m.season_id || seasonId,
+                seasonSlug: m.tournament_season || seasonSlug,
               };
               setState((prev) => {
                 const exists = prev.knockout.matches.some((k) => k.id === koMatch.id);
@@ -1202,6 +1826,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 startTime: parsedTime.startTime,
                 sets: m.sets_json || undefined,
                 mvpPlayerId: m.mvp_player_id || undefined,
+                seasonId: m.season_id || seasonId,
+                seasonSlug: m.tournament_season || seasonSlug,
               };
               setState((prev) => {
                 const exists = prev.matches.some((existing) => existing.id === groupMatch.id);
@@ -1399,6 +2025,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onPlayerChange: (payload) => {
+          const eventRow = payload.new || payload.old;
+          if (eventRow?.season_id && seasonId && eventRow.season_id !== seasonId) {
+            return;
+          }
           if (payload.eventType === 'INSERT' && payload.new) {
             const p = payload.new;
             const mappedPlayer: Player = {
@@ -1414,6 +2044,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               category: p.category || undefined,
               style: p.style || undefined,
               photoUrl: p.photo_url || undefined,
+              seasonId: p.season_id || seasonId,
+              seasonSlug,
             };
             setState((prev) => {
               if (prev.players.some((existing) => existing.id === mappedPlayer.id)) return prev;
@@ -1456,6 +2088,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onTeamChange: (payload) => {
+          const eventRow = payload?.new || payload?.old;
+          if (eventRow?.season_id && seasonId && eventRow.season_id !== seasonId) {
+            return;
+          }
           // Only ignore immediate self-echoes from local TEAM mutations (never block on score updates!)
           if (Date.now() - lastLocalTeamMutationTime.current < 1800) return;
 
@@ -1496,7 +2132,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             return;
           }
 
-          SupabaseService.fetchTeams().then((teams) => {
+          SupabaseService.fetchTeams(seasonSlug, seasonId).then((teams) => {
             if (isDisposed || Date.now() - lastLocalTeamMutationTime.current < 1800) return;
             if (teams && teams.length >= 0) {
               setState((prev) => {
@@ -1516,9 +2152,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           });
         },
 
-        onTeamPlayerChange: () => {
+        onTeamPlayerChange: (payload) => {
+          const eventRow = payload?.new || payload?.old;
+          if (eventRow?.season_id && seasonId && eventRow.season_id !== seasonId) {
+            return;
+          }
           if (Date.now() - lastLocalTeamMutationTime.current < 1800) return;
-          SupabaseService.fetchTeams().then((teams) => {
+          SupabaseService.fetchTeams(seasonSlug, seasonId).then((teams) => {
             if (isDisposed || Date.now() - lastLocalTeamMutationTime.current < 1800) return;
             if (teams && teams.length >= 0) {
               setState((prev) => {
@@ -1539,6 +2179,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onRegistrationChange: (payload) => {
+          const eventRow = payload.new || payload.old;
+          if (eventRow?.season_slug && eventRow.season_slug !== seasonSlug) {
+            return;
+          }
+          if (eventRow?.season_id && seasonId && eventRow.season_id !== seasonId) {
+            return;
+          }
           if (payload.eventType === 'INSERT' && payload.new) {
             const mapped = SupabaseService.mapDbRegistration(payload.new);
             setState((prev) => {
@@ -1566,20 +2213,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         },
 
         onFormConfigChange: (payload) => {
-          const row = payload?.new;
+          const row = payload?.new || payload?.old;
           if (!row) return;
+          if (row.season_slug && row.season_slug !== seasonSlug) return;
+          if (row.season_id && seasonId && row.season_id !== seasonId) return;
           const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
           if (typeof row.enabled === 'boolean' && !isRegGuardActive) {
             const incomingEnabled = row.enabled !== false;
             const incomingNotice = row.closed_notice !== undefined ? row.closed_notice || undefined : undefined;
-            syncRegistrationEnabledState(incomingEnabled, incomingNotice, true);
+            syncRegistrationEnabledState(incomingEnabled, incomingNotice, true, seasonSlug);
           }
 
           if (
             Date.now() - heroPublishGuardRef.current >= 2500 &&
             (row.appearance_json as any)?.heroPublished
           ) {
-            applyPublishedHeroConfig((row.appearance_json as any).heroPublished);
+            applyPublishedHeroConfig((row.appearance_json as any).heroPublished, seasonSlug);
           }
 
           if (
@@ -1587,7 +2236,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             (row.appearance_json as any)?.youtubeLive
           ) {
             const incomingYt = normalizeYouTubeLiveConfig((row.appearance_json as any).youtubeLive);
-            applyYoutubeLiveConfig(incomingYt);
+            applyYoutubeLiveConfig(incomingYt, seasonSlug);
             if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
               try {
                 const ych = new BroadcastChannel('spl_livestream_channel');
@@ -1597,13 +2246,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }
           }
 
-          SupabaseService.fetchFormConfig(seasonSlug).then((cfg) => {
+          SupabaseService.fetchFormConfig(seasonSlug, false).then((cfg) => {
             if (!cfg || isDisposed) return;
             if (Date.now() - heroPublishGuardRef.current >= 2500 && (cfg.appearance as any)?.heroPublished) {
-              applyPublishedHeroConfig((cfg.appearance as any).heroPublished);
+              applyPublishedHeroConfig((cfg.appearance as any).heroPublished, seasonSlug);
             }
             if (Date.now() - youtubeGuardRef.current >= 2500 && (cfg.appearance as any)?.youtubeLive) {
-              applyYoutubeLiveConfig((cfg.appearance as any).youtubeLive);
+              applyYoutubeLiveConfig((cfg.appearance as any).youtubeLive, seasonSlug);
             }
             const guardStillActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const resolvedEnabled = guardStillActive ? regToggleGuardRef.current.enabled : cfg.enabled !== false;
@@ -1614,7 +2263,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             if (Array.isArray(normalizedCfg.fields) && normalizedCfg.fields.length > 0) {
               setFormConfig(normalizedCfg);
               try {
-                localStorage.setItem(`spl_forms_cache_${seasonSlug}`, JSON.stringify(normalizedCfg));
+                localStorage.setItem(
+                  getSeasonStorageKey('spl_forms_cache', seasonSlug),
+                  JSON.stringify(normalizedCfg)
+                );
               } catch {}
             }
             setIsRegistrationStatusHydrated(true);
@@ -1629,6 +2281,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }
 
             const extracted = SupabaseService.extractTournamentSettingsFromConfig(normalizedCfg);
+            const extractedFormation = SupabaseService.extractTeamFormationFromConfig(normalizedCfg);
             const playoffMeta = SupabaseService.extractPlayoffStateFromConfig(normalizedCfg);
             setState((prev) => {
               const metaById = playoffMeta?.matchMetaById || {};
@@ -1653,6 +2306,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 ...prev,
                 registrationSettings: {
                   ...prev.registrationSettings,
+                  seasonSlug,
                   enabled: resolvedEnabled,
                   ...(normalizedCfg.closedNotice !== undefined ? { closedNotice: normalizedCfg.closedNotice } : {}),
                 },
@@ -1701,12 +2355,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 payment: extracted.payment
                   ? { ...prev.payment, ...extracted.payment }
                   : prev.payment,
+                predefinedTeams: extractedFormation.predefinedTeams ?? prev.predefinedTeams,
+                teamFormationMode: extractedFormation.teamFormationMode ?? prev.teamFormationMode,
               };
             });
           });
         },
 
-        onPlayoffChange: () => {
+        onPlayoffChange: (payload) => {
+          const row = payload?.new || payload?.old;
+          if (row?.season_slug && row.season_slug !== seasonSlug) return;
+          if (row?.season_id && seasonId && row.season_id !== seasonId) return;
           if (!isDisposed) {
             void reconcileAuthoritativeData();
           }
@@ -1775,11 +2434,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     };
 
     // =========================================================================
-    // 2. REAL-TIME SERVER-SENT EVENTS (SSE) STREAM
+    // 2. REAL-TIME SERVER-SENT EVENTS (SSE) STREAM (Season-Scoped)
     // =========================================================================
     let eventSource: EventSource | null = null;
     try {
-      eventSource = new EventSource('/api/tournament/stream');
+      eventSource = new EventSource(`/api/tournament/stream?season=${encodeURIComponent(seasonSlug)}`);
 
       eventSource.onopen = () => {
         if (!SupabaseService.isAvailable() && !isDisposed) {
@@ -1799,6 +2458,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('match_score', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && data.match) {
             if (
               shouldIgnoreStaleRemoteMatchUpdate(
@@ -1844,6 +2504,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('knockout_score', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && data.match) {
             if (
               shouldIgnoreStaleRemoteMatchUpdate(
@@ -1921,6 +2582,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('tournament_state', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data) {
             if (data.lastUpdated) lastServerScoreTime.current = data.lastUpdated;
             setState((prev) => ({
@@ -1930,6 +2592,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               knockout: data.knockout || prev.knockout,
               settings: data.settings ? { ...prev.settings, ...data.settings } : prev.settings,
               payment: data.payment ? { ...prev.payment, ...data.payment } : prev.payment,
+              predefinedTeams: Array.isArray(data.predefinedTeams) ? data.predefinedTeams : prev.predefinedTeams,
+              teamFormationMode: data.teamFormationMode || prev.teamFormationMode,
             }));
           }
         } catch {}
@@ -1938,6 +2602,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('settings_updated', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data) {
             if (data.lastUpdated) lastServerScoreTime.current = data.lastUpdated;
             setState((prev) => ({
@@ -1952,6 +2617,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('teams_update', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && Array.isArray(data.teams)) {
             setState((prev) => ({ ...prev, teams: data.teams }));
           }
@@ -1961,6 +2627,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('team_updated', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && data.team && data.team.id) {
             if (data.lastUpdated) lastServerScoreTime.current = data.lastUpdated;
             setState((prev) => {
@@ -1977,8 +2644,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('hero_published', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data?.heroConfig && Date.now() - heroPublishGuardRef.current >= 2500) {
-            applyPublishedHeroConfig(data.heroConfig);
+            applyPublishedHeroConfig(data.heroConfig, seasonSlug);
           }
         } catch {}
       });
@@ -1986,8 +2654,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('livestream_updated', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data?.config && Date.now() - youtubeGuardRef.current >= 2500) {
-            applyYoutubeLiveConfig(data.config);
+            applyYoutubeLiveConfig(data.config, seasonSlug);
           }
         } catch {}
       });
@@ -1995,12 +2664,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('form_published', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          const incomingSlug = data?.seasonSlug || data?.config?.seasonSlug;
+          if (incomingSlug && incomingSlug !== seasonSlug) return;
           if (data && data.config) {
             if ((data.config.appearance as any)?.heroPublished && Date.now() - heroPublishGuardRef.current >= 2500) {
-              applyPublishedHeroConfig((data.config.appearance as any).heroPublished);
+              applyPublishedHeroConfig((data.config.appearance as any).heroPublished, seasonSlug);
             }
             if ((data.config.appearance as any)?.youtubeLive && Date.now() - youtubeGuardRef.current >= 2500) {
-              applyYoutubeLiveConfig((data.config.appearance as any).youtubeLive);
+              applyYoutubeLiveConfig((data.config.appearance as any).youtubeLive, seasonSlug);
             }
             const isRegGuardActive = Date.now() - regToggleGuardRef.current.updatedAt < 2500;
             const effectiveEnabled = isRegGuardActive
@@ -2012,6 +2683,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               ...prev,
               registrationSettings: {
                 ...prev.registrationSettings,
+                seasonSlug,
                 enabled: effectiveEnabled,
                 ...(data.config.closedNotice !== undefined ? { closedNotice: data.config.closedNotice } : {}),
               },
@@ -2023,6 +2695,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('registration_created', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          const rSeason = data?.seasonSlug || data?.registration?.season;
+          if (rSeason && rSeason !== seasonSlug) return;
           if (data && data.registration) {
             setState((prev) => {
               if (prev.registrations.some((r) => r.id === data.registration.id)) return prev;
@@ -2035,6 +2709,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('registration_updated', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          const rSeason = data?.seasonSlug || data?.registration?.season;
+          if (rSeason && rSeason !== seasonSlug) return;
           if (data && data.registration) {
             setState((prev) => ({
               ...prev,
@@ -2049,6 +2725,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('registration_deleted', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && data.id) {
             setState((prev) => ({
               ...prev,
@@ -2061,6 +2738,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('registrations_bulk_deleted', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && Array.isArray(data.ids)) {
             const delSet = new Set(data.ids);
             setState((prev) => ({
@@ -2074,6 +2752,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       eventSource.addEventListener('registrations_bulk_approved', (event: MessageEvent) => {
         try {
           const data = JSON.parse(event.data);
+          if (data?.seasonSlug && data.seasonSlug !== seasonSlug) return;
           if (data && Array.isArray(data.ids)) {
             const appSet = new Set(data.ids);
             setState((prev) => ({
@@ -2084,6 +2763,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }));
           }
         } catch {}
+      });
+
+      eventSource.addEventListener('season_changed', () => {
+        if (!isDisposed) {
+          void refreshSeason();
+        }
+      });
+
+      eventSource.addEventListener('season_updated', () => {
+        if (!isDisposed) {
+          void refreshSeason();
+        }
+      });
+
+      eventSource.addEventListener('season_created', () => {
+        if (!isDisposed) {
+          void refreshSeason();
+        }
       });
     } catch {}
 
@@ -2105,6 +2802,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       regChannel.onmessage = (event) => {
         if (event.data?.type !== 'REGISTRATION_SYNC') return;
+        if (event.data?.seasonSlug && event.data.seasonSlug !== seasonSlug) return;
         const { action, payload } = event.data;
         if (action === 'upsert' && payload?.id) {
           setState((prev) => {
@@ -2133,18 +2831,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
 
       heroChannel.onmessage = (event) => {
+        if (event.data?.seasonSlug && event.data.seasonSlug !== seasonSlug) return;
         if (event.data?.type === 'HERO_PUBLISHED' && event.data.heroConfig) {
-          applyPublishedHeroConfig(event.data.heroConfig);
+          applyPublishedHeroConfig(event.data.heroConfig, seasonSlug);
         }
       };
 
       livestreamChannel.onmessage = (event) => {
+        if (event.data?.seasonSlug && event.data.seasonSlug !== seasonSlug) return;
         if (event.data?.type === 'LIVESTREAM_UPDATED' && event.data.config) {
-          applyYoutubeLiveConfig(event.data.config);
+          applyYoutubeLiveConfig(event.data.config, seasonSlug);
         }
       };
 
       liveChannel.onmessage = (event) => {
+        if (event.data?.seasonSlug && event.data.seasonSlug !== seasonSlug) return;
         if (event.data?.type === 'SCORE_UPDATE') {
           const { matches, teams, knockout, lastUpdated } = event.data;
           if (lastUpdated) lastServerScoreTime.current = lastUpdated;
@@ -2182,10 +2883,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
 
       formChannel.onmessage = (event) => {
+        const incomingSlug = event.data?.seasonSlug || event.data?.config?.seasonSlug;
+        if (incomingSlug && incomingSlug !== seasonSlug) return;
         if (event.data?.type === 'FORM_PUBLISHED' && event.data.config) {
           const nextCfg = event.data.config as RegistrationFormConfig;
           if ((nextCfg.appearance as any)?.heroPublished) {
-            applyPublishedHeroConfig((nextCfg.appearance as any).heroPublished);
+            applyPublishedHeroConfig((nextCfg.appearance as any).heroPublished, seasonSlug);
           }
           setFormConfig(nextCfg);
           setIsRegistrationStatusHydrated(true);
@@ -2194,6 +2897,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
               ...prev,
               registrationSettings: {
                 ...prev.registrationSettings,
+                seasonSlug,
                 enabled: nextCfg.enabled !== false,
                 ...(nextCfg.closedNotice !== undefined ? { closedNotice: nextCfg.closedNotice } : {}),
               },
@@ -2203,8 +2907,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
     }
 
+    const seasonStateKey = getSeasonStorageKey(STORAGE_KEY, seasonSlug);
+    const seasonFormKey = getSeasonStorageKey('spl_forms_cache', seasonSlug);
+
     const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_KEY && e.newValue) {
+      if (e.key === seasonStateKey && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (parsed && Array.isArray(parsed.matches)) {
@@ -2217,7 +2924,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }));
           }
         } catch {}
-      } else if (e.key && e.key.startsWith('spl_forms_cache_') && e.newValue) {
+      } else if (e.key === seasonFormKey && e.newValue) {
         try {
           const parsedForm = JSON.parse(e.newValue);
           if (parsedForm && Array.isArray(parsedForm.fields)) {
@@ -2228,6 +2935,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
                 ...prev,
                 registrationSettings: {
                   ...prev.registrationSettings,
+                  seasonSlug,
                   enabled: parsedForm.enabled !== false,
                   ...(parsedForm.closedNotice !== undefined ? { closedNotice: parsedForm.closedNotice } : {}),
                 },
@@ -2310,7 +3018,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       regChannel?.close();
       unsubMaster?.();
     };
-  }, []);
+  }, [
+    activeSeason.seasonSlug,
+    activeSeason.id,
+    applyPublishedHeroConfig,
+    applyYoutubeLiveConfig,
+    refreshRegistrations,
+    refreshSeason,
+    syncRegistrationEnabledState,
+  ]);
 
   // Derived Standings (pure computation — no network side-effects inside useMemo)
   const standings = useMemo(() => {
@@ -2365,7 +3081,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   useEffect(() => {
     if (!SupabaseService.isAvailable() || stateRef.current.teams.length === 0) return;
     const timer = setTimeout(() => {
-      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const seasonSlug = activeSeasonRef.current.seasonSlug || stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const seasonId = activeSeasonRef.current.id;
       const playoffSettings = normalizePlayoffSettings(stateRef.current.settings.playoffSettings);
       const currentStandings = calculateStandings(
         stateRef.current.teams,
@@ -2377,10 +3094,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           manualTieBreakOrder: stateRef.current.knockout.manualTieBreakOrder,
         }
       );
-      SupabaseService.syncStandings(seasonSlug, currentStandings).catch(() => {});
+      SupabaseService.syncStandings(seasonSlug, currentStandings, seasonId).catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
-  }, [completedStandingsSignature, state.registrationSettings.seasonSlug]);
+  }, [completedStandingsSignature, activeSeason.seasonSlug, activeSeason.id]);
 
 
   // Confetti trigger (lazy-loaded and respects prefers-reduced-motion)
@@ -2421,13 +3138,28 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       .catch(() => {});
   }, []);
 
+  const getActiveSeasonCtx = useCallback(
+    () => ({
+      seasonSlug:
+        activeSeasonRef.current.seasonSlug ||
+        stateRef.current.registrationSettings.seasonSlug ||
+        'season-4',
+      seasonId: activeSeasonRef.current.id,
+      isLocked: Boolean(activeSeasonRef.current.isLocked || activeSeasonRef.current.status === 'archived'),
+    }),
+    []
+  );
+
   // Settings (Atomic Supabase + Server Persistence & Multi-Device Broadcast)
   const saveAllSettings = async (
     settingsUpdate: Partial<TournamentSettings>,
     paymentUpdate?: Partial<PaymentSettings>
   ): Promise<{ success: boolean; error?: string }> => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'This season is archived and locked for edits.' };
+    }
     const current = stateRef.current;
-    const seasonSlug = current.registrationSettings.seasonSlug || 'season-4';
 
     const nextSettings: TournamentSettings = {
       ...current.settings,
@@ -2456,19 +3188,27 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         };
       }
       savedConfigFromDb = sbRes.config;
-      SupabaseService.logAudit('settings_updated', 'settings', seasonSlug, {
-        settings: settingsUpdate,
-        hasPaymentUpdate: Boolean(paymentUpdate),
-      }).catch(() => {});
+      SupabaseService.logAudit(
+        'settings_updated',
+        'settings',
+        seasonSlug,
+        {
+          settings: settingsUpdate,
+          hasPaymentUpdate: Boolean(paymentUpdate),
+        },
+        undefined,
+        seasonId
+      ).catch(() => {});
     }
 
     // 2. Sync to centralized Express backend & SSE broadcast
     let serverError: string | undefined;
     try {
-      const res = await fetch('/api/tournament/state', {
+      const res = await fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({
+          seasonSlug,
           settings: nextSettings,
           ...(paymentUpdate ? { payment: nextPayment } : {}),
         }),
@@ -2528,6 +3268,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const ch = new BroadcastChannel('spl_live_scores_channel');
         ch.postMessage({
           type: 'SETTINGS_UPDATED',
+          seasonSlug,
           settings: nextSettings,
           payment: nextPayment,
           lastUpdated: now,
@@ -2548,6 +3289,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateRegistrationSettings = (settingsUpdate: Partial<RegistrationSettings>) => {
+    const { seasonSlug, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     if (typeof settingsUpdate.enabled === 'boolean') {
       regToggleGuardRef.current = {
         seq: regToggleGuardRef.current.seq + 1,
@@ -2564,6 +3307,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const nextSettings = {
         ...prev.registrationSettings,
         ...settingsUpdate,
+        seasonSlug,
         fields: {
           ...prev.registrationSettings.fields,
           ...(settingsUpdate.fields || {}),
@@ -2571,9 +3315,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
 
       // Asynchronously sync with backend
-      fetch('/api/registration-settings', {
+      fetch(`/api/registration-settings?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify(nextSettings),
       }).catch(() => {});
 
@@ -2586,6 +3330,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Players
   const addPlayer = (name: string, details?: Partial<Player>): Player => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
     const newPlayer: Player = {
       id: crypto.randomUUID(),
       name: name.trim(),
@@ -2599,19 +3344,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       registrationStatus: details?.registrationStatus || 'direct',
       registrationId: details?.registrationId,
       photoUrl: details?.photoUrl,
+      seasonId,
+      seasonSlug,
     };
+    if (isLocked) return newPlayer;
 
     if (SupabaseService.isAvailable()) {
-      SupabaseService.upsertPlayer(newPlayer).catch(() => {});
-      SupabaseService.logAudit('player_created', 'player', newPlayer.id, { name: newPlayer.name }).catch(() => {});
+      SupabaseService.upsertPlayer(newPlayer, seasonSlug, seasonId).catch(() => {});
+      SupabaseService.logAudit('player_created', 'player', newPlayer.id, { name: newPlayer.name, seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
       const updatedPlayers = [...prev.players, newPlayer];
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ players: updatedPlayers }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, players: updatedPlayers }),
       }).catch(() => {});
       return {
         ...prev,
@@ -2622,6 +3370,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const bulkAddPlayers = (names: string[]) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     const newOnes: Player[] = names
       .map((n) => n.trim())
       .filter(Boolean)
@@ -2631,20 +3381,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         gender: 'M',
         skillLevel: 'Advanced',
         registrationStatus: 'direct' as const,
+        seasonId,
+        seasonSlug,
       }));
     if (newOnes.length === 0) return;
 
     if (SupabaseService.isAvailable()) {
-      newOnes.forEach((p) => SupabaseService.upsertPlayer(p).catch(() => {}));
-      SupabaseService.logAudit('players_bulk_created', 'player', undefined, { count: newOnes.length }).catch(() => {});
+      SupabaseService.upsertPlayersBulk(newOnes, seasonSlug, seasonId).catch(() => {});
+      SupabaseService.logAudit('players_bulk_created', 'player', undefined, { count: newOnes.length, seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
       const updatedPlayers = [...prev.players, ...newOnes];
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ players: updatedPlayers }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, players: updatedPlayers }),
       }).catch(() => {});
       return {
         ...prev,
@@ -2654,18 +3406,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updatePlayer = (id: string, updates: Partial<Player>) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
       const target = prev.players.find((p) => p.id === id);
       if (target && SupabaseService.isAvailable()) {
-        SupabaseService.upsertPlayer({ ...target, ...updates }).catch(() => {});
-        SupabaseService.logAudit('player_updated', 'player', id, updates).catch(() => {});
+        SupabaseService.upsertPlayer({ ...target, ...updates }, seasonSlug, seasonId).catch(() => {});
+        SupabaseService.logAudit('player_updated', 'player', id, updates, undefined, seasonId).catch(() => {});
       }
 
       const updatedPlayers = prev.players.map((p) => (p.id === id ? { ...p, ...updates } : p));
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ players: updatedPlayers }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, players: updatedPlayers }),
       }).catch(() => {});
 
       return {
@@ -2679,9 +3433,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deletePlayer = (id: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deletePlayer(id).catch(() => {});
-      SupabaseService.logAudit('player_deleted', 'player', id).catch(() => {});
+      SupabaseService.deletePlayer(id, seasonSlug, seasonId).catch(() => {});
+      SupabaseService.logAudit('player_deleted', 'player', id, { seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
@@ -2692,10 +3448,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         captainId: t.captainId === id ? undefined : t.captainId,
       }));
 
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ players: updatedPlayers, teams: updatedTeams }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, players: updatedPlayers, teams: updatedTeams }),
       }).catch(() => {});
 
       return {
@@ -2709,12 +3465,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deletePlayersBulk = (playerIds: string[]) => {
-    if (!playerIds || playerIds.length === 0) return;
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked || !playerIds || playerIds.length === 0) return;
     const idSet = new Set(playerIds);
 
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deletePlayersBulk(playerIds).catch(() => {});
-      SupabaseService.logAudit('players_bulk_deleted', 'player', undefined, { count: playerIds.length }).catch(() => {});
+      SupabaseService.deletePlayersBulk(playerIds, seasonSlug, seasonId).catch(() => {});
+      SupabaseService.logAudit('players_bulk_deleted', 'player', undefined, { count: playerIds.length, seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
@@ -2725,10 +3482,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         captainId: idSet.has(t.captainId || '') ? undefined : t.captainId,
       }));
 
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ players: updatedPlayers, teams: updatedTeams }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, players: updatedPlayers, teams: updatedTeams }),
       }).catch(() => {});
 
       return {
@@ -2742,15 +3499,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearPlayers = () => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     if (SupabaseService.isAvailable()) {
-      SupabaseService.clearPlayers().catch(() => {});
-      SupabaseService.logAudit('players_cleared', 'player', undefined).catch(() => {});
+      SupabaseService.clearPlayers(seasonSlug, seasonId).catch(() => {});
+      SupabaseService.logAudit('players_cleared', 'player', undefined, { seasonSlug }, undefined, seasonId).catch(() => {});
     }
     setState((prev) => {
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ players: [], teams: [], matches: [] }),
+        body: JSON.stringify({ seasonSlug, players: [], teams: [], matches: [] }),
       }).catch(() => {});
       return {
         ...prev,
@@ -2771,6 +3530,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     captainId?: string,
     badge = '🏸'
   ): Team => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     const newTeam: Team = {
@@ -2781,10 +3541,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       locked: false,
       avatarColor: 'from-amber-500 to-orange-600',
       badge: badge || '🏸',
+      seasonId,
+      seasonSlug,
     };
+    if (isLocked) return newTeam;
 
     if (SupabaseService.isAvailable()) {
-      SupabaseService.saveTeam(newTeam)
+      SupabaseService.saveTeam(newTeam, seasonSlug, seasonId)
         .then(() => {
           lastLocalTeamMutationTime.current = Date.now();
           lastServerScoreTime.current = Date.now();
@@ -2793,15 +3556,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       SupabaseService.logAudit('team_created', 'team', newTeam.id, {
         name: newTeam.name,
         badge: newTeam.badge,
-      }).catch(() => {});
+        seasonSlug,
+      }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
       const nextTeams = [...prev.teams, newTeam];
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
+        body: JSON.stringify({ seasonSlug, teams: nextTeams }),
       }).catch(() => {});
       return {
         ...prev,
@@ -2812,7 +3576,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateTeam = async (id: string, updates: Partial<Team>): Promise<boolean> => {
-    if (!id) return false;
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (!id || isLocked) return false;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
 
@@ -2824,6 +3589,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ...t,
           ...updates,
           id,
+          seasonId: t.seasonId || seasonId,
+          seasonSlug: t.seasonSlug || seasonSlug,
           name: updates.name !== undefined ? updates.name.trim() || t.name : t.name,
           badge: updates.badge !== undefined ? updates.badge || '🏸' : t.badge || '🏸',
         };
@@ -2841,6 +3608,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const ch = new BroadcastChannel('spl_live_scores_channel');
         ch.postMessage({
           type: 'TEAM_UPDATED',
+          seasonSlug,
           teamId: id,
           team: updatedTarget,
           lastUpdated: Date.now(),
@@ -2857,10 +3625,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
 
     promises.push(
-      fetch(`/api/tournament/teams/${encodeURIComponent(id)}`, {
+      fetch(`/api/tournament/teams/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ ...updates, fullTeam: updatedTarget }),
+        body: JSON.stringify({ ...updates, seasonSlug, fullTeam: updatedTarget }),
       })
         .then((res) => res.ok)
         .catch(() => false)
@@ -2873,19 +3641,21 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deleteTeam = (id: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deleteTeam(id).catch(() => {});
-      SupabaseService.logAudit('team_deleted', 'team', id).catch(() => {});
+      SupabaseService.deleteTeam(id, seasonSlug).catch(() => {});
+      SupabaseService.logAudit('team_deleted', 'team', id, { seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
       const nextTeams = prev.teams.filter((t) => t.id !== id);
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
+        body: JSON.stringify({ seasonSlug, teams: nextTeams }),
       }).catch(() => {});
 
       return {
@@ -2901,22 +3671,23 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deleteTeamsBulk = (teamIds: string[]) => {
-    if (!teamIds || teamIds.length === 0) return;
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked || !teamIds || teamIds.length === 0) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     const idSet = new Set(teamIds);
 
     if (SupabaseService.isAvailable()) {
-      SupabaseService.deleteTeamsBulk(teamIds).catch(() => {});
-      SupabaseService.logAudit('teams_bulk_deleted', 'team', undefined, { count: teamIds.length }).catch(() => {});
+      SupabaseService.deleteTeamsBulk(teamIds, seasonSlug).catch(() => {});
+      SupabaseService.logAudit('teams_bulk_deleted', 'team', undefined, { count: teamIds.length, seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => {
       const nextTeams = prev.teams.filter((t) => !idSet.has(t.id));
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
+        body: JSON.stringify({ seasonSlug, teams: nextTeams }),
       }).catch(() => {});
 
       return {
@@ -2955,6 +3726,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setTeamCaptain = (teamId: string, captainId: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     setState((prev) => {
@@ -2962,17 +3735,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         if (t.id !== teamId) return t;
         const updatedPlayers =
           captainId && !t.players.includes(captainId) ? [captainId, ...t.players] : t.players;
-        const updatedTeam = { ...t, captainId, players: updatedPlayers };
+        const updatedTeam = { ...t, captainId, players: updatedPlayers, seasonId, seasonSlug };
         if (SupabaseService.isAvailable()) {
-          SupabaseService.saveTeam(updatedTeam).catch(() => {});
+          SupabaseService.saveTeam(updatedTeam, seasonSlug, seasonId).catch(() => {});
         }
         return updatedTeam;
       });
 
-      fetch('/api/tournament/captains', {
+      fetch(`/api/tournament/captains?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments: [{ teamId, captainId }] }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, assignments: [{ teamId, captainId }] }),
       }).catch(() => {});
 
       return { ...prev, teams: nextTeams };
@@ -2980,7 +3753,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setCaptainsBulk = (assignments: { teamId: string; captainId: string }[]) => {
-    if (!assignments || assignments.length === 0) return;
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked || !assignments || assignments.length === 0) return;
     const map = new Map(assignments.map((a) => [a.teamId, a.captainId]));
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
@@ -2990,19 +3764,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const newCap = map.get(t.id);
           const updatedPlayers =
             newCap && !t.players.includes(newCap) ? [newCap, ...t.players] : t.players;
-          const updatedTeam = { ...t, captainId: newCap, players: updatedPlayers };
+          const updatedTeam = { ...t, captainId: newCap, players: updatedPlayers, seasonId, seasonSlug };
           if (SupabaseService.isAvailable()) {
-            SupabaseService.saveTeam(updatedTeam).catch(() => {});
+            SupabaseService.saveTeam(updatedTeam, seasonSlug, seasonId).catch(() => {});
           }
           return updatedTeam;
         }
         return t;
       });
 
-      fetch('/api/tournament/captains', {
+      fetch(`/api/tournament/captains?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assignments }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, assignments }),
       }).catch(() => {});
 
       return { ...prev, teams: nextTeams };
@@ -3010,6 +3784,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setTeamPlayer = (teamId: string, playerIndex: number, newPlayerId: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     setState((prev) => {
@@ -3031,13 +3807,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       currentTeam.players[playerIndex] = newPlayerId;
       if (SupabaseService.isAvailable()) {
-        SupabaseService.saveTeamsBulk(teams).catch(() => {});
+        SupabaseService.saveTeamsBulk(teams, seasonSlug, seasonId).catch(() => {});
       }
 
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams }),
+        body: JSON.stringify({ seasonSlug, teams }),
       }).catch(() => {});
       return { ...prev, teams };
     });
@@ -3045,10 +3821,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Direct Player to Team Assignment
   const assignPlayerToTeam = (teamId: string, playerId: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     setState((prev) => {
-      // 1. Prevent invalid or duplicate player assignments: remove player from any other team first
       const nextTeams = prev.teams.map((t) => {
         if (t.id === teamId) {
           if (t.players.includes(playerId)) return t;
@@ -3062,12 +3839,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       if (SupabaseService.isAvailable()) {
-        SupabaseService.saveTeamsBulk(nextTeams).catch(() => {});
+        SupabaseService.saveTeamsBulk(nextTeams, seasonSlug, seasonId).catch(() => {});
       }
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
+        body: JSON.stringify({ seasonSlug, teams: nextTeams }),
       }).catch(() => {});
 
       return { ...prev, teams: nextTeams };
@@ -3076,6 +3853,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Direct Player Removal from Team
   const removePlayerFromTeam = (teamId: string, playerId: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     setState((prev) => {
@@ -3089,12 +3868,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       if (SupabaseService.isAvailable()) {
-        SupabaseService.saveTeamsBulk(nextTeams).catch(() => {});
+        SupabaseService.saveTeamsBulk(nextTeams, seasonSlug, seasonId).catch(() => {});
       }
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: nextTeams }),
+        body: JSON.stringify({ seasonSlug, teams: nextTeams }),
       }).catch(() => {});
 
       return { ...prev, teams: nextTeams };
@@ -3110,6 +3889,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     code?: string;
     preview?: ManualTeamEditPreviewResult;
   }> => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'This season is archived and locked for edits.' };
+    }
     const current = stateRef.current;
     const preview = computeManualTeamEdit(input, {
       teams: current.teams,
@@ -3138,10 +3921,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     const affectedTeams: Team[] = [];
     if (preview.primaryTeamAfter) {
-      affectedTeams.push(preview.primaryTeamAfter);
+      affectedTeams.push({ ...preview.primaryTeamAfter, seasonId, seasonSlug });
     }
     for (const ct of preview.counterpartTeamsAfter) {
-      affectedTeams.push(ct);
+      affectedTeams.push({ ...ct, seasonId, seasonSlug });
     }
 
     const baselineRostersByTeamId: Record<string, string[]> = {};
@@ -3161,6 +3944,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       const dbRes = await SupabaseService.saveManualTeamRosterEdit({
         affectedTeams,
         baselineRostersByTeamId,
+        seasonSlug,
+        seasonId,
         auditDetails: {
           mode: current.teamFormationMode,
           primaryTeamId: input.primaryTeamId,
@@ -3169,11 +3954,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           swaps: preview.swaps,
           replacements: preview.replacements,
           lockAction: input.lockAction || 'keep',
+          seasonSlug,
         },
       });
 
       if (dbRes.conflict) {
-        const latestTeams = await SupabaseService.fetchTeams();
+        const latestTeams = await SupabaseService.fetchTeams(seasonSlug, seasonId);
         if (latestTeams && latestTeams.length > 0) {
           setState((prev) => ({ ...prev, teams: latestTeams }));
         }
@@ -3194,6 +3980,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           preview,
         };
       }
+
+      SupabaseService.saveTeamFormationConfig(
+        seasonSlug,
+        current.teamFormationMode,
+        preview.nextPredefinedTeams,
+        seasonId
+      ).catch(() => {});
     }
 
     // Apply verified state update locally
@@ -3210,6 +4003,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         for (const updatedTeam of affectedTeams) {
           ch.postMessage({
             type: 'TEAM_UPDATED',
+            seasonSlug,
             teamId: updatedTeam.id,
             team: updatedTeam,
             lastUpdated: Date.now(),
@@ -3221,10 +4015,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     // Sync to local Express state backup
     try {
-      await fetch('/api/tournament/state', {
+      await fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({
+          seasonSlug,
           teams: preview.nextTeams,
           predefinedTeams: preview.nextPredefinedTeams,
         }),
@@ -3241,13 +4036,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setTeams = async (teams: Team[]): Promise<boolean> => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return false;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
-    // Deduplicate by team.id to guarantee no duplicate team entries
     const uniqueMap = new Map<string, Team>();
     for (const t of teams) {
       if (t && t.id && !uniqueMap.has(t.id)) {
-        uniqueMap.set(t.id, t);
+        uniqueMap.set(t.id, { ...t, seasonId: t.seasonId || seasonId, seasonSlug: t.seasonSlug || seasonSlug });
       }
     }
     const uniqueTeams = Array.from(uniqueMap.values());
@@ -3257,13 +4053,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     try {
       const promises: Promise<boolean>[] = [];
       if (SupabaseService.isAvailable()) {
-        promises.push(SupabaseService.saveTeamsBulk(uniqueTeams).catch(() => false));
+        promises.push(SupabaseService.saveTeamsBulk(uniqueTeams, seasonSlug, seasonId).catch(() => false));
       }
       promises.push(
-        fetch('/api/tournament/state', {
+        fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-          body: JSON.stringify({ teams: uniqueTeams }),
+          body: JSON.stringify({ seasonSlug, teams: uniqueTeams }),
         })
           .then((res) => res.ok)
           .catch(() => false)
@@ -3279,17 +4075,19 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearTeams = () => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastLocalTeamMutationTime.current = Date.now();
     lastServerScoreTime.current = Date.now();
     if (SupabaseService.isAvailable()) {
-      SupabaseService.clearTeams().catch(() => {});
-      SupabaseService.logAudit('teams_cleared', 'team', undefined).catch(() => {});
+      SupabaseService.clearTeams(seasonSlug, seasonId).catch(() => {});
+      SupabaseService.logAudit('teams_cleared', 'team', undefined, { seasonSlug }, undefined, seasonId).catch(() => {});
     }
     setState((prev) => {
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teams: [] }),
+        body: JSON.stringify({ seasonSlug, teams: [] }),
       }).catch(() => {});
       return { ...prev, teams: [] };
     });
@@ -3297,17 +4095,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Pre-decided teams
   const setTeamFormationMode = (mode: 'random' | 'predefined' | 'mixed') => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
-      fetch('/api/tournament/state', {
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveTeamFormationConfig(seasonSlug, mode, prev.predefinedTeams, seasonId).catch(() => {});
+      }
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ teamFormationMode: mode }),
+        body: JSON.stringify({ seasonSlug, teamFormationMode: mode }),
       }).catch(() => {});
       return { ...prev, teamFormationMode: mode };
     });
   };
 
   const addPredefinedTeam = (name: string, p1: string, p2: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
       const updated = [
         ...prev.predefinedTeams,
@@ -3317,10 +4122,13 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           players: [p1, p2] as [string, string],
         },
       ];
-      fetch('/api/tournament/state', {
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveTeamFormationConfig(seasonSlug, prev.teamFormationMode, updated, seasonId).catch(() => {});
+      }
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ predefinedTeams: updated }),
+        body: JSON.stringify({ seasonSlug, predefinedTeams: updated }),
       }).catch(() => {});
       return {
         ...prev,
@@ -3330,12 +4138,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updatePredefinedTeam = (id: string, updates: Partial<PredefinedTeam>) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
       const updated = prev.predefinedTeams.map((pt) => (pt.id === id ? { ...pt, ...updates } : pt));
-      fetch('/api/tournament/state', {
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveTeamFormationConfig(seasonSlug, prev.teamFormationMode, updated, seasonId).catch(() => {});
+      }
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ predefinedTeams: updated }),
+        body: JSON.stringify({ seasonSlug, predefinedTeams: updated }),
       }).catch(() => {});
       return {
         ...prev,
@@ -3345,12 +4158,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deletePredefinedTeam = (id: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
       const updated = prev.predefinedTeams.filter((pt) => pt.id !== id);
-      fetch('/api/tournament/state', {
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveTeamFormationConfig(seasonSlug, prev.teamFormationMode, updated, seasonId).catch(() => {});
+      }
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ predefinedTeams: updated }),
+        body: JSON.stringify({ seasonSlug, predefinedTeams: updated }),
       }).catch(() => {});
       return {
         ...prev,
@@ -3360,11 +4178,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearPredefinedTeams = () => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
-      fetch('/api/tournament/state', {
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.saveTeamFormationConfig(seasonSlug, prev.teamFormationMode, [], seasonId).catch(() => {});
+      }
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ predefinedTeams: [] }),
+        body: JSON.stringify({ seasonSlug, predefinedTeams: [] }),
       }).catch(() => {});
       return { ...prev, predefinedTeams: [] };
     });
@@ -3372,10 +4195,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Matches (clean optimistic update + serialized Supabase persistence — no side effects in setState)
   const updateMatch = (id: string, updates: Partial<Match>) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     sportsAudio.playScorePing();
     const now = Date.now();
     const currentState = stateRef.current;
-    const seasonSlug = currentState.registrationSettings.seasonSlug || 'season-4';
     lastServerScoreTime.current = now;
 
     let updatedMatchObj: Match | undefined;
@@ -3393,6 +4217,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ...updates,
         court: resolvedCourt,
         courtName: resolvedCourtName,
+        seasonId: m.seasonId || seasonId,
+        seasonSlug: m.seasonSlug || seasonSlug,
       };
       if (updates.status !== undefined && updates.status !== 'completed' && !('winner' in updates)) {
         updated.winner = undefined;
@@ -3440,15 +4266,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       // 1. Sync to Supabase PostgreSQL Realtime database (serialized per match)
       if (syncedToSupabase) {
-        SupabaseService.updateMatchScore(id, updatedMatchObj, false, seasonSlug).catch(() => {});
+        SupabaseService.updateMatchScore(id, updatedMatchObj, false, seasonSlug, seasonId).catch(() => {});
       }
 
       // 2. Dispatch score update to server for Express SSE / fallback sync
-      fetch(`/api/tournament/matches/${encodeURIComponent(id)}`, {
+      fetch(`/api/tournament/matches/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({
           ...updates,
+          seasonSlug,
           scoreA: updatedMatchObj.scoreA ?? null,
           scoreB: updatedMatchObj.scoreB ?? null,
           winner: updatedMatchObj.winner ?? null,
@@ -3465,6 +4292,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           const ch = new BroadcastChannel('spl_live_scores_channel');
           ch.postMessage({
             type: 'SCORE_UPDATE',
+            seasonSlug,
             matchId: id,
             match: updatedMatchObj,
             matches: nextMatches,
@@ -3484,16 +4312,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setMatches = (matches: Match[]) => {
-    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     lastServerScoreTime.current = Date.now();
     setState((prev) => {
       if (SupabaseService.isAvailable()) {
-        SupabaseService.batchSaveMatches(matches, seasonSlug).catch(() => {});
+        SupabaseService.batchSaveMatches(matches, seasonSlug, seasonId).catch(() => {});
       }
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, matches }),
       }).catch(() => {});
       return { ...prev, matches };
     });
@@ -3507,8 +4336,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     error?: string;
     report?: ScheduleValidationReport;
   }> => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'This season is archived and locked for edits.' };
+    }
     const current = stateRef.current;
-    const seasonSlug = current.registrationSettings.seasonSlug || 'season-4';
     const normalizedDraft = normalizeScheduleSequence(
       draftMatches,
       current.settings.courtNames
@@ -3545,16 +4377,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         draftMatches: normalizedDraft,
         removedMatchIds: report.removedMatchIds,
         season: seasonSlug,
+        seasonId,
         auditDetails: {
           totalMatches: normalizedDraft.length,
           changedCount: report.changedMatchIds.length,
           addedCount: report.addedMatchIds.length,
           removedCount: report.removedMatchIds.length,
+          seasonSlug,
         },
       });
 
       if (dbRes.conflict) {
-        const latest = await SupabaseService.fetchMatches(seasonSlug);
+        const latest = await SupabaseService.fetchMatches(seasonSlug, seasonId);
         if (latest) {
           setState((prev) => ({
             ...prev,
@@ -3605,6 +4439,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const ch = new BroadcastChannel('spl_live_scores_channel');
         ch.postMessage({
           type: 'SCHEDULE_UPDATED',
+          seasonSlug,
           matches: authoritativeMatches,
           lastUpdated: nowTs,
         });
@@ -3613,10 +4448,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
 
     try {
-      await fetch('/api/tournament/state', {
+      await fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({
+          seasonSlug,
           matches: authoritativeMatches,
         }),
       });
@@ -3633,6 +4469,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const generateFixtures = async (
     courtConfig?: { courts: number; courtNames?: string[] }
   ): Promise<{ success: boolean; count?: number; error?: string }> => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'This season is archived and locked for edits.' };
+    }
     if (state.teams.length < 2) {
       return { success: false, error: 'At least 2 teams are required to generate a match schedule.' };
     }
@@ -3643,14 +4483,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       state.settings.courtNames ||
       Array.from({ length: courts }, (_, i) => `Court ${i + 1}`);
 
-    const fixtures = generateRoundRobinFixtures(state.teams, courts, courtNames);
-    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    const fixtures = generateRoundRobinFixtures(state.teams, courts, courtNames).map((m) => ({
+      ...m,
+      seasonId,
+      seasonSlug,
+    }));
     lastServerScoreTime.current = Date.now();
 
     try {
       // 1. Direct Supabase atomic replacement (delete old, insert new)
       if (SupabaseService.isAvailable()) {
-        const supRes = await SupabaseService.replaceSeasonMatches(fixtures, seasonSlug, { courts, courtNames });
+        const supRes = await SupabaseService.replaceSeasonMatches(
+          fixtures,
+          seasonSlug,
+          { courts, courtNames },
+          seasonId
+        );
         if (!supRes.success) {
           console.warn('Supabase schedule replacement error:', supRes.error);
         }
@@ -3695,13 +4543,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deleteMatch = async (matchId: string): Promise<boolean> => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return false;
     try {
-      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
       localMatchGuardRef.current.delete(matchId);
       if (SupabaseService.isAvailable()) {
         await SupabaseService.deleteMatch(matchId);
       }
-      await fetch(`/api/tournament/matches/${matchId}`, {
+      await fetch(`/api/tournament/matches/${matchId}?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'DELETE',
         headers: { ...AuthService.getAuthHeader() },
       }).catch(() => {});
@@ -3734,7 +4583,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           updatedAt: Date.now(),
         };
         if (wasKoMatch && SupabaseService.isAvailable()) {
-          SupabaseService.savePlayoffState(seasonSlug, nextKnockout).catch(() => {});
+          SupabaseService.savePlayoffState(seasonSlug, nextKnockout, seasonId).catch(() => {});
         }
         return {
           ...prev,
@@ -3750,7 +4599,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearResults = () => {
-    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
       const clearedMatches = prev.matches.map((m) => ({
         ...m,
@@ -3768,12 +4618,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }));
 
       if (SupabaseService.isAvailable()) {
-        SupabaseService.batchSaveMatches(clearedMatches, seasonSlug).catch(() => {});
+        SupabaseService.batchSaveMatches(clearedMatches, seasonSlug, seasonId).catch(() => {});
       }
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ matches: clearedMatches, knockout: { ...prev.knockout, matches: clearedKnockoutMatches } }),
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ seasonSlug, matches: clearedMatches, knockout: { ...prev.knockout, matches: clearedKnockoutMatches } }),
       }).catch(() => {});
 
       return {
@@ -3788,17 +4638,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const clearAllMatches = () => {
-    const seasonSlug = state.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     if (SupabaseService.isAvailable()) {
       SupabaseService.clearSeasonMatches(seasonSlug).catch(() => {});
       SupabaseService.clearKnockoutMatches(seasonSlug).catch(() => {});
-      SupabaseService.logAudit('matches_cleared', 'matches', undefined).catch(() => {});
+      SupabaseService.logAudit('matches_cleared', 'matches', undefined, { seasonSlug }, undefined, seasonId).catch(() => {});
     }
     setState((prev) => {
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ matches: [], knockout: { ...prev.knockout, matches: [] } }),
+        body: JSON.stringify({ seasonSlug, matches: [], knockout: { ...prev.knockout, matches: [] } }),
       }).catch(() => {});
       return {
         ...prev,
@@ -3810,25 +4661,26 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Helper to persist full knockout / IPL playoff state cleanly across Supabase, Express SSE & BroadcastChannel
   const persistKnockoutState = (nextKnockout: KnockoutData, replaceMatchesInDb = false) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     const now = Date.now();
     lastServerScoreTime.current = now;
-    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
 
     if (SupabaseService.isAvailable()) {
       if (replaceMatchesInDb) {
         if (nextKnockout.matches.length === 0) {
           SupabaseService.clearKnockoutMatches(seasonSlug).catch(() => {});
         } else {
-          SupabaseService.replaceKnockoutMatches(nextKnockout.matches, seasonSlug).catch(() => {});
+          SupabaseService.replaceKnockoutMatches(nextKnockout.matches, seasonSlug, seasonId).catch(() => {});
         }
       }
-      SupabaseService.savePlayoffState(seasonSlug, nextKnockout).catch(() => {});
+      SupabaseService.savePlayoffState(seasonSlug, nextKnockout, seasonId).catch(() => {});
     }
 
-    fetch('/api/tournament/state', {
+    fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ knockout: nextKnockout }),
+      body: JSON.stringify({ seasonSlug, knockout: nextKnockout }),
     }).catch(() => {});
 
     if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
@@ -3836,6 +4688,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const ch = new BroadcastChannel('spl_live_scores_channel');
         ch.postMessage({
           type: 'SCORE_UPDATE',
+          seasonSlug,
           matches: stateRef.current.matches,
           teams: stateRef.current.teams,
           knockout: nextKnockout,
@@ -3853,6 +4706,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Knockout Bracket & Advanced Flexible Knockout Engine
   const setKnockoutFormat = (format: PlayoffFormat, customQualifyingCount?: number) => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const resolvedCount = resolveFormatQualifyingCount(
       format,
@@ -3880,6 +4734,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     manualSelectedTeamIds?: string[];
     customStageConfig?: CustomKnockoutStageConfig;
   }) => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const nextFormat = params.format ?? currentState.knockout.format;
     const nextCount = resolveFormatQualifyingCount(
@@ -3921,6 +4776,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     customStageConfig?: CustomKnockoutStageConfig;
     saveAsDraft?: boolean;
   }): { success: boolean; error?: string } => {
+    const { seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'Archived season is read-only. Cannot generate knockout bracket.' };
+    }
     const currentState = stateRef.current;
     const playoffSettings = normalizePlayoffSettings(currentState.settings.playoffSettings);
     const activeFormat: PlayoffFormat =
@@ -4132,16 +4991,23 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     persistKnockoutState(nextKnockout, true);
     if (SupabaseService.isAvailable()) {
-      SupabaseService.logAudit(auditEntry.action, 'playoffs', bracketId, {
-        format: activeFormat,
-        qualifyingTeamsCount: required,
-        qualificationMode: activeQualificationMode,
-        qualifiedSeeds: qualifiedSeeds.map((q) => ({
-          rank: q.rank,
-          teamId: q.teamId,
-          teamName: q.teamName,
-        })),
-      }).catch(() => {});
+      SupabaseService.logAudit(
+        auditEntry.action,
+        'playoffs',
+        bracketId,
+        {
+          format: activeFormat,
+          qualifyingTeamsCount: required,
+          qualificationMode: activeQualificationMode,
+          qualifiedSeeds: qualifiedSeeds.map((q) => ({
+            rank: q.rank,
+            teamId: q.teamId,
+            teamName: q.teamName,
+          })),
+        },
+        undefined,
+        seasonId
+      ).catch(() => {});
     }
     return { success: true };
   };
@@ -4156,9 +5022,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     dependencyWarning?: boolean;
     dependentMatches?: KnockoutMatch[];
   } => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'Archived season is read-only. Cannot update knockout matches.' };
+    }
     const now = Date.now();
     const currentState = stateRef.current;
-    const seasonSlug = currentState.registrationSettings.seasonSlug || 'season-4';
     const targetMatch = currentState.knockout.matches.find((m) => m.id === id);
     if (!targetMatch) return { success: false, error: 'Knockout match not found.' };
 
@@ -4432,7 +5301,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     // 1. Sync to Supabase (target match + any progressed downstream matches + playoff metadata)
     if (syncedToSupabase && updatedKoMatch) {
-      SupabaseService.updateMatchScore(id, updatedKoMatch, true, seasonSlug).catch(() => {});
+      SupabaseService.updateMatchScore(id, updatedKoMatch, true, seasonSlug, seasonId).catch(() => {});
       for (const downstream of progressedUpdates) {
         localMatchGuardRef.current.set(downstream.id, {
           updatedAt: now,
@@ -4441,9 +5310,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           status: downstream.status,
           court: downstream.court,
         });
-        SupabaseService.updateMatchScore(downstream.id, downstream, true, seasonSlug).catch(() => {});
+        SupabaseService.updateMatchScore(downstream.id, downstream, true, seasonSlug, seasonId).catch(() => {});
       }
-      SupabaseService.savePlayoffState(seasonSlug, nextKnockout).catch(() => {});
+      SupabaseService.savePlayoffState(seasonSlug, nextKnockout, seasonId).catch(() => {});
     }
 
     // 2. Broadcast to other tabs
@@ -4452,6 +5321,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const ch = new BroadcastChannel('spl_live_scores_channel');
         ch.postMessage({
           type: 'SCORE_UPDATE',
+          seasonSlug,
           matchId: id,
           match: updatedKoMatch,
           matches: currentState.matches,
@@ -4464,11 +5334,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
 
     // 3. Sync to server & SSE stream
-    fetch(`/api/tournament/matches/${encodeURIComponent(id)}`, {
+    fetch(`/api/tournament/matches/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify({
         ...updates,
+        seasonSlug,
         scoreA: updatedKoMatch?.scoreA ?? null,
         scoreB: updatedKoMatch?.scoreB ?? null,
         winner: updatedKoMatch?.winner ?? null,
@@ -4482,10 +5353,11 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }).catch(() => {});
 
     for (const downstream of progressedUpdates) {
-      fetch(`/api/tournament/matches/${encodeURIComponent(downstream.id)}`, {
+      fetch(`/api/tournament/matches/${encodeURIComponent(downstream.id)}?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({
+          seasonSlug,
           teamA: downstream.teamA ?? null,
           teamB: downstream.teamB ?? null,
           status: downstream.status,
@@ -4514,10 +5386,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       progressedUpdates.length > 0 ||
       updatedKoMatch?.status === 'completed'
     ) {
-      fetch('/api/tournament/state', {
+      fetch(`/api/tournament/state?season=${encodeURIComponent(seasonSlug)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-        body: JSON.stringify({ knockout: nextKnockout }),
+        body: JSON.stringify({ seasonSlug, knockout: nextKnockout }),
       }).catch(() => {});
     }
 
@@ -4533,6 +5405,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     draftMatches?: KnockoutMatch[],
     customStageConfig?: CustomKnockoutStageConfig
   ): { success: boolean; error?: string; warnings?: string[] } => {
+    if (getActiveSeasonCtx().isLocked) {
+      return { success: false, error: 'Archived season is read-only. Cannot save knockout draft.' };
+    }
     const currentState = stateRef.current;
     const effectiveCustomConfig = customStageConfig ?? currentState.knockout.customStageConfig;
     const matchesToValidate = draftMatches || currentState.knockout.matches;
@@ -4594,6 +5469,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const rollbackKnockoutVersion = (versionId: string): { success: boolean; error?: string } => {
+    if (getActiveSeasonCtx().isLocked) {
+      return { success: false, error: 'Archived season is read-only. Cannot roll back bracket.' };
+    }
     const currentState = stateRef.current;
     const snapshot = (currentState.knockout.versionHistory || []).find((v) => v.id === versionId);
     if (!snapshot) {
@@ -4667,6 +5545,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const resetPlayoffs = () => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
     const resetRaw = currentState.knockout.matches.map((m) => {
@@ -4725,6 +5604,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deletePlayoffs = () => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
     const auditEntry = createPlayoffAuditEntry(
@@ -4755,6 +5635,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const publishPlayoffs = (published: boolean): { success: boolean; error?: string } => {
+    if (getActiveSeasonCtx().isLocked) {
+      return { success: false, error: 'Archived season is read-only. Cannot change playoff publication.' };
+    }
     const currentState = stateRef.current;
     if (published) {
       const validation = validateKnockoutBracketConfig({
@@ -4825,6 +5708,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const setPlayoffTieBreakOrder = (teamIdsOrder: string[]) => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const actorName = AuthService.getCurrentUser()?.name || 'Tournament Admin';
     const auditEntry = createPlayoffAuditEntry(
@@ -4842,6 +5726,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const toggleTeamPlayoffDisqualification = (teamId: string) => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const existing = currentState.knockout.disqualifiedTeamIds || [];
     const isCurrentlyDq = existing.includes(teamId);
@@ -4867,6 +5752,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const recalculatePlayoffStandings = () => {
+    if (getActiveSeasonCtx().isLocked) return;
     const currentState = stateRef.current;
     const playoffSettings = normalizePlayoffSettings(currentState.settings.playoffSettings);
     const recalculated = calculatePlayoffLeagueStandings({
@@ -4927,19 +5813,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
   // Form Customizer & Token Link Handlers
   const fetchFormConfig = async (seasonSlug?: string): Promise<RegistrationFormConfig> => {
-    const slug = seasonSlug || state.registrationSettings.seasonSlug || 'season-4';
+    const slug = seasonSlug || getActiveSeasonCtx().seasonSlug;
+    const cacheKey = getSeasonStorageKey('spl_forms_cache', slug);
 
     let localForm: RegistrationFormConfig | null = null;
     try {
-      const cached = localStorage.getItem(`${FORMS_CACHE_PREFIX}${slug}`);
+      const cached = localStorage.getItem(cacheKey);
       if (cached) localForm = JSON.parse(cached);
     } catch {}
 
-    const res = await safeFetchJson<RegistrationFormConfig>(`/api/forms/${slug}`);
+    const res = await safeFetchJson<RegistrationFormConfig>(`/api/forms/${encodeURIComponent(slug)}`);
     if (res.ok && res.data) {
       setFormConfig(res.data);
       try {
-        localStorage.setItem(`${FORMS_CACHE_PREFIX}${slug}`, JSON.stringify(res.data));
+        localStorage.setItem(cacheKey, JSON.stringify(res.data));
       } catch {}
       return res.data;
     }
@@ -4956,7 +5843,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     config: RegistrationFormConfig,
     publish = false
   ): Promise<{ success: boolean; config?: RegistrationFormConfig; error?: string }> => {
-    const slug = config.seasonSlug || 'season-4';
+    const { seasonSlug: activeSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    const slug = config.seasonSlug || activeSlug;
+    if (isLocked && slug === activeSlug) {
+      return { success: false, error: 'Archived season is read-only. Registration form cannot be edited.' };
+    }
+    const cacheKey = getSeasonStorageKey('spl_forms_cache', slug);
     try {
       const currentVersion = config.version || formConfig.version || 1;
       const nextVersion = publish ? currentVersion + 1 : currentVersion;
@@ -4970,6 +5862,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       const payload: RegistrationFormConfig = {
         ...config,
+        seasonSlug: slug,
         enabled: nextEnabled,
         version: nextVersion,
         isPublished: publish ? true : config.isPublished,
@@ -4987,6 +5880,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         ...prev,
         registrationSettings: {
           ...prev.registrationSettings,
+          seasonSlug: slug,
           enabled: nextEnabled,
           ...(payload.closedNotice !== undefined ? { closedNotice: payload.closedNotice } : {}),
         },
@@ -5009,10 +5903,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       setFormConfig(payload);
       setIsRegistrationStatusHydrated(true);
 
-      // Save locally first so UI is instantly updated
+      // Save locally first so UI is instantly updated (strictly season-scoped)
       try {
-        localStorage.setItem(`${FORMS_CACHE_PREFIX}${slug}`, JSON.stringify(payload));
-        localStorage.setItem('spl_forms_cache_season-4', JSON.stringify(payload));
+        localStorage.setItem(cacheKey, JSON.stringify(payload));
       } catch {}
 
       // Broadcast form configuration immediately across all open tabs
@@ -5030,18 +5923,20 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       // Synchronize to centralized Supabase backend directly
       if (SupabaseService.isAvailable()) {
-        await SupabaseService.saveFormConfig(payload, publish);
+        await SupabaseService.saveFormConfig(payload, publish, seasonId);
         SupabaseService.logAudit(
           publish ? 'form_published' : 'form_draft_saved',
           'form',
           slug,
-          { version: nextVersion, fieldsCount: payload.fields.length, enabled: nextEnabled }
+          { version: nextVersion, fieldsCount: payload.fields.length, enabled: nextEnabled },
+          undefined,
+          seasonId
         ).catch(() => {});
       }
 
-      const res = await safeFetchJson<RegistrationFormConfig>(`/api/forms/${slug}`, {
+      const res = await safeFetchJson<RegistrationFormConfig>(`/api/forms/${encodeURIComponent(slug)}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify(payload),
       });
 
@@ -5070,14 +5965,16 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     closedNotice?: string
   ): Promise<{ success: boolean; enabled: boolean; error?: string }> => {
     const task = regToggleChainRef.current.then(async () => {
-      const normalizedNext = Boolean(nextEnabled);
+      const { seasonSlug: activeSlug, seasonId, isLocked } = getActiveSeasonCtx();
       const prevEnabled =
         formConfigRef.current.enabled !== false &&
         stateRef.current.registrationSettings.enabled !== false;
-      const slug =
-        formConfigRef.current.seasonSlug ||
-        stateRef.current.registrationSettings.seasonSlug ||
-        'season-4';
+      if (isLocked) {
+        return { success: false, enabled: prevEnabled, error: 'Archived season is read-only.' };
+      }
+      const normalizedNext = Boolean(nextEnabled);
+      const slug = formConfigRef.current.seasonSlug || activeSlug;
+      const cacheKey = getSeasonStorageKey('spl_forms_cache', slug);
       const seq = regToggleGuardRef.current.seq + 1;
       regToggleGuardRef.current = { seq, enabled: normalizedNext, updatedAt: Date.now() };
 
@@ -5090,7 +5987,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       };
 
       // Optimistic local state + multi-tab broadcast
-      syncRegistrationEnabledState(normalizedNext, closedNotice, true);
+      syncRegistrationEnabledState(normalizedNext, closedNotice, true, slug);
 
       if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
         try {
@@ -5109,7 +6006,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (!sbRes.success) {
             if (regToggleGuardRef.current.seq === seq) {
               regToggleGuardRef.current = { seq: seq + 1, enabled: prevEnabled, updatedAt: Date.now() };
-              syncRegistrationEnabledState(prevEnabled, undefined, true);
+              syncRegistrationEnabledState(prevEnabled, undefined, true, slug);
             }
             return {
               success: false,
@@ -5120,31 +6017,34 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (sbRes.config && regToggleGuardRef.current.seq === seq) {
             setFormConfig(sbRes.config);
             try {
-              localStorage.setItem(`${FORMS_CACHE_PREFIX}${slug}`, JSON.stringify(sbRes.config));
+              localStorage.setItem(cacheKey, JSON.stringify(sbRes.config));
             } catch {}
           }
           SupabaseService.logAudit(
             normalizedNext ? 'registration_opened' : 'registration_closed',
             'form',
             slug,
-            { enabled: normalizedNext }
+            { enabled: normalizedNext },
+            undefined,
+            seasonId
           ).catch(() => {});
         }
 
         // Mirror to local Express server when present (non-fatal on static hosting)
         await Promise.allSettled([
-          safeFetchJson('/api/registration-settings', {
+          safeFetchJson(`/api/registration-settings?season=${encodeURIComponent(slug)}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
             body: JSON.stringify({
               ...stateRef.current.registrationSettings,
+              seasonSlug: slug,
               enabled: normalizedNext,
               ...(closedNotice !== undefined ? { closedNotice } : {}),
             }),
           }),
           safeFetchJson(`/api/forms/${encodeURIComponent(slug)}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
             body: JSON.stringify({
               ...optimisticConfig,
               isPublished: true,
@@ -5156,7 +6056,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       } catch (err: any) {
         if (regToggleGuardRef.current.seq === seq) {
           regToggleGuardRef.current = { seq: seq + 1, enabled: prevEnabled, updatedAt: Date.now() };
-          syncRegistrationEnabledState(prevEnabled, undefined, true);
+          syncRegistrationEnabledState(prevEnabled, undefined, true, slug);
         }
         return {
           success: false,
@@ -5174,23 +6074,24 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const fetchTokens = async (
     seasonSlug?: string
   ): Promise<{ tokens: RegistrationTokenRecord[]; activeToken: RegistrationTokenRecord | null }> => {
-    const slug = seasonSlug || state.registrationSettings.seasonSlug || 'season-4';
+    const slug = seasonSlug || getActiveSeasonCtx().seasonSlug;
+    const cacheKey = getSeasonStorageKey('spl_tokens_cache', slug);
 
     let cachedTokens: RegistrationTokenRecord[] = [];
     try {
-      const cached = localStorage.getItem(`${TOKENS_CACHE_PREFIX}${slug}`);
+      const cached = localStorage.getItem(cacheKey);
       if (cached) cachedTokens = JSON.parse(cached);
     } catch {}
 
     const res = await safeFetchJson<{ tokens: RegistrationTokenRecord[]; activeToken: RegistrationTokenRecord | null }>(
-      `/api/tokens/${slug}`
+      `/api/tokens/${encodeURIComponent(slug)}`
     );
 
     if (res.ok && res.data && Array.isArray(res.data.tokens)) {
       setTokens(res.data.tokens);
       setActiveToken(res.data.activeToken || null);
       try {
-        localStorage.setItem(`${TOKENS_CACHE_PREFIX}${slug}`, JSON.stringify(res.data.tokens));
+        localStorage.setItem(cacheKey, JSON.stringify(res.data.tokens));
       } catch {}
       return { tokens: res.data.tokens, activeToken: res.data.activeToken || null };
     }
@@ -5210,7 +6111,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     invalidatePrevious: boolean,
     label?: string
   ): Promise<{ success: boolean; tokenRecord?: RegistrationTokenRecord; error?: string }> => {
-    const slug = seasonSlug || state.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug: activeSlug, isLocked } = getActiveSeasonCtx();
+    const slug = seasonSlug || activeSlug;
+    if (isLocked && slug === activeSlug) {
+      return { success: false, error: 'Archived season is read-only. Cannot regenerate token.' };
+    }
+    const cacheKey = getSeasonStorageKey('spl_tokens_cache', slug);
 
     try {
       // 1. Try server endpoint
@@ -5221,7 +6127,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         error?: string;
       }>('/api/tokens/regenerate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
         body: JSON.stringify({ seasonSlug: slug, invalidatePrevious, label }),
       });
 
@@ -5230,7 +6136,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setTokens(res.data.tokens || [res.data.tokenRecord]);
         try {
           localStorage.setItem(
-            `${TOKENS_CACHE_PREFIX}${slug}`,
+            cacheKey,
             JSON.stringify(res.data.tokens || [res.data.tokenRecord])
           );
         } catch {}
@@ -5240,7 +6146,6 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     } catch {}
 
     // 2. Resilient Client-Side Fallback (for Vercel static deployments or offline environments)
-    // Generates a robust, cryptographically sound token instantly without crashing JSON parser
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
     let rand = '';
     for (let i = 0; i < 6; i++) {
@@ -5261,7 +6166,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     let existingTokens: RegistrationTokenRecord[] = [];
     try {
-      const cached = localStorage.getItem(`${TOKENS_CACHE_PREFIX}${slug}`);
+      const cached = localStorage.getItem(cacheKey);
       if (cached) existingTokens = JSON.parse(cached);
     } catch {}
 
@@ -5279,7 +6184,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     setTokens(updatedTokens);
     setActiveToken(newTokenRecord);
     try {
-      localStorage.setItem(`${TOKENS_CACHE_PREFIX}${slug}`, JSON.stringify(updatedTokens));
+      localStorage.setItem(cacheKey, JSON.stringify(updatedTokens));
     } catch {}
 
     triggerCelebration();
@@ -5289,12 +6194,18 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   const toggleTokenStatus = async (
     tokenId: string
   ): Promise<{ success: boolean; token?: RegistrationTokenRecord }> => {
-    const slug = state.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug: slug, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return { success: false };
+    const cacheKey = getSeasonStorageKey('spl_tokens_cache', slug);
 
     try {
       const res = await safeFetchJson<{ success: boolean; token?: RegistrationTokenRecord }>(
-        `/api/tokens/${tokenId}/toggle-status`,
-        { method: 'POST' }
+        `/api/tokens/${encodeURIComponent(tokenId)}/toggle-status?season=${encodeURIComponent(slug)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+          body: JSON.stringify({ seasonSlug: slug }),
+        }
       );
 
       if (res.ok && res.data && res.data.token) {
@@ -5302,7 +6213,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         setTokens((prev) => {
           const next = prev.map((t) => (t.id === tokenId ? updated : t));
           try {
-            localStorage.setItem(`${TOKENS_CACHE_PREFIX}${slug}`, JSON.stringify(next));
+            localStorage.setItem(cacheKey, JSON.stringify(next));
           } catch {}
           return next;
         });
@@ -5325,7 +6236,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         return t;
       });
       try {
-        localStorage.setItem(`${TOKENS_CACHE_PREFIX}${slug}`, JSON.stringify(next));
+        localStorage.setItem(cacheKey, JSON.stringify(next));
       } catch {}
       return next;
     });
@@ -5342,7 +6253,25 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     formData: any
   ): Promise<{ success: boolean; registration?: Registration; error?: string; linkRevoked?: boolean; registrationClosed?: boolean }> => {
     const cleanMobile = formData.mobile ? formData.mobile.replace(/\D/g, '') : '';
-    const targetSeason = formData.season || state.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug: activeSlug, seasonId: activeSeasonId, isLocked } = getActiveSeasonCtx();
+    const targetSeason = formData.season || activeSlug;
+    const targetSeasonObj =
+      seasons.find((s) => s.seasonSlug === targetSeason) ||
+      (targetSeason === activeSlug ? activeSeasonRef.current : undefined);
+    const targetSeasonId = targetSeasonObj?.id || (targetSeason === activeSlug ? activeSeasonId : undefined);
+    const seasonDisplayTitle =
+      targetSeasonObj?.seasonTitle ||
+      activeSeasonRef.current.seasonTitle ||
+      `Smash Premier League ${targetSeasonObj?.seasonNumber || activeSeasonRef.current.seasonNumber}`;
+    const regPrefix = `SPL-${targetSeasonObj?.tournamentYear || activeSeasonRef.current.tournamentYear || new Date().getFullYear()}`;
+
+    if (targetSeasonObj?.status === 'archived' || (targetSeason === activeSlug && isLocked)) {
+      return {
+        success: false,
+        registrationClosed: true,
+        error: `Registration for ${seasonDisplayTitle} is closed (archived season).`,
+      };
+    }
 
     // 1. Primary path: Supabase PostgreSQL direct database persistence
     if (SupabaseService.isAvailable()) {
@@ -5350,17 +6279,17 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         // Authoritative Registration Open/Closed enforcement before any submission
         const liveStatus = await SupabaseService.fetchRegistrationOpenStatus(targetSeason);
         if (liveStatus && !liveStatus.enabled) {
-          syncRegistrationEnabledState(false, liveStatus.closedNotice, true);
+          syncRegistrationEnabledState(false, liveStatus.closedNotice, true, targetSeason);
           return {
             success: false,
             registrationClosed: true,
             error:
               liveStatus.closedNotice ||
-              'Registration for Smash Premier League 3.0 is currently closed.',
+              `Registration for ${seasonDisplayTitle} is currently closed.`,
           };
         }
 
-        // Direct duplicate mobile check in Supabase
+        // Direct duplicate mobile check in Supabase strictly scoped to targetSeason
         const dupCheck = await SupabaseService.checkDuplicateRegistration(cleanMobile, targetSeason);
         if (dupCheck?.isDuplicate) {
           return {
@@ -5370,7 +6299,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         // Generate guaranteed collision-free registration ID
-        const regId = await SupabaseService.generateCollisionFreeRegId('SPL-2026');
+        const regId = await SupabaseService.generateCollisionFreeRegId(regPrefix, targetSeason);
 
         const initialPaymentStatus: PaymentStatus = formData.txnId ? 'pending_verification' : 'unpaid';
 
@@ -5381,6 +6310,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         const newReg: Registration = {
           id: crypto.randomUUID(),
           regId,
+          seasonId: targetSeasonId,
+          seasonSlug: targetSeason,
           name: (formData.name || '').trim(),
           mobile: cleanMobile,
           whatsapp: formData.whatsapp ? String(formData.whatsapp).trim() : undefined,
@@ -5413,31 +6344,31 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           ],
         };
 
-        const saveRes = await SupabaseService.saveRegistrationWithDetail(newReg);
+        const saveRes = await SupabaseService.saveRegistrationWithDetail(newReg, targetSeasonId);
         if (!saveRes.success) {
           if (saveRes.registrationClosed) {
-            syncRegistrationEnabledState(false, saveRes.error, true);
+            syncRegistrationEnabledState(false, saveRes.error, true, targetSeason);
             return {
               success: false,
               registrationClosed: true,
               error:
                 saveRes.error ||
-                'Registration for Smash Premier League 3.0 is currently closed.',
+                `Registration for ${seasonDisplayTitle} is currently closed.`,
             };
           }
           // Retry once with alternative salt in case of any rare ID collision
           const altSalt = Math.floor(1000 + Math.random() * 9000);
-          newReg.regId = `SPL-2026-${Date.now().toString(36).toUpperCase().slice(-3)}-${altSalt}`;
-          const retryRes = await SupabaseService.saveRegistrationWithDetail(newReg);
+          newReg.regId = `${regPrefix}-${Date.now().toString(36).toUpperCase().slice(-3)}-${altSalt}`;
+          const retryRes = await SupabaseService.saveRegistrationWithDetail(newReg, targetSeasonId);
           if (!retryRes.success) {
             if (retryRes.registrationClosed) {
-              syncRegistrationEnabledState(false, retryRes.error, true);
+              syncRegistrationEnabledState(false, retryRes.error, true, targetSeason);
               return {
                 success: false,
                 registrationClosed: true,
                 error:
                   retryRes.error ||
-                  'Registration for Smash Premier League 3.0 is currently closed.',
+                  `Registration for ${seasonDisplayTitle} is currently closed.`,
               };
             }
             return {
@@ -5453,30 +6384,39 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         }
 
         // Record audit trail in Supabase
-        SupabaseService.logAudit('registration_submitted', 'registration', newReg.id, {
-          name: newReg.name,
-          regId: newReg.regId,
-          mobile: newReg.mobile,
-          season: newReg.season,
-          version: newReg.formVersion,
-        }).catch(() => {});
+        SupabaseService.logAudit(
+          'registration_submitted',
+          'registration',
+          newReg.id,
+          {
+            name: newReg.name,
+            regId: newReg.regId,
+            mobile: newReg.mobile,
+            season: newReg.season,
+            version: newReg.formVersion,
+          },
+          undefined,
+          targetSeasonId
+        ).catch(() => {});
 
         // Safely notify local full-stack dev server in background if running
-        safeFetchJson('/api/registrations', {
+        safeFetchJson(`/api/registrations?season=${encodeURIComponent(targetSeason)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(newReg),
         }).catch(() => {});
 
-        // Update local React state immediately and broadcast across tabs
-        setState((prev) => ({
-          ...prev,
-          registrations: [
-            newReg,
-            ...prev.registrations.filter((r) => r.id !== newReg.id),
-          ],
-        }));
-        broadcastRegistrationsSync('upsert', newReg);
+        // Update local React state only if submitting into the currently active season
+        if (targetSeason === activeSlug) {
+          setState((prev) => ({
+            ...prev,
+            registrations: [
+              newReg,
+              ...prev.registrations.filter((r) => r.id !== newReg.id),
+            ],
+          }));
+          broadcastRegistrationsSync('upsert', newReg);
+        }
 
         return { success: true, registration: newReg };
       } catch (err: any) {
@@ -5496,7 +6436,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         error:
           formConfig.closedNotice ||
           state.registrationSettings.closedNotice ||
-          'Registration for Smash Premier League 3.0 is currently closed.',
+          `Registration for ${seasonDisplayTitle} is currently closed.`,
       };
     }
 
@@ -5506,27 +6446,29 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         registration?: Registration;
         error?: string;
         linkRevoked?: boolean;
-      }>('/api/registrations', {
+      }>(`/api/registrations?season=${encodeURIComponent(targetSeason)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, season: targetSeason }),
       });
 
       if (res.ok && res.data && res.data.registration) {
         const savedReg = res.data.registration;
-        setState((prev) => ({
-          ...prev,
-          registrations: [
-            ...prev.registrations.filter((r) => r.id !== savedReg.id),
-            savedReg,
-          ],
-        }));
+        if (targetSeason === activeSlug) {
+          setState((prev) => ({
+            ...prev,
+            registrations: [
+              ...prev.registrations.filter((r) => r.id !== savedReg.id),
+              savedReg,
+            ],
+          }));
+        }
         return { success: true, registration: savedReg };
       }
 
       if (res.data && res.data.error) {
         if ((res.data as any).registrationClosed) {
-          syncRegistrationEnabledState(false, res.data.error, true);
+          syncRegistrationEnabledState(false, res.data.error, true, targetSeason);
         }
         return {
           success: false,
@@ -5539,7 +6481,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
     // Resilient local memory fallback
     const isDup = state.registrations.some(
-      (r) => r.mobile.replace(/\D/g, '') === cleanMobile && r.status !== 'rejected'
+      (r) =>
+        r.mobile.replace(/\D/g, '') === cleanMobile &&
+        r.status !== 'rejected' &&
+        (r.season || activeSlug) === targetSeason
     );
     if (isDup) {
       return {
@@ -5549,10 +6494,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }
     const regSeq = String(state.registrations.length + 1).padStart(3, '0');
     const regSalt = Math.floor(100 + Math.random() * 900);
-    const regId = `SPL-2026-${regSeq}-${regSalt}`;
+    const regId = `${regPrefix}-${regSeq}-${regSalt}`;
     const newReg: Registration = {
       id: crypto.randomUUID(),
       regId,
+      seasonId: targetSeasonId,
+      seasonSlug: targetSeason,
       name: (formData.name || '').trim(),
       mobile: cleanMobile,
       whatsapp: formData.whatsapp,
@@ -5576,22 +6523,29 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       formVersion: formData.formVersion || formConfig.version || 1,
     };
 
-    setState((prev) => ({
-      ...prev,
-      registrations: [...prev.registrations, newReg],
-    }));
+    if (targetSeason === activeSlug) {
+      setState((prev) => ({
+        ...prev,
+        registrations: [...prev.registrations, newReg],
+      }));
+    }
     return { success: true, registration: newReg };
   };
 
   const addRegistration = (
     data: Partial<Registration> & { name: string; mobile: string }
   ): Registration => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    const targetSeason = data.season || seasonSlug;
+    const regPrefix = `SPL-${activeSeasonRef.current.tournamentYear || new Date().getFullYear()}`;
     const regSeq = String(state.registrations.length + 1).padStart(3, '0');
     const regSalt = Math.floor(100 + Math.random() * 900);
-    const regId = `SPL-2026-${regSeq}-${regSalt}`;
+    const regId = `${regPrefix}-${regSeq}-${regSalt}`;
     const newReg: Registration = {
       id: crypto.randomUUID(),
       regId,
+      seasonId,
+      seasonSlug: targetSeason,
       name: data.name.trim(),
       mobile: data.mobile.replace(/\D/g, ''),
       whatsapp: data.whatsapp,
@@ -5607,13 +6561,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       paymentStatus: (data.paymentStatus as any) || (data.status === 'paid' ? 'paid' : 'unpaid'),
       method: data.method || 'upi',
       txnId: data.txnId,
-      season: data.season || state.registrationSettings.seasonSlug,
+      season: targetSeason,
       createdAt: Date.now(),
       paidAt: data.status === 'paid' ? Date.now() : undefined,
     };
 
+    if (isLocked) return newReg;
+
     if (SupabaseService.isAvailable()) {
-      SupabaseService.saveRegistration(newReg).catch(() => {});
+      SupabaseService.saveRegistration(newReg, seasonId).catch(() => {});
     }
 
     setState((prev) => ({
@@ -5622,9 +6578,9 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
 
     // Post to backend
-    fetch('/api/registrations', {
+    fetch(`/api/registrations?season=${encodeURIComponent(targetSeason)}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify(newReg),
     }).catch(() => {});
 
@@ -5632,6 +6588,8 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const updateRegistration = (id: string, updates: Partial<Registration>) => {
+    const { seasonSlug, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     setState((prev) => {
       const updated = prev.registrations.map((r) =>
         r.id === id
@@ -5675,7 +6633,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         .catch(() => {});
     }
 
-    fetch(`/api/registrations/${id}`, {
+    fetch(`/api/registrations/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify(updates),
@@ -5683,28 +6641,22 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const approveRegistration = (id: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
+    const reg = stateRef.current.registrations.find((r) => r.id === id);
+    if (!reg) return;
     triggerCelebration();
     const nowTs = Date.now();
-    let targetPlayerId: string | undefined;
+    const cleanMobile = reg.mobile ? reg.mobile.replace(/\D/g, '') : '';
 
-    setState((prev) => {
-      const reg = prev.registrations.find((r) => r.id === id);
-      if (!reg) return prev;
-
-      const cleanMobile = reg.mobile ? reg.mobile.replace(/\D/g, '') : '';
-      const existingPlayer = prev.players.find(
-        (p) =>
-          (cleanMobile && p.mobile && p.mobile.replace(/\D/g, '') === cleanMobile) ||
-          p.name.trim().toLowerCase() === reg.name.trim().toLowerCase()
-      );
-
-      const playerId = existingPlayer ? existingPlayer.id : (reg.playerId || crypto.randomUUID());
-      targetPlayerId = playerId;
-      let updatedPlayers = prev.players;
+    const finalizeApproval = (existingPlayer: Player | undefined) => {
+      const targetPlayerId = existingPlayer ? existingPlayer.id : (reg.playerId || crypto.randomUUID());
 
       if (!existingPlayer) {
         const newPlayer: Player = {
-          id: playerId,
+          id: targetPlayerId,
+          seasonId,
+          seasonSlug,
           name: reg.name.trim(),
           mobile: reg.mobile,
           age: reg.age,
@@ -5717,62 +6669,100 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           style: reg.style,
           photoUrl: reg.photoUrl,
         };
-        updatedPlayers = [...prev.players, newPlayer];
         if (SupabaseService.isAvailable()) {
-          SupabaseService.upsertPlayer(newPlayer).catch(() => {});
+          SupabaseService.upsertPlayer(newPlayer, seasonSlug, seasonId).catch(() => {});
         }
+        setState((prev) => ({
+          ...prev,
+          players: prev.players.some((p) => p.id === targetPlayerId)
+            ? prev.players
+            : [...prev.players, newPlayer],
+          registrations: prev.registrations.map((r) =>
+            r.id === id
+              ? { ...r, status: 'approved' as const, approvedAt: r.approvedAt || nowTs, playerId: targetPlayerId }
+              : r
+          ),
+        }));
+      } else {
+        // Canonical repeat athlete (e.g. from SPL 3.0): reuse canonical players.id and include in active season roster without duplicating row
+        const linkedPlayer: Player = {
+          ...existingPlayer,
+          registrationId: reg.regId,
+          registrationStatus: 'approved',
+        };
+        setState((prev) => ({
+          ...prev,
+          players: prev.players.some((p) => p.id === targetPlayerId)
+            ? prev.players
+            : [...prev.players, linkedPlayer],
+          registrations: prev.registrations.map((r) =>
+            r.id === id
+              ? { ...r, status: 'approved' as const, approvedAt: r.approvedAt || nowTs, playerId: targetPlayerId }
+              : r
+          ),
+        }));
       }
 
-      const updatedRegistrations = prev.registrations.map((r) =>
-        r.id === id
-          ? {
-              ...r,
-              status: 'approved' as const,
-              approvedAt: r.approvedAt || nowTs,
-              playerId,
-            }
-          : r
-      );
-
-      const approvedReg = updatedRegistrations.find((r) => r.id === id);
-      if (approvedReg) {
-        broadcastRegistrationsSync('upsert', approvedReg);
-      }
-
-      return {
-        ...prev,
-        players: updatedPlayers,
-        registrations: updatedRegistrations,
-      };
-    });
-
-    if (SupabaseService.isAvailable()) {
-      SupabaseService.updateRegistrationFieldsAtomic(id, {
+      broadcastRegistrationsSync('upsert', {
+        ...reg,
         status: 'approved',
-        approvedAt: nowTs,
-        ...(targetPlayerId ? { playerId: targetPlayerId } : {}),
-      })
-        .then((res) => {
-          if (res.success && res.registration) {
-            setState((prev) => ({
-              ...prev,
-              registrations: prev.registrations.map((r) => (r.id === id ? res.registration! : r)),
-            }));
-            broadcastRegistrationsSync('upsert', res.registration);
-          }
-          SupabaseService.logAudit('registration_approved', 'registration', id, { playerId: targetPlayerId }).catch(() => {});
-        })
-        .catch(() => {});
-    }
+        approvedAt: reg.approvedAt || nowTs,
+        playerId: targetPlayerId,
+      });
 
-    fetch(`/api/registrations/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ status: 'approved', approvedAt: nowTs, ...(targetPlayerId ? { playerId: targetPlayerId } : {}) }),
-    }).catch(() => {});
+      if (SupabaseService.isAvailable()) {
+        SupabaseService.updateRegistrationFieldsAtomic(id, {
+          status: 'approved',
+          approvedAt: nowTs,
+          playerId: targetPlayerId,
+        })
+          .then((res) => {
+            if (res.success && res.registration) {
+              setState((prev) => ({
+                ...prev,
+                registrations: prev.registrations.map((r) => (r.id === id ? res.registration! : r)),
+              }));
+              broadcastRegistrationsSync('upsert', res.registration);
+            }
+            SupabaseService.logAudit(
+              'registration_approved',
+              'registration',
+              id,
+              { playerId: targetPlayerId, seasonSlug },
+              undefined,
+              seasonId
+            ).catch(() => {});
+          })
+          .catch(() => {});
+      }
+
+      fetch(`/api/registrations/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ status: 'approved', approvedAt: nowTs, playerId: targetPlayerId }),
+      }).catch(() => {});
+    };
+
+    const existingLocalPlayer = stateRef.current.players.find(
+      (p) =>
+        (cleanMobile && p.mobile && p.mobile.replace(/\D/g, '') === cleanMobile) ||
+        p.name.trim().toLowerCase() === reg.name.trim().toLowerCase()
+    );
+
+    if (existingLocalPlayer || !cleanMobile || !SupabaseService.isAvailable()) {
+      finalizeApproval(existingLocalPlayer);
+    } else {
+      void SupabaseService.findPlayerByMobileGlobal(cleanMobile)
+        .then((globalMatch) => {
+          finalizeApproval(globalMatch || undefined);
+        })
+        .catch(() => finalizeApproval(undefined));
+    }
   };
 
   const rejectRegistration = (id: string, reason?: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     const existingReg = stateRef.current.registrations.find((r) => r.id === id);
     const nextNotes = reason ? `${existingReg?.notes || ''} [Rejected: ${reason}]`.trim() : existingReg?.notes;
 
@@ -5789,7 +6779,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             }));
             broadcastRegistrationsSync('upsert', res.registration);
           }
-          SupabaseService.logAudit('registration_rejected', 'registration', id, { reason }).catch(() => {});
+          SupabaseService.logAudit(
+            'registration_rejected',
+            'registration',
+            id,
+            { reason, seasonSlug },
+            undefined,
+            seasonId
+          ).catch(() => {});
         })
         .catch(() => {});
     }
@@ -5807,7 +6804,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       ),
     }));
 
-    fetch(`/api/registrations/${id}`, {
+    fetch(`/api/registrations/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
       body: JSON.stringify({ status: 'rejected', ...(nextNotes !== undefined ? { notes: nextNotes } : {}) }),
@@ -5821,6 +6818,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     verifiedBy = 'Tournament Director',
     paidAmount?: number
   ): Promise<{ success: boolean; registration?: Registration; error?: string }> => {
+    const { seasonSlug, isLocked } = getActiveSeasonCtx();
+    if (isLocked) {
+      return { success: false, error: 'Archived season is read-only. Payment status cannot be modified.' };
+    }
     // 1. Primary path when Supabase client is configured: atomic DB update directly on PostgreSQL
     if (SupabaseService.isAvailable()) {
       const atomicRes = await SupabaseService.verifyRegistrationPaymentAtomic({
@@ -5841,7 +6842,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         broadcastRegistrationsSync('upsert', authoritative);
 
         // Mirror update cleanly to Express backend SSE stream (best-effort)
-        safeFetchJson(`/api/registrations/${id}/verify-payment`, {
+        safeFetchJson(`/api/registrations/${encodeURIComponent(id)}/verify-payment?season=${encodeURIComponent(seasonSlug)}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
           body: JSON.stringify({ paymentStatus, verifiedBy, note, paidAmount }),
@@ -5856,7 +6857,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       // If direct Supabase call failed (e.g. RLS/network), try authenticated Express backend API which persists to Supabase + mirrors SSE
       try {
         const apiRes = await safeFetchJson<{ success: boolean; registration?: Registration; error?: string }>(
-          `/api/registrations/${id}/verify-payment`,
+          `/api/registrations/${encodeURIComponent(id)}/verify-payment?season=${encodeURIComponent(seasonSlug)}`,
           {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
@@ -5885,7 +6886,7 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     // 2. Express server mode (when Supabase env is not set)
     try {
       const res = await safeFetchJson<{ success: boolean; registration?: Registration; error?: string }>(
-        `/api/registrations/${id}/verify-payment`,
+        `/api/registrations/${encodeURIComponent(id)}/verify-payment?season=${encodeURIComponent(seasonSlug)}`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
@@ -5912,13 +6913,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
   };
 
   const deleteRegistration = (id: string) => {
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked) return;
     if (SupabaseService.isAvailable()) {
       SupabaseService.deleteRegistration(id)
         .then((ok) => {
           if (ok) void refreshRegistrations();
         })
         .catch(() => {});
-      SupabaseService.logAudit('registration_deleted', 'registration', id).catch(() => {});
+      SupabaseService.logAudit('registration_deleted', 'registration', id, { seasonSlug }, undefined, seasonId).catch(() => {});
     }
 
     setState((prev) => ({
@@ -5927,14 +6930,15 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
     broadcastRegistrationsSync('delete', { id });
 
-    fetch(`/api/registrations/${id}`, {
+    fetch(`/api/registrations/${encodeURIComponent(id)}?season=${encodeURIComponent(seasonSlug)}`, {
       method: 'DELETE',
       headers: { ...AuthService.getAuthHeader() },
     }).catch(() => {});
   };
 
   const deleteRegistrationsBulk = (ids: string[]) => {
-    if (!ids || ids.length === 0) return;
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked || !ids || ids.length === 0) return;
     const idSet = new Set(ids);
 
     if (SupabaseService.isAvailable()) {
@@ -5943,7 +6947,14 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           if (ok) void refreshRegistrations();
         })
         .catch(() => {});
-      SupabaseService.logAudit('registrations_bulk_deleted', 'registration', undefined, { count: ids.length }).catch(() => {});
+      SupabaseService.logAudit(
+        'registrations_bulk_deleted',
+        'registration',
+        undefined,
+        { count: ids.length, seasonSlug },
+        undefined,
+        seasonId
+      ).catch(() => {});
     }
 
     setState((prev) => ({
@@ -5952,37 +6963,64 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     }));
     broadcastRegistrationsSync('bulk_delete', { ids });
 
-    fetch('/api/registrations/bulk-delete', {
+    fetch(`/api/registrations/bulk-delete?season=${encodeURIComponent(seasonSlug)}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ ids }),
+      body: JSON.stringify({ ids, seasonSlug }),
     }).catch(() => {});
   };
 
   const bulkApproveRegistrations = (ids: string[]) => {
-    if (!ids || ids.length === 0) return;
+    const { seasonSlug, seasonId, isLocked } = getActiveSeasonCtx();
+    if (isLocked || !ids || ids.length === 0) return;
     triggerCelebration();
     const idSet = new Set(ids);
     const nowTs = Date.now();
 
-    setState((prev) => {
-      const newPlayers = [...prev.players];
+    const runBulkApproval = async () => {
+      const currentPlayers = [...stateRef.current.players];
+      const currentRegs = stateRef.current.registrations;
       const newlyCreatedPlayers: Player[] = [];
-      const updatedRegistrations = prev.registrations.map((r) => {
+      const globalReuseCache = new Map<string, Player>();
+
+      if (SupabaseService.isAvailable()) {
+        for (const r of currentRegs) {
+          if (!idSet.has(r.id)) continue;
+          const cleanMobile = r.mobile ? r.mobile.replace(/\D/g, '') : '';
+          const alreadyLocal = currentPlayers.some(
+            (p) =>
+              (cleanMobile && p.mobile && p.mobile.replace(/\D/g, '') === cleanMobile) ||
+              p.name.trim().toLowerCase() === r.name.trim().toLowerCase()
+          );
+          if (!alreadyLocal && cleanMobile && !globalReuseCache.has(cleanMobile)) {
+            const globalMatch = await SupabaseService.findPlayerByMobileGlobal(cleanMobile).catch(() => null);
+            if (globalMatch) {
+              globalReuseCache.set(cleanMobile, globalMatch);
+            }
+          }
+        }
+      }
+
+      const newPlayers = [...currentPlayers];
+      const updatedRegistrations = currentRegs.map((r) => {
         if (!idSet.has(r.id)) return r;
 
         const cleanMobile = r.mobile ? r.mobile.replace(/\D/g, '') : '';
-        const existingPlayer = newPlayers.find(
+        const existingLocal = newPlayers.find(
           (p) =>
             (cleanMobile && p.mobile && p.mobile.replace(/\D/g, '') === cleanMobile) ||
             p.name.trim().toLowerCase() === r.name.trim().toLowerCase()
         );
+        const globalMatch = cleanMobile ? globalReuseCache.get(cleanMobile) : undefined;
+        const resolvedExisting = existingLocal || globalMatch;
 
-        const playerId = existingPlayer ? existingPlayer.id : (r.playerId || crypto.randomUUID());
+        const playerId = resolvedExisting ? resolvedExisting.id : (r.playerId || crypto.randomUUID());
 
-        if (!existingPlayer) {
+        if (!resolvedExisting) {
           const np: Player = {
             id: playerId,
+            seasonId,
+            seasonSlug,
             name: r.name.trim(),
             mobile: r.mobile,
             age: r.age,
@@ -5991,6 +7029,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
           };
           newPlayers.push(np);
           newlyCreatedPlayers.push(np);
+        } else if (!existingLocal) {
+          newPlayers.push({
+            ...resolvedExisting,
+            registrationId: r.regId,
+            registrationStatus: 'approved',
+          });
         }
 
         const approvedReg: Registration = {
@@ -6012,31 +7056,34 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       });
 
       if (SupabaseService.isAvailable() && newlyCreatedPlayers.length > 0) {
-        SupabaseService.upsertPlayersBulk(newlyCreatedPlayers).catch(() => {});
+        SupabaseService.upsertPlayersBulk(newlyCreatedPlayers, seasonSlug, seasonId).catch(() => {});
       }
 
-      broadcastRegistrationsSync('refresh');
-
-      return {
+      setState((prev) => ({
         ...prev,
         players: newPlayers,
         registrations: updatedRegistrations,
-      };
-    });
+      }));
+      broadcastRegistrationsSync('refresh');
 
-    fetch('/api/registrations/bulk-approve', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
-      body: JSON.stringify({ ids }),
-    }).catch(() => {});
+      fetch(`/api/registrations/bulk-approve?season=${encodeURIComponent(seasonSlug)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({ ids, seasonSlug }),
+      }).catch(() => {});
+    };
+
+    void runBulkApproval();
   };
 
   // Global resets & export
   const resetToDefault = () => {
-    setState(DEFAULT_STATE);
+    if (getActiveSeasonCtx().isLocked) return;
+    setState(buildSeasonDefaultState(activeSeasonRef.current));
   };
 
   const clearTournamentData = () => {
+    if (getActiveSeasonCtx().isLocked) return;
     setState((prev) => ({
       ...prev,
       matches: [],
@@ -6072,49 +7119,99 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
     return false;
   };
 
-  // Hero Section Manager Actions
+  // Hero Section Manager & Cross-Season Design Studio Actions
+  const fetchHeroStateForSeason = useCallback(
+    async (seasonSlug?: string) => {
+      const targetSlug = seasonSlug || getActiveSeasonCtx().seasonSlug;
+      return SupabaseService.fetchAdminHeroState(targetSlug);
+    },
+    [getActiveSeasonCtx]
+  );
+
   const fetchAdminHeroState = useCallback(async () => {
-    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
-    return SupabaseService.fetchAdminHeroState(seasonSlug);
-  }, []);
+    return fetchHeroStateForSeason();
+  }, [fetchHeroStateForSeason]);
 
-  const saveHeroDraft = useCallback(async (draft: HeroConfig) => {
-    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
-    const currentUser = AuthService.getCurrentUser();
-    const author = currentUser?.name || currentUser?.username || 'Tournament Director';
-    return SupabaseService.saveHeroDraft(draft, author, seasonSlug);
-  }, []);
+  const saveHeroDraftForSeason = useCallback(
+    async (draft: HeroConfig, seasonSlug?: string) => {
+      const targetSlug = seasonSlug || getActiveSeasonCtx().seasonSlug;
+      const targetMeta = seasonsRef.current.find((s) => s.seasonSlug === targetSlug);
+      const targetLocked = targetMeta
+        ? Boolean(targetMeta.isLocked || targetMeta.status === 'archived')
+        : getActiveSeasonCtx().isLocked;
+      if (targetLocked) {
+        return { success: false, error: 'Archived season is read-only. Cannot save Hero draft.' };
+      }
+      const currentUser = AuthService.getCurrentUser();
+      const author = currentUser?.name || currentUser?.username || 'Tournament Director';
+      return SupabaseService.saveHeroDraft(draft, author, targetSlug);
+    },
+    [getActiveSeasonCtx]
+  );
 
-  const publishHeroConfig = useCallback(
+  const saveHeroDraft = useCallback(
+    async (draft: HeroConfig) => saveHeroDraftForSeason(draft),
+    [saveHeroDraftForSeason]
+  );
+
+  const publishHeroConfigForSeason = useCallback(
     async (
       config: HeroConfig,
       summary = 'Hero customization published',
-      action: 'publish' | 'restore' = 'publish'
+      action: 'publish' | 'restore' = 'publish',
+      seasonSlug?: string
     ) => {
-      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const targetSlug = seasonSlug || getActiveSeasonCtx().seasonSlug;
+      const targetMeta = seasonsRef.current.find((s) => s.seasonSlug === targetSlug);
+      const targetLocked = targetMeta
+        ? Boolean(targetMeta.isLocked || targetMeta.status === 'archived')
+        : getActiveSeasonCtx().isLocked;
+      if (targetLocked) {
+        return { success: false, error: 'Archived season is read-only. Cannot publish Hero configuration.' };
+      }
       const currentUser = AuthService.getCurrentUser();
       const author = currentUser?.name || currentUser?.username || 'Tournament Director';
-      heroPublishGuardRef.current = Date.now();
+      if (targetSlug === activeSeasonRef.current.seasonSlug) {
+        heroPublishGuardRef.current = Date.now();
+      }
       const res = await SupabaseService.publishHeroConfig(
         config,
         author,
         summary,
         action,
-        seasonSlug
+        targetSlug
       );
       if (res.success && res.published) {
-        applyPublishedHeroConfig(res.published);
+        if (targetSlug === activeSeasonRef.current.seasonSlug) {
+          applyPublishedHeroConfig(res.published, targetSlug);
+        } else {
+          try {
+            localStorage.setItem(
+              getSeasonStorageKey('spl_hero_published_cache', targetSlug),
+              JSON.stringify(res.published)
+            );
+          } catch {}
+        }
         if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
           try {
             const hch = new BroadcastChannel('spl_hero_config_channel');
-            hch.postMessage({ type: 'HERO_PUBLISHED', heroConfig: res.published, seasonSlug });
+            hch.postMessage({ type: 'HERO_PUBLISHED', heroConfig: res.published, seasonSlug: targetSlug });
             hch.close();
           } catch {}
         }
       }
       return res;
     },
-    [applyPublishedHeroConfig]
+    [applyPublishedHeroConfig, getActiveSeasonCtx]
+  );
+
+  const publishHeroConfig = useCallback(
+    async (
+      config: HeroConfig,
+      summary = 'Hero customization published',
+      action: 'publish' | 'restore' = 'publish'
+    ) => publishHeroConfigForSeason(config, summary, action),
+    [publishHeroConfigForSeason]
   );
 
   const saveHeroVersionColor = useCallback(
@@ -6122,8 +7219,10 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       if (!AuthService.canManageTournament()) {
         return { success: false, error: 'Unauthorized: Tournament Director or Super Admin required.' };
       }
-      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const { seasonSlug, isLocked } = getActiveSeasonCtx();
+      if (isLocked) return { success: false, error: 'Archived season is read-only. Cannot update Hero color.' };
       const cleanColor = sanitizeHexColor(versionColor, DEFAULT_HERO_VERSION_COLOR);
+      const seasonVerLabel = activeSeasonRef.current.seasonNumber || '3.0';
 
       // Fetch latest published & draft state so we never overwrite or reset other Hero settings
       const adminState = await SupabaseService.fetchAdminHeroState(seasonSlug).catch(() => ({
@@ -6132,18 +7231,26 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
         versions: [],
       }));
 
+      const nextSeasonBranding = {
+        ...(adminState.published.seasonBranding || DEFAULT_HERO_CONFIG.seasonBranding!),
+        presetId: cleanColor === DEFAULT_HERO_VERSION_COLOR ? ('spl-3-original' as const) : ('custom' as const),
+        useGradient: cleanColor === DEFAULT_HERO_VERSION_COLOR,
+        textColor: cleanColor,
+      };
+
       const nextPublished = normalizeHeroConfig({
         ...adminState.published,
         text: {
           ...adminState.published.text,
           versionColor: cleanColor,
         },
+        seasonBranding: nextSeasonBranding,
       });
 
       const summary =
         cleanColor === DEFAULT_HERO_VERSION_COLOR
-          ? 'Restored default Hero "3.0" text color'
-          : `Updated Hero "3.0" text color to ${cleanColor.toUpperCase()}`;
+          ? `Restored default Hero "${seasonVerLabel}" text color`
+          : `Updated Hero "${seasonVerLabel}" text color to ${cleanColor.toUpperCase()}`;
 
       const res = await publishHeroConfig(nextPublished, summary, 'publish');
 
@@ -6160,6 +7267,12 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
             {
               ...adminState.draft,
               text: { ...adminState.draft.text, versionColor: cleanColor },
+              seasonBranding: {
+                ...(adminState.draft.seasonBranding || DEFAULT_HERO_CONFIG.seasonBranding!),
+                presetId: cleanColor === DEFAULT_HERO_VERSION_COLOR ? 'spl-3-original' : 'custom',
+                useGradient: cleanColor === DEFAULT_HERO_VERSION_COLOR,
+                textColor: cleanColor,
+              },
             },
             author,
             seasonSlug
@@ -6169,40 +7282,47 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
 
       return res;
     },
-    [publishHeroConfig, publishedHeroConfig]
+    [publishHeroConfig, publishedHeroConfig, getActiveSeasonCtx]
+  );
+
+  const restoreHeroVersionForSeason = useCallback(
+    async (versionRecord: HeroVersionRecord, seasonSlug?: string) => {
+      return publishHeroConfigForSeason(
+        versionRecord.config,
+        `Restored Version v${versionRecord.versionNum}`,
+        'restore',
+        seasonSlug
+      );
+    },
+    [publishHeroConfigForSeason]
   );
 
   const restoreHeroVersion = useCallback(
-    async (versionRecord: HeroVersionRecord) => {
-      return publishHeroConfig(
-        versionRecord.config,
-        `Restored Version v${versionRecord.versionNum}`,
-        'restore'
-      );
-    },
-    [publishHeroConfig]
+    async (versionRecord: HeroVersionRecord) => restoreHeroVersionForSeason(versionRecord),
+    [restoreHeroVersionForSeason]
   );
 
   const refreshYouTubeLiveConfig = useCallback(async () => {
-    const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+    const { seasonSlug } = getActiveSeasonCtx();
     try {
       const latest = await SupabaseService.fetchYouTubeLiveConfig(seasonSlug);
-      applyYoutubeLiveConfig(latest);
+      applyYoutubeLiveConfig(latest, seasonSlug);
       return latest;
     } catch {
       return null;
     }
-  }, [applyYoutubeLiveConfig]);
+  }, [applyYoutubeLiveConfig, getActiveSeasonCtx]);
 
   const saveYouTubeLiveConfig = useCallback(
     async (config: YouTubeLiveConfig) => {
-      const seasonSlug = stateRef.current.registrationSettings.seasonSlug || 'season-4';
+      const { seasonSlug, isLocked } = getActiveSeasonCtx();
+      if (isLocked) return { success: false, error: 'Archived season is read-only. Cannot update YouTube Live settings.' };
       const currentUser = AuthService.getCurrentUser();
       const author = currentUser?.name || currentUser?.username || 'Tournament Director';
       youtubeGuardRef.current = Date.now();
       const res = await SupabaseService.saveYouTubeLiveConfig(config, author, seasonSlug);
       if (res.success && res.config) {
-        applyYoutubeLiveConfig(res.config);
+        applyYoutubeLiveConfig(res.config, seasonSlug);
         if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
           try {
             const ych = new BroadcastChannel('spl_livestream_channel');
@@ -6213,114 +7333,202 @@ export const TournamentProvider: React.FC<{ children: React.ReactNode }> = ({ ch
       }
       return res;
     },
-    [applyYoutubeLiveConfig]
+    [applyYoutubeLiveConfig, getActiveSeasonCtx]
+  );
+
+  const activeSeasonContextValue = useMemo<ActiveSeasonContextValue>(
+    () => ({
+      activeSeason,
+      seasons,
+      seasonSummaries,
+      seasonId: activeSeason.id,
+      seasonSlug: activeSeason.seasonSlug,
+      seasonNumber: activeSeason.seasonNumber,
+      editionName: activeSeason.editionName,
+      seasonStatus: activeSeason.status,
+      tournamentYear: activeSeason.tournamentYear,
+      isSeasonLocked,
+      seasonLoading,
+      seasonError,
+      refreshSeason,
+      refreshSeasonSummaries,
+      switchActiveSeason,
+      activateSeasonSafely,
+      createSeason,
+      updateSeason,
+      updateSeasonStatus,
+    }),
+    [
+      activeSeason,
+      seasons,
+      seasonSummaries,
+      isSeasonLocked,
+      seasonLoading,
+      seasonError,
+      refreshSeason,
+      refreshSeasonSummaries,
+      switchActiveSeason,
+      activateSeasonSafely,
+      createSeason,
+      updateSeason,
+      updateSeasonStatus,
+    ]
   );
 
   return (
-    <TournamentContext.Provider
-      value={{
-        state,
-        standings,
-        isCentralizedDbConnected,
-        isSupabaseConnected,
-        dbBackendType,
-        realtimeStatus,
-        reconnectRealtime,
-        testDbConnection,
-        updateSettings,
-        updatePaymentSettings,
-        saveAllSettings,
-        updateRegistrationSettings,
-        addPlayer,
-        bulkAddPlayers,
-        updatePlayer,
-        deletePlayer,
-        deletePlayersBulk,
-        clearPlayers,
-        addTeam,
-        updateTeam,
-        deleteTeam,
-        deleteTeamsBulk,
-        renameTeam,
-        toggleTeamLock,
-        togglePlayerLockInTeam,
-        setTeamCaptain,
-        setCaptainsBulk,
-        setTeamPlayer,
-        assignPlayerToTeam,
-        removePlayerFromTeam,
-        saveManualTeamEdit,
-        setTeams,
-        clearTeams,
-        setTeamFormationMode,
-        addPredefinedTeam,
-        updatePredefinedTeam,
-        deletePredefinedTeam,
-        clearPredefinedTeams,
-        updateMatch,
-        setMatches,
-        saveEditedSchedule,
-        generateFixtures,
-        deleteMatch,
-        clearResults,
-        clearAllMatches,
-        setKnockoutFormat,
-        configureKnockoutQualification,
-        generateKnockoutBracket,
-        updateKnockoutMatch,
-        saveKnockoutDraft,
-        rollbackKnockoutVersion,
-        resetSingleKnockoutMatch,
-        clearKnockout,
-        resetPlayoffs,
-        deletePlayoffs,
-        publishPlayoffs,
-        overridePlayoffQualifiedTeams,
-        setPlayoffTieBreakOrder,
-        toggleTeamPlayoffDisqualification,
-        recalculatePlayoffStandings,
-        formConfig,
-        isRegistrationOpen,
-        isRegistrationStatusHydrated,
-        tokens,
-        activeToken,
-        fetchFormConfig,
-        saveFormConfig,
-        toggleRegistrationStatus,
-        fetchTokens,
-        regenerateToken,
-        toggleTokenStatus,
-        isRegistrationsLoading,
-        registrationsSyncError,
-        refreshRegistrations,
-        submitPublicRegistration,
-        addRegistration,
-        updateRegistration,
-        approveRegistration,
-        rejectRegistration,
-        verifyPayment,
-        deleteRegistration,
-        deleteRegistrationsBulk,
-        bulkApproveRegistrations,
-        resetToDefault,
-        clearTournamentData,
-        exportStateJSON,
-        importStateJSON,
-        triggerCelebration,
-        publishedHeroConfig,
-        fetchAdminHeroState,
-        saveHeroDraft,
-        publishHeroConfig,
-        saveHeroVersionColor,
-        restoreHeroVersion,
-        youtubeLiveConfig,
-        saveYouTubeLiveConfig,
-        refreshYouTubeLiveConfig,
-      }}
-    >
-      {children}
-    </TournamentContext.Provider>
+    <ActiveSeasonContext.Provider value={activeSeasonContextValue}>
+      <TournamentContext.Provider
+        value={{
+          state,
+          standings,
+          activeSeason,
+          seasons,
+          seasonSummaries,
+          seasonLoading,
+          seasonError,
+          isSeasonLocked,
+          refreshSeason,
+          refreshSeasonSummaries,
+          switchActiveSeason,
+          activateSeasonSafely,
+          createSeason,
+          updateSeason,
+          updateSeasonStatus,
+          isCentralizedDbConnected,
+          isSupabaseConnected,
+          dbBackendType,
+          realtimeStatus,
+          reconnectRealtime,
+          testDbConnection,
+          updateSettings,
+          updatePaymentSettings,
+          saveAllSettings,
+          updateRegistrationSettings,
+          addPlayer,
+          bulkAddPlayers,
+          updatePlayer,
+          deletePlayer,
+          deletePlayersBulk,
+          clearPlayers,
+          addTeam,
+          updateTeam,
+          deleteTeam,
+          deleteTeamsBulk,
+          renameTeam,
+          toggleTeamLock,
+          togglePlayerLockInTeam,
+          setTeamCaptain,
+          setCaptainsBulk,
+          setTeamPlayer,
+          assignPlayerToTeam,
+          removePlayerFromTeam,
+          saveManualTeamEdit,
+          setTeams,
+          clearTeams,
+          setTeamFormationMode,
+          addPredefinedTeam,
+          updatePredefinedTeam,
+          deletePredefinedTeam,
+          clearPredefinedTeams,
+          updateMatch,
+          setMatches,
+          saveEditedSchedule,
+          generateFixtures,
+          deleteMatch,
+          clearResults,
+          clearAllMatches,
+          setKnockoutFormat,
+          configureKnockoutQualification,
+          generateKnockoutBracket,
+          updateKnockoutMatch,
+          saveKnockoutDraft,
+          rollbackKnockoutVersion,
+          resetSingleKnockoutMatch,
+          clearKnockout,
+          resetPlayoffs,
+          deletePlayoffs,
+          publishPlayoffs,
+          overridePlayoffQualifiedTeams,
+          setPlayoffTieBreakOrder,
+          toggleTeamPlayoffDisqualification,
+          recalculatePlayoffStandings,
+          formConfig,
+          isRegistrationOpen,
+          isRegistrationStatusHydrated,
+          tokens,
+          activeToken,
+          fetchFormConfig,
+          saveFormConfig,
+          toggleRegistrationStatus,
+          fetchTokens,
+          regenerateToken,
+          toggleTokenStatus,
+          isRegistrationsLoading,
+          registrationsSyncError,
+          refreshRegistrations,
+          submitPublicRegistration,
+          addRegistration,
+          updateRegistration,
+          approveRegistration,
+          rejectRegistration,
+          verifyPayment,
+          deleteRegistration,
+          deleteRegistrationsBulk,
+          bulkApproveRegistrations,
+          resetToDefault,
+          clearTournamentData,
+          exportStateJSON,
+          importStateJSON,
+          triggerCelebration,
+          publishedHeroConfig,
+          fetchAdminHeroState,
+          fetchHeroStateForSeason,
+          saveHeroDraft,
+          saveHeroDraftForSeason,
+          publishHeroConfig,
+          publishHeroConfigForSeason,
+          saveHeroVersionColor,
+          restoreHeroVersion,
+          restoreHeroVersionForSeason,
+          youtubeLiveConfig,
+          saveYouTubeLiveConfig,
+          refreshYouTubeLiveConfig,
+        }}
+      >
+        {children}
+      </TournamentContext.Provider>
+    </ActiveSeasonContext.Provider>
   );
+};
+
+export const useActiveSeason = (): ActiveSeasonContextValue => {
+  const ctx = useContext(ActiveSeasonContext);
+  if (ctx) return ctx;
+  const tournamentCtx = useContext(TournamentContext);
+  if (tournamentCtx) {
+    return {
+      activeSeason: tournamentCtx.activeSeason,
+      seasons: tournamentCtx.seasons,
+      seasonSummaries: tournamentCtx.seasonSummaries,
+      seasonId: tournamentCtx.activeSeason.id,
+      seasonSlug: tournamentCtx.activeSeason.seasonSlug,
+      seasonNumber: tournamentCtx.activeSeason.seasonNumber,
+      editionName: tournamentCtx.activeSeason.editionName,
+      seasonStatus: tournamentCtx.activeSeason.status,
+      tournamentYear: tournamentCtx.activeSeason.tournamentYear,
+      isSeasonLocked: tournamentCtx.isSeasonLocked,
+      seasonLoading: tournamentCtx.seasonLoading,
+      seasonError: tournamentCtx.seasonError,
+      refreshSeason: tournamentCtx.refreshSeason,
+      refreshSeasonSummaries: tournamentCtx.refreshSeasonSummaries,
+      switchActiveSeason: tournamentCtx.switchActiveSeason,
+      activateSeasonSafely: tournamentCtx.activateSeasonSafely,
+      createSeason: tournamentCtx.createSeason,
+      updateSeason: tournamentCtx.updateSeason,
+      updateSeasonStatus: tournamentCtx.updateSeasonStatus,
+    };
+  }
+  throw new Error('useActiveSeason must be used within a TournamentProvider');
 };
 
 export const useTournament = () => {

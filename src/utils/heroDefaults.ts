@@ -5,6 +5,10 @@ import {
   HeroConfig,
   HeroFontFamily,
   HeroThemePresetId,
+  SeasonBrandingConfig,
+  SeasonDesignPresetId,
+  SeasonGradientDirection,
+  TournamentSeason,
 } from '../types/tournament';
 
 export const HERO_FONT_OPTIONS: { value: HeroFontFamily; label: string; sample: string }[] = [
@@ -169,6 +173,131 @@ const DEFAULT_HERO_BUTTONS: HeroButtonConfig[] = [
 
 export const DEFAULT_HERO_VERSION_COLOR = '#fbbf24';
 
+export interface SeasonDesignPresetDefinition {
+  id: Exclude<SeasonDesignPresetId, 'custom'>;
+  name: string;
+  description: string;
+  branding: SeasonBrandingConfig;
+}
+
+// Exact original SPL 3.0 season number styling (`from-amber-200 via-amber-400 to-orange-500`)
+export const DEFAULT_SEASON_BRANDING: SeasonBrandingConfig = {
+  presetId: 'spl-3-original',
+  useGradient: true,
+  textColor: '#fbbf24',
+  primaryGradientColor: '#fde68a',
+  midGradientColor: '#fbbf24',
+  secondaryGradientColor: '#f97316',
+  gradientDirection: 'to-r',
+  fontSizeDesktop: 58,
+  fontSizeMobile: 34,
+  fontWeight: '900',
+  letterSpacing: 0,
+  textShadowEnabled: false,
+  textShadowBlur: 12,
+  glowEnabled: false,
+  glowColor: '#f59e0b',
+  glowIntensity: 35,
+  outlineColor: '#000000',
+  outlineThickness: 0,
+  editionColor: '#fcd34d',
+  editionBadgeBg: '#090d16',
+  editionBadgeBgOpacity: 0,
+  editionBadgeBorderColor: '#f59e0b',
+  editionTextWeight: '900',
+  editionLetterSpacing: 0.24,
+  editionItalic: false,
+  editionUppercase: true,
+};
+
+export const SEASON_DESIGN_PRESETS: SeasonDesignPresetDefinition[] = [
+  {
+    id: 'spl-3-original',
+    name: 'SPL 3.0 Original',
+    description: 'Authentic SPL 3.0 amber-to-orange metallic gradient (#fde68a -> #fbbf24 -> #f97316) and unboxed gold kicker.',
+    branding: { ...DEFAULT_SEASON_BRANDING },
+  },
+  {
+    id: 'championship-gold',
+    name: 'Championship Gold',
+    description: 'Burnished stadium gold gradient with subtle arena glow and gold-tinted edition badge.',
+    branding: {
+      ...DEFAULT_SEASON_BRANDING,
+      presetId: 'championship-gold',
+      primaryGradientColor: '#fef08a',
+      midGradientColor: '#f59e0b',
+      secondaryGradientColor: '#d97706',
+      glowEnabled: true,
+      glowColor: '#f59e0b',
+      glowIntensity: 40,
+      editionColor: '#fde68a',
+      editionBadgeBg: '#451a03',
+      editionBadgeBgOpacity: 45,
+      editionBadgeBorderColor: '#f59e0b',
+    },
+  },
+  {
+    id: 'electric-red',
+    name: 'Electric Red',
+    description: 'High-voltage crimson & rose smash gradient with arena red glow and dark crimson badge.',
+    branding: {
+      ...DEFAULT_SEASON_BRANDING,
+      presetId: 'electric-red',
+      textColor: '#f43f5e',
+      primaryGradientColor: '#fecdd3',
+      midGradientColor: '#f43f5e',
+      secondaryGradientColor: '#dc2626',
+      glowEnabled: true,
+      glowColor: '#f43f5e',
+      glowIntensity: 50,
+      editionColor: '#fda4af',
+      editionBadgeBg: '#4c0519',
+      editionBadgeBgOpacity: 55,
+      editionBadgeBorderColor: '#f43f5e',
+    },
+  },
+  {
+    id: 'royal-purple',
+    name: 'Royal Purple',
+    description: 'Regal violet-to-indigo broadcast gradient paired with amethyst glow and royal badge.',
+    branding: {
+      ...DEFAULT_SEASON_BRANDING,
+      presetId: 'royal-purple',
+      textColor: '#a855f7',
+      primaryGradientColor: '#e9d5ff',
+      midGradientColor: '#a855f7',
+      secondaryGradientColor: '#6366f1',
+      glowEnabled: true,
+      glowColor: '#a855f7',
+      glowIntensity: 48,
+      editionColor: '#d8b4fe',
+      editionBadgeBg: '#2e1065',
+      editionBadgeBgOpacity: 55,
+      editionBadgeBorderColor: '#a855f7',
+    },
+  },
+  {
+    id: 'ice-blue',
+    name: 'Ice Blue',
+    description: 'Crisp glacier cyan-to-cobalt gradient with stadium ice glow and midnight sky badge.',
+    branding: {
+      ...DEFAULT_SEASON_BRANDING,
+      presetId: 'ice-blue',
+      textColor: '#38bdf8',
+      primaryGradientColor: '#e0f2fe',
+      midGradientColor: '#38bdf8',
+      secondaryGradientColor: '#2563eb',
+      glowEnabled: true,
+      glowColor: '#38bdf8',
+      glowIntensity: 45,
+      editionColor: '#7dd3fc',
+      editionBadgeBg: '#082f49',
+      editionBadgeBgOpacity: 55,
+      editionBadgeBorderColor: '#38bdf8',
+    },
+  },
+];
+
 export const DEFAULT_HERO_CONFIG: HeroConfig = {
   version: 1,
   status: 'published',
@@ -285,6 +414,7 @@ export const DEFAULT_HERO_CONFIG: HeroConfig = {
     floatingParticles: true,
     spotlightEffects: true,
   },
+  seasonBranding: { ...DEFAULT_SEASON_BRANDING },
 };
 
 export function cloneHeroConfig(config: HeroConfig): HeroConfig {
@@ -728,5 +858,128 @@ export function normalizeHeroConfig(input?: Partial<HeroConfig> | null): HeroCon
           ? raw.animations.spotlightEffects
           : base.animations.spotlightEffects,
     },
+    seasonBranding: normalizeSeasonBranding(raw.seasonBranding, raw.text?.versionColor),
   };
+}
+
+export function normalizeSeasonBranding(
+  rawBranding?: Partial<SeasonBrandingConfig> | null,
+  legacyVersionColor?: string
+): SeasonBrandingConfig {
+  const def = DEFAULT_SEASON_BRANDING;
+  const allowedPresets = new Set<SeasonDesignPresetId>([
+    'spl-3-original',
+    'championship-gold',
+    'electric-red',
+    'royal-purple',
+    'ice-blue',
+    'custom',
+  ]);
+  const allowedDirections = new Set<SeasonGradientDirection>(['to-r', 'to-br', 'to-b', 'to-l']);
+  const allowedWeights = new Set(['500', '600', '700', '800', '900']);
+  const allowedEditionWeights = new Set(['600', '700', '800', '900']);
+
+  // Preserve legacy Hero Section Manager single-color overrides when no seasonBranding object existed yet
+  const cleanLegacyColor = sanitizeHexColor(legacyVersionColor, DEFAULT_HERO_VERSION_COLOR);
+  if ((!rawBranding || typeof rawBranding !== 'object') && cleanLegacyColor !== DEFAULT_HERO_VERSION_COLOR) {
+    return {
+      ...def,
+      presetId: 'custom',
+      useGradient: false,
+      textColor: cleanLegacyColor,
+      primaryGradientColor: cleanLegacyColor,
+      midGradientColor: cleanLegacyColor,
+      secondaryGradientColor: cleanLegacyColor,
+    };
+  }
+
+  const r = rawBranding || {};
+  return {
+    presetId: (allowedPresets.has(r.presetId as SeasonDesignPresetId)
+      ? r.presetId
+      : def.presetId) as SeasonDesignPresetId,
+    useGradient: typeof r.useGradient === 'boolean' ? r.useGradient : def.useGradient,
+    textColor: sanitizeHexColor(r.textColor, cleanLegacyColor || def.textColor),
+    primaryGradientColor: sanitizeHexColor(r.primaryGradientColor, def.primaryGradientColor),
+    midGradientColor: sanitizeHexColor(r.midGradientColor, def.midGradientColor),
+    secondaryGradientColor: sanitizeHexColor(r.secondaryGradientColor, def.secondaryGradientColor),
+    gradientDirection: (allowedDirections.has(r.gradientDirection as SeasonGradientDirection)
+      ? r.gradientDirection
+      : def.gradientDirection) as SeasonGradientDirection,
+    fontSizeDesktop: clampNumber(r.fontSizeDesktop, 28, 120, def.fontSizeDesktop),
+    fontSizeMobile: clampNumber(r.fontSizeMobile, 20, 72, def.fontSizeMobile),
+    fontWeight: (allowedWeights.has(String(r.fontWeight))
+      ? String(r.fontWeight)
+      : def.fontWeight) as SeasonBrandingConfig['fontWeight'],
+    letterSpacing: clampNumber(r.letterSpacing, -4, 16, def.letterSpacing),
+    textShadowEnabled: typeof r.textShadowEnabled === 'boolean' ? r.textShadowEnabled : def.textShadowEnabled,
+    textShadowBlur: clampNumber(r.textShadowBlur, 0, 32, def.textShadowBlur),
+    glowEnabled: typeof r.glowEnabled === 'boolean' ? r.glowEnabled : def.glowEnabled,
+    glowColor: sanitizeHexColor(r.glowColor, def.glowColor),
+    glowIntensity: clampNumber(r.glowIntensity, 0, 100, def.glowIntensity),
+    outlineColor: sanitizeHexColor(r.outlineColor, def.outlineColor),
+    outlineThickness: clampNumber(r.outlineThickness, 0, 4, def.outlineThickness),
+    editionColor: sanitizeHexColor(r.editionColor, def.editionColor),
+    editionBadgeBg: sanitizeHexColor(r.editionBadgeBg, def.editionBadgeBg),
+    editionBadgeBgOpacity: clampNumber(r.editionBadgeBgOpacity, 0, 100, def.editionBadgeBgOpacity),
+    editionBadgeBorderColor: sanitizeHexColor(r.editionBadgeBorderColor, def.editionBadgeBorderColor),
+    editionTextWeight: (allowedEditionWeights.has(String(r.editionTextWeight))
+      ? String(r.editionTextWeight)
+      : def.editionTextWeight) as SeasonBrandingConfig['editionTextWeight'],
+    editionLetterSpacing: clampNumber(r.editionLetterSpacing, 0.04, 0.4, def.editionLetterSpacing),
+    editionItalic: typeof r.editionItalic === 'boolean' ? r.editionItalic : def.editionItalic,
+    editionUppercase: typeof r.editionUppercase === 'boolean' ? r.editionUppercase : def.editionUppercase,
+  };
+}
+
+export function applySeasonDesignPreset(
+  config: HeroConfig,
+  presetId: Exclude<SeasonDesignPresetId, 'custom'>
+): HeroConfig {
+  const preset = SEASON_DESIGN_PRESETS.find((p) => p.id === presetId) || SEASON_DESIGN_PRESETS[0];
+  const next = cloneHeroConfig(config);
+  const b = { ...preset.branding };
+  next.seasonBranding = b;
+  next.text.versionColor = b.presetId === 'spl-3-original' ? DEFAULT_HERO_VERSION_COLOR : b.textColor;
+  next.text.kickerColor = b.editionColor;
+  return next;
+}
+
+export function isDefaultSpl3OriginalBranding(
+  branding?: SeasonBrandingConfig,
+  legacyVersionColor?: string
+): boolean {
+  const cleanLegacy = sanitizeHexColor(legacyVersionColor, DEFAULT_HERO_VERSION_COLOR);
+  if (!branding) return cleanLegacy === DEFAULT_HERO_VERSION_COLOR;
+  return (
+    branding.presetId === 'spl-3-original' &&
+    branding.useGradient === true &&
+    branding.primaryGradientColor === DEFAULT_SEASON_BRANDING.primaryGradientColor &&
+    branding.midGradientColor === DEFAULT_SEASON_BRANDING.midGradientColor &&
+    branding.secondaryGradientColor === DEFAULT_SEASON_BRANDING.secondaryGradientColor &&
+    branding.gradientDirection === DEFAULT_SEASON_BRANDING.gradientDirection &&
+    branding.fontSizeDesktop === DEFAULT_SEASON_BRANDING.fontSizeDesktop &&
+    branding.fontSizeMobile === DEFAULT_SEASON_BRANDING.fontSizeMobile &&
+    branding.fontWeight === DEFAULT_SEASON_BRANDING.fontWeight &&
+    branding.letterSpacing === DEFAULT_SEASON_BRANDING.letterSpacing &&
+    !branding.textShadowEnabled &&
+    !branding.glowEnabled &&
+    branding.outlineThickness === 0 &&
+    cleanLegacy === DEFAULT_HERO_VERSION_COLOR
+  );
+}
+
+export function buildSeasonInitialHeroConfig(
+  season: Pick<TournamentSeason, 'seasonNumber' | 'editionName' | 'leagueName' | 'seasonSlug'>
+): HeroConfig {
+  const base = cloneHeroConfig(DEFAULT_HERO_CONFIG);
+  const num = (season.seasonNumber || '3.0').trim();
+  const edition = (season.editionName || 'Championship Edition').trim();
+  const league = (season.leagueName || 'SMASH PREMIER LEAGUE').trim().toUpperCase();
+
+  base.logo.subtitle = `SPL ${num} · ${edition.toUpperCase()}`;
+  base.text.kickerText = edition.toUpperCase();
+  base.text.mainHeading.text = `${league} ${num}`;
+  base.seasonBranding = { ...DEFAULT_SEASON_BRANDING };
+  return base;
 }

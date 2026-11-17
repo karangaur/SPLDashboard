@@ -44,14 +44,18 @@ import { AuthService } from '../../services/authService';
 import { SupabaseService } from '../../services/supabaseService';
 import {
   APPROVED_HERO_ACTION_TARGETS,
+  applySeasonDesignPreset,
+  buildSeasonInitialHeroConfig,
   cloneHeroConfig,
   DEFAULT_HERO_CONFIG,
   DEFAULT_HERO_VERSION_COLOR,
+  DEFAULT_SEASON_BRANDING,
   HERO_ANIMATION_PRESETS,
   HERO_FONT_OPTIONS,
   HERO_THEME_PRESETS,
   normalizeHeroConfig,
   sanitizeHexColor,
+  SEASON_DESIGN_PRESETS,
   validateHeroActionDestination,
 } from '../../utils/heroDefaults';
 import { HeroSectionCanvas } from '../home/HeroSectionCanvas';
@@ -75,9 +79,13 @@ export const HeroSectionManagerView: React.FC = () => {
     publishHeroConfig,
     saveHeroVersionColor,
     restoreHeroVersion,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
-  const canManage = AuthService.canManageTournament();
+  const canManage = AuthService.canManageTournament() && !isSeasonLocked;
+  const activeSeasonNumber = activeSeason.seasonNumber || '3.0';
+  const activeEditionName = activeSeason.editionName || 'Champion Edition';
 
   const [activeTab, setActiveTab] = useState<EditorTab>('background');
   const [draftConfig, setDraftConfig] = useState<HeroConfig>(() =>
@@ -166,6 +174,7 @@ export const HeroSectionManagerView: React.FC = () => {
       buttons: c.buttons,
       theme: c.theme,
       animations: c.animations,
+      seasonBranding: c.seasonBranding,
     });
     return JSON.stringify(stripMeta(draftConfig)) !== JSON.stringify(stripMeta(livePublished));
   }, [draftConfig, livePublished]);
@@ -283,6 +292,12 @@ export const HeroSectionManagerView: React.FC = () => {
       setDraftConfig((prev) => ({
         ...prev,
         text: { ...prev.text, versionColor: valid },
+        seasonBranding: {
+          ...(prev.seasonBranding || DEFAULT_SEASON_BRANDING),
+          presetId: valid === DEFAULT_HERO_VERSION_COLOR ? 'spl-3-original' : 'custom',
+          useGradient: valid === DEFAULT_HERO_VERSION_COLOR,
+          textColor: valid,
+        },
       }));
       setPreviewSource('draft');
     }
@@ -303,14 +318,15 @@ export const HeroSectionManagerView: React.FC = () => {
       setDraftConfig((prev) => ({
         ...prev,
         text: { ...prev.text, versionColor: savedColor },
+        seasonBranding: res.published?.seasonBranding || prev.seasonBranding,
       }));
       setVersionColorHex(savedColor);
       if (res.version) {
         setVersions((prev) => [res.version!, ...prev.filter((v) => v.id !== res.version!.id)]);
       }
-      showToast('success', `"3.0" text color (${savedColor.toUpperCase()}) saved and synced live across all devices!`);
+      showToast('success', `"${activeSeasonNumber}" text color (${savedColor.toUpperCase()}) saved and synced live across all devices!`);
     } else {
-      showToast('error', res.error || 'Failed to save "3.0" text color.');
+      showToast('error', res.error || `Failed to save "${activeSeasonNumber}" text color.`);
     }
   };
 
@@ -319,6 +335,7 @@ export const HeroSectionManagerView: React.FC = () => {
     setDraftConfig((prev) => ({
       ...prev,
       text: { ...prev.text, versionColor: DEFAULT_HERO_VERSION_COLOR },
+      seasonBranding: { ...DEFAULT_SEASON_BRANDING },
     }));
     setPreviewSource('draft');
     setIsResettingVersionColor(true);
@@ -330,13 +347,14 @@ export const HeroSectionManagerView: React.FC = () => {
       setDraftConfig((prev) => ({
         ...prev,
         text: { ...prev.text, versionColor: DEFAULT_HERO_VERSION_COLOR },
+        seasonBranding: res.published?.seasonBranding || { ...DEFAULT_SEASON_BRANDING },
       }));
       if (res.version) {
         setVersions((prev) => [res.version!, ...prev.filter((v) => v.id !== res.version!.id)]);
       }
-      showToast('success', 'Restored default "3.0" color matching "Meet the Contenders" and published live!');
+      showToast('success', `Restored default "${activeSeasonNumber}" color matching "Meet the Contenders" and published live!`);
     } else {
-      showToast('error', res.error || 'Failed to reset "3.0" text color.');
+      showToast('error', res.error || `Failed to reset "${activeSeasonNumber}" text color.`);
     }
   };
 
@@ -465,7 +483,8 @@ export const HeroSectionManagerView: React.FC = () => {
             <button
               type="button"
               onClick={() => setConfirmResetModal(true)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-colors cursor-pointer"
+              disabled={isSeasonLocked || !canManage}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2.5 min-h-[42px] rounded-xl text-xs font-semibold text-slate-300 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 transition-colors disabled:opacity-50 cursor-pointer"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Reset Default</span>
@@ -474,7 +493,7 @@ export const HeroSectionManagerView: React.FC = () => {
             <button
               type="button"
               onClick={handleSaveDraft}
-              disabled={isSavingDraft || isLoading}
+              disabled={isSavingDraft || isLoading || isSeasonLocked || !canManage}
               className="inline-flex items-center gap-1.5 px-4 py-2.5 min-h-[42px] rounded-xl text-xs font-bold text-slate-100 bg-slate-800 hover:bg-slate-700 border border-white/15 transition-colors disabled:opacity-50 cursor-pointer"
             >
               {isSavingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5 text-sky-400" />}
@@ -484,7 +503,7 @@ export const HeroSectionManagerView: React.FC = () => {
             <button
               type="button"
               onClick={handlePublish}
-              disabled={isPublishing || isLoading}
+              disabled={isPublishing || isLoading || isSeasonLocked || !canManage}
               className="inline-flex items-center gap-2 px-5 py-2.5 min-h-[42px] rounded-xl text-xs sm:text-sm font-black uppercase tracking-wider text-slate-950 bg-gradient-to-r from-amber-300 via-amber-400 to-orange-500 hover:from-amber-200 hover:to-orange-400 shadow-lg shadow-amber-500/20 transition-all disabled:opacity-50 cursor-pointer"
             >
               {isPublishing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
@@ -492,6 +511,12 @@ export const HeroSectionManagerView: React.FC = () => {
             </button>
           </div>
         </div>
+
+        {isSeasonLocked && (
+          <div className="mt-4 rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
+            <strong>SPL {activeSeasonNumber} is Archived (Read-Only):</strong> Hero publishing and version restores are locked. Switch to an active or draft season in Settings to edit hero branding.
+          </div>
+        )}
 
         {feedback && (
           <div
@@ -523,7 +548,7 @@ export const HeroSectionManagerView: React.FC = () => {
       {confirmResetModal && (
         <div className="rounded-2xl border border-amber-500/40 bg-amber-950/25 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="text-xs sm:text-sm text-amber-100">
-            Reset draft to the factory <strong>SPL 3.0 Champion Edition</strong> design? You can inspect the preview before clicking Publish.
+            Reset draft to the factory <strong>SPL {activeSeasonNumber} {activeEditionName}</strong> design? You can inspect the preview before clicking Publish.
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
@@ -536,10 +561,13 @@ export const HeroSectionManagerView: React.FC = () => {
             <button
               type="button"
               onClick={() => {
-                setDraftConfig(cloneHeroConfig({ ...DEFAULT_HERO_CONFIG, status: 'draft' }));
+                const seasonDefault = buildSeasonInitialHeroConfig(activeSeason);
+                seasonDefault.status = 'draft';
+                setDraftConfig(seasonDefault);
+                setVersionColorHex(DEFAULT_HERO_VERSION_COLOR);
                 setPreviewSource('draft');
                 setConfirmResetModal(false);
-                showToast('info', 'Draft reset to SPL 3.0 default. Save Draft or Publish when ready.');
+                showToast('info', `Draft reset to SPL ${activeSeasonNumber} default. Save Draft or Publish when ready.`);
               }}
               className="px-3.5 py-2 rounded-lg text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 cursor-pointer"
             >
@@ -1171,7 +1199,7 @@ export const HeroSectionManagerView: React.FC = () => {
                         }))
                       }
                       className="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2.5 text-sm text-white"
-                      placeholder="SPL 3.0 · CHAMPION EDITION"
+                      placeholder={`SPL ${activeSeasonNumber} · ${activeEditionName.toUpperCase()}`}
                     />
                   </div>
 
@@ -1538,18 +1566,53 @@ export const HeroSectionManagerView: React.FC = () => {
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <div>
                                 <h3 className="text-xs sm:text-sm font-display font-bold text-white">
-                                  3.0 Text Color
+                                  {activeSeasonNumber} Season Branding & Color
                                 </h3>
                                 <p className="text-[11px] text-slate-400 mt-0.5">
-                                  Customize the highlighted “3.0” color in the Hero heading or restore the default “Meet the Contenders” color.
+                                  Quick-apply a season preset or set a custom “{activeSeasonNumber}” highlight color. Full typography, gradient, glow, outline & badge controls are available in Season Management → Design Studio.
                                 </p>
                               </div>
                               <span className="text-[11px] font-mono px-2 py-0.5 rounded-md border border-white/10 bg-slate-950/80 text-amber-300 uppercase">
-                                {isDefaultVersionColor ? 'Default Branding' : activeVersionColor}
+                                {draftConfig.seasonBranding?.presetId && draftConfig.seasonBranding.presetId !== 'spl-3-original'
+                                  ? draftConfig.seasonBranding.presetId
+                                  : isDefaultVersionColor
+                                    ? 'SPL 3.0 Original'
+                                    : activeVersionColor}
                               </span>
                             </div>
 
-                            {/* Live Preview of Selected "3.0" Color */}
+                            {/* Season Design Preset Quick-Selector */}
+                            <div className="flex flex-wrap gap-1.5">
+                              {SEASON_DESIGN_PRESETS.map((preset) => {
+                                const isActivePreset = draftConfig.seasonBranding?.presetId === preset.id;
+                                return (
+                                  <button
+                                    key={preset.id}
+                                    type="button"
+                                    onClick={() => {
+                                      setDraftConfig((prev) => applySeasonDesignPreset(prev, preset.id));
+                                      setVersionColorHex(preset.branding.textColor);
+                                      setPreviewSource('draft');
+                                    }}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[11px] font-semibold transition-colors cursor-pointer ${
+                                      isActivePreset
+                                        ? 'border-amber-400 bg-amber-400/15 text-amber-200'
+                                        : 'border-white/10 bg-slate-950/60 text-slate-300 hover:text-white hover:bg-white/5'
+                                    }`}
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full shrink-0"
+                                      style={{
+                                        background: `linear-gradient(90deg, ${preset.branding.primaryGradientColor}, ${preset.branding.secondaryGradientColor})`,
+                                      }}
+                                    />
+                                    <span>{preset.name}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            {/* Live Preview of Selected Version Color */}
                             <div className="rounded-xl border border-white/10 bg-[#05060b] px-4 py-3 flex items-center justify-between gap-3">
                               <span className="text-[10px] font-display font-bold uppercase tracking-[0.18em] text-slate-400 shrink-0">
                                 Preview
@@ -1559,12 +1622,24 @@ export const HeroSectionManagerView: React.FC = () => {
                                 style={{ color: draftConfig.text.mainHeading.color || '#ffffff' }}
                               >
                                 SMASH PREMIER LEAGUE{' '}
-                                {isDefaultVersionColor ? (
+                                {draftConfig.seasonBranding?.useGradient ? (
+                                  <span
+                                    style={{
+                                      backgroundImage: `linear-gradient(90deg, ${draftConfig.seasonBranding.primaryGradientColor}, ${draftConfig.seasonBranding.midGradientColor}, ${draftConfig.seasonBranding.secondaryGradientColor})`,
+                                      WebkitBackgroundClip: 'text',
+                                      backgroundClip: 'text',
+                                      color: 'transparent',
+                                      WebkitTextFillColor: 'transparent',
+                                    }}
+                                  >
+                                    {activeSeasonNumber}
+                                  </span>
+                                ) : isDefaultVersionColor ? (
                                   <span className="bg-gradient-to-r from-amber-200 via-amber-400 to-orange-500 bg-clip-text text-transparent">
-                                    3.0
+                                    {activeSeasonNumber}
                                   </span>
                                 ) : (
-                                  <span style={{ color: activeVersionColor }}>3.0</span>
+                                  <span style={{ color: activeVersionColor }}>{activeSeasonNumber}</span>
                                 )}
                               </div>
                             </div>
@@ -1582,7 +1657,7 @@ export const HeroSectionManagerView: React.FC = () => {
                                   <input
                                     id="hero-30-color-picker"
                                     type="color"
-                                    aria-label="3.0 Text Color Picker"
+                                    aria-label={`${activeSeasonNumber} Text Color Picker`}
                                     value={activeVersionColor}
                                     onChange={(e) => handleVersionColorChange(e.target.value)}
                                     className="w-8 h-7 rounded-md bg-transparent border-0 cursor-pointer shrink-0 p-0"
@@ -1603,7 +1678,7 @@ export const HeroSectionManagerView: React.FC = () => {
                                 <input
                                   id="hero-30-hex-input"
                                   type="text"
-                                  aria-label="3.0 Custom HEX Color"
+                                  aria-label={`${activeSeasonNumber} Custom HEX Color`}
                                   maxLength={7}
                                   value={versionColorHex}
                                   onChange={(e) => handleVersionColorChange(e.target.value)}
@@ -2176,12 +2251,12 @@ export const HeroSectionManagerView: React.FC = () => {
                             >
                               Load into Preview
                             </button>
-                            <button
-                              type="button"
-                              onClick={() => void handleRestoreVersion(ver)}
-                              disabled={restoringVersionId === ver.id}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 cursor-pointer"
-                            >
+                              <button
+                                type="button"
+                                onClick={() => void handleRestoreVersion(ver)}
+                                disabled={restoringVersionId === ver.id || isSeasonLocked || !canManage}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 disabled:opacity-50 cursor-pointer"
+                              >
                               {restoringVersionId === ver.id ? (
                                 <Loader2 className="w-3.5 h-3.5 animate-spin" />
                               ) : (
@@ -2295,6 +2370,8 @@ export const HeroSectionManagerView: React.FC = () => {
                 heroConfig={normalizeHeroConfig(activePreviewConfig)}
                 isRegistrationOpen={previewRegOpen}
                 tournamentName={state.settings.name || 'Smash Premier League'}
+                seasonNumber={activeSeasonNumber}
+                editionName={activeEditionName}
                 organizerLabel={state.settings.organizer || 'Maharajganj Badminton Association Presents'}
                 venueLabel={state.settings.venue || 'Maharajganj Indoor Badminton Stadium'}
                 announcementText={state.settings.announcement || ''}

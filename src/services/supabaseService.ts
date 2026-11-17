@@ -16,9 +16,23 @@ import {
   HeroConfig,
   HeroVersionRecord,
   YouTubeLiveConfig,
+  TournamentSeason,
+  TournamentSeasonStatus,
+  SeasonSummaryCounts,
+  SeasonActivationCheckResult,
+  SeasonArchiveSnapshot,
+  CreateSeasonInput,
+  UpdateSeasonInput,
+  ActivateSeasonResult,
+  PredefinedTeam,
 } from '../types/tournament';
-import { createDefaultFormConfig } from '../utils/tournamentEngine';
-import { DEFAULT_HERO_CONFIG, normalizeHeroConfig, cloneHeroConfig } from '../utils/heroDefaults';
+import { calculateRegistrationStats, createDefaultFormConfig } from '../utils/tournamentEngine';
+import {
+  DEFAULT_HERO_CONFIG,
+  normalizeHeroConfig,
+  cloneHeroConfig,
+  buildSeasonInitialHeroConfig,
+} from '../utils/heroDefaults';
 import {
   DEFAULT_YOUTUBE_LIVE_CONFIG,
   normalizeYouTubeLiveConfig,
@@ -41,48 +55,1106 @@ import {
   DbRegistration,
   DbRegistrationFormConfig,
   DbRegistrationToken,
+  DbTournamentSeason,
 } from '../types/database.types';
 
 export class SupabaseService {
+  private static seasonsTableAvailable: boolean | null = null;
+  private static seasonIdColumnSupport = new Map<string, boolean>();
+
   static isAvailable(): boolean {
     return isSupabaseConfigured();
   }
 
-  // ============================================================================
-  // 1. PLAYERS
-  // ============================================================================
-  static async fetchPlayers(): Promise<Player[] | null> {
-    if (!this.isAvailable()) return null;
+  private static isMissingRelationOrColumnError(err: any, columnName?: string): boolean {
+    const code = String(err?.code || '');
+    const msg = String(err?.message || '').toLowerCase();
+    if (code === 'PGRST205' || code === '42P01' || msg.includes('does not exist') && msg.includes('relation')) {
+      return true;
+    }
+    if (columnName && (code === '42703' || code === 'PGRST204' || msg.includes(columnName.toLowerCase()))) {
+      return true;
+    }
+    return false;
+  }
+
+  static async hasTournamentSeasonsTable(): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    if (this.seasonsTableAvailable !== null) return this.seasonsTableAvailable;
     try {
-      const { data, error } = await supabase
-        .from('players')
+      const { error } = await (supabase.from('tournament_seasons' as any) as any)
+        .select('id')
+        .limit(1);
+      if (error && this.isMissingRelationOrColumnError(error)) {
+        this.seasonsTableAvailable = false;
+        return false;
+      }
+      this.seasonsTableAvailable = !error;
+      return this.seasonsTableAvailable;
+    } catch {
+      this.seasonsTableAvailable = false;
+      return false;
+    }
+  }
+
+  static async hasSeasonIdColumn(tableName: string): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    const cached = this.seasonIdColumnSupport.get(tableName);
+    if (cached !== undefined) return cached;
+    try {
+      const { error } = await (supabase.from(tableName as any) as any)
+        .select('season_id')
+        .limit(1);
+      if (error && this.isMissingRelationOrColumnError(error, 'season_id')) {
+        this.seasonIdColumnSupport.set(tableName, false);
+        return false;
+      }
+      const supported = !error;
+      this.seasonIdColumnSupport.set(tableName, supported);
+      return supported;
+    } catch {
+      this.seasonIdColumnSupport.set(tableName, false);
+      return false;
+    }
+  }
+
+  private static inferSeasonNumberFromText(text?: string | null, fallback = '3.0'): string {
+    const raw = String(text || '');
+    const decimalMatch = raw.match(/\b(\d+\.\d+)\b/);
+    if (decimalMatch) return decimalMatch[1];
+    if (/\bseason\s*iv\b/i.test(raw) && !/\b4\.0\b/.test(raw)) return '3.0';
+    if (/\bseason\s*iii\b/i.test(raw)) return '3.0';
+    if (/\bseason\s*v\b/i.test(raw)) return '5.0';
+    return fallback;
+  }
+
+  private static mapDbSeason(row: DbTournamentSeason | any): TournamentSeason {
+    const settingsJson = (row.settings_json && typeof row.settings_json === 'object' ? row.settings_json : {}) as Record<string, any>;
+    const status = (row.status || (row.is_active ? 'active' : 'upcoming')) as TournamentSeasonStatus;
+    return {
+      id: String(row.id),
+      leagueName: String(row.league_name || 'SMASH PREMIER LEAGUE'),
+      leagueShortName: String(row.league_short_name || 'SPL'),
+      seasonNumber: String(row.season_number || '3.0'),
+      editionName: String(row.edition_name || 'CHAMPION EDITION'),
+      seasonTitle: String(row.season_title || settingsJson.seasonTitle || `Season ${row.season_number || '3.0'} (${row.edition_name || 'Edition'})`),
+      seasonSlug: String(row.season_slug || 'season-4'),
+      tournamentYear: Number(row.tournament_year || new Date().getFullYear()),
+      status,
+      isActive: Boolean(row.is_active),
+      isLocked: Boolean(row.is_locked || status === 'archived'),
+      entryFee: Number(row.entry_fee ?? settingsJson.entryFee ?? 500),
+      maxSlots: Number(row.max_slots ?? settingsJson.maxSlots ?? 32),
+      courtsCount: Number(row.courts_count ?? settingsJson.courts ?? 2),
+      courtNames: Array.isArray(settingsJson.courtNames) ? settingsJson.courtNames : undefined,
+      venue: row.venue || settingsJson.venue || undefined,
+      organizer: row.organizer || settingsJson.organizer || undefined,
+      date: row.date || settingsJson.date || undefined,
+      startDate: settingsJson.startDate || undefined,
+      endDate: settingsJson.endDate || undefined,
+      description: settingsJson.description || undefined,
+      announcement: settingsJson.announcement || undefined,
+      scoringRules: settingsJson.scoringRules || undefined,
+      playoffSettings: settingsJson.playoffSettings ? normalizePlayoffSettings(settingsJson.playoffSettings) : undefined,
+      registrationEnabled: settingsJson.registrationEnabled !== undefined ? Boolean(settingsJson.registrationEnabled) : true,
+      historicalSummary: settingsJson.historicalSummary || undefined,
+      createdAt: row.created_at ? new Date(row.created_at).getTime() : undefined,
+      updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : undefined,
+    };
+  }
+
+  static synthesizeSeasonFromFormConfig(row?: DbRegistrationFormConfig | null): TournamentSeason {
+    const appJson = (row?.appearance_json as any) || {};
+    const tSettings = appJson.tournamentSettings || {};
+    const slug = row?.season_slug || 'season-4';
+    const seasonTitle = row?.season_title || tSettings.season || 'Season IV (Championship Edition)';
+    const inferredNumber =
+      String(appJson.seasonNumber || '').trim() ||
+      (slug === 'season-4' ? '3.0' : this.inferSeasonNumberFromText(seasonTitle, '3.0'));
+    const editionName =
+      String(appJson.editionName || '').trim() ||
+      (inferredNumber === '3.0' ? 'CHAMPION EDITION' : 'To Be Announced');
+    const yearMatch = String(row?.date || '').match(/\b(20\d{2})\b/);
+    const tournamentYear = Number(appJson.tournamentYear) || (yearMatch ? Number(yearMatch[1]) : 2026);
+    const resolvedDate = row?.date || tSettings.date || (slug === 'season-4' ? '2026-10-25' : undefined);
+
+    return {
+      id: String(row?.season_id || row?.id || slug),
+      leagueName: 'SMASH PREMIER LEAGUE',
+      leagueShortName: 'SPL',
+      seasonNumber: inferredNumber,
+      editionName,
+      seasonTitle,
+      seasonSlug: slug,
+      tournamentYear,
+      status: (appJson.seasonStatus as TournamentSeasonStatus) || (slug === 'season-4' ? 'active' : 'upcoming'),
+      isActive: slug === 'season-4',
+      isLocked: appJson.seasonStatus === 'archived',
+      entryFee: Number(row?.entry_fee ?? tSettings.entryFee ?? 500),
+      maxSlots: Number(row?.max_slots ?? tSettings.slotLimit ?? 32),
+      courtsCount: Number(appJson.courts ?? tSettings.courts ?? 2),
+      courtNames: Array.isArray(appJson.courtNames) ? appJson.courtNames : Array.isArray(tSettings.courtNames) ? tSettings.courtNames : undefined,
+      venue: row?.venue || tSettings.venue || 'Maharajganj Indoor Badminton Stadium',
+      organizer: tSettings.organizer || 'SPL Tournament Committee',
+      date: resolvedDate,
+      announcement: tSettings.announcement || undefined,
+      scoringRules: tSettings.scoringRules || undefined,
+      playoffSettings: tSettings.playoffSettings ? normalizePlayoffSettings(tSettings.playoffSettings) : undefined,
+      registrationEnabled: row?.enabled !== false,
+      historicalSummary:
+        appJson.historicalSummary ||
+        (slug === 'season-4'
+          ? {
+              champions: 'Karan & Saptrishi',
+              championTeam: 'Team Karan',
+              runnersUp: 'Alok & Ravi',
+              runnerUpTeam: 'Team Alok',
+            }
+          : undefined),
+      createdAt: row?.created_at ? new Date(row.created_at).getTime() : undefined,
+      updatedAt: row?.updated_at ? new Date(row.updated_at).getTime() : undefined,
+    };
+  }
+
+  static getDefaultFallbackSeason(): TournamentSeason {
+    return this.synthesizeSeasonFromFormConfig(null);
+  }
+
+  static async fetchSeasons(): Promise<TournamentSeason[]> {
+    if (!this.isAvailable()) {
+      return [this.getDefaultFallbackSeason()];
+    }
+    try {
+      const hasTable = await this.hasTournamentSeasonsTable();
+      if (hasTable) {
+        const { data, error } = await (supabase.from('tournament_seasons' as any) as any)
+          .select('*')
+          .order('tournament_year', { ascending: false })
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data) && data.length > 0) {
+          return data.map((row: any) => this.mapDbSeason(row));
+        }
+      }
+
+      // Fallback before Phase 2 migration: derive seasons from registration_form_config
+      const { data: formRows } = await supabase
+        .from('registration_form_config')
         .select('*')
-        .order('name', { ascending: true });
+        .order('updated_at', { ascending: false });
+      if (Array.isArray(formRows) && formRows.length > 0) {
+        return (formRows as DbRegistrationFormConfig[]).map((r) => this.synthesizeSeasonFromFormConfig(r));
+      }
+    } catch {}
+    return [this.getDefaultFallbackSeason()];
+  }
 
-      if (error || !data) return null;
+  static async fetchActiveSeason(): Promise<TournamentSeason> {
+    if (!this.isAvailable()) {
+      return this.getDefaultFallbackSeason();
+    }
+    try {
+      const hasTable = await this.hasTournamentSeasonsTable();
+      if (hasTable) {
+        const { data: activeRow, error } = await (supabase.from('tournament_seasons' as any) as any)
+          .select('*')
+          .eq('is_active', true)
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (!error && activeRow) {
+          return this.mapDbSeason(activeRow);
+        }
 
-      return (data as DbPlayer[]).map((p: any) => ({
-        id: p.id,
-        name: p.name,
-        mobile: p.mobile || undefined,
-        age: p.age || undefined,
-        gender: p.gender,
-        skillLevel: p.skill_level === 'Pro' ? 'Pro' : p.skill_level === 'Intermediate' ? 'Intermediate' : 'Advanced',
-        photoUrl: p.photo_url || undefined,
-        registrationStatus: p.registration_status || 'direct',
-        registrationId: p.registration_id || undefined,
-        city: p.city || undefined,
-        category: p.category || undefined,
-        style: p.style || undefined,
-      }));
+        const { data: firstRow } = await (supabase.from('tournament_seasons' as any) as any)
+          .select('*')
+          .order('tournament_year', { ascending: false })
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (firstRow) {
+          return this.mapDbSeason(firstRow);
+        }
+      }
+
+      const row = await this.fetchFormConfigRow('season-4', { allowFallback: true });
+      return this.synthesizeSeasonFromFormConfig(row);
+    } catch {
+      return this.getDefaultFallbackSeason();
+    }
+  }
+
+  static async resolveSeasonContext(seasonSlugOrId?: string): Promise<TournamentSeason> {
+    if (!seasonSlugOrId) return this.fetchActiveSeason();
+    const seasons = await this.fetchSeasons();
+    const matched = seasons.find(
+      (s) => s.seasonSlug === seasonSlugOrId || s.id === seasonSlugOrId || s.seasonNumber === seasonSlugOrId
+    );
+    if (matched) return matched;
+    if (this.isAvailable()) {
+      const row = await this.fetchFormConfigRow(seasonSlugOrId, { allowFallback: false });
+      if (row) return this.synthesizeSeasonFromFormConfig(row);
+    }
+    return this.fetchActiveSeason();
+  }
+
+  static async fetchSeasonSummaries(
+    seasonsList?: TournamentSeason[]
+  ): Promise<Record<string, SeasonSummaryCounts>> {
+    const out: Record<string, SeasonSummaryCounts> = {};
+    try {
+      const res = await fetch(`/api/seasons/summaries?t=${Date.now()}`, { cache: 'no-store' });
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.summaries && typeof data.summaries === 'object') {
+          Object.assign(out, data.summaries);
+        }
+      }
+    } catch {}
+
+    if (this.isAvailable()) {
+      try {
+        const list = seasonsList && seasonsList.length > 0 ? seasonsList : await this.fetchSeasons();
+        await Promise.all(
+          list.map(async (s) => {
+            const slug = s.seasonSlug;
+            const prev = out[slug] || {
+              seasonSlug: slug,
+              seasonId: s.id,
+              registeredPlayers: 0,
+              rosterPlayers: 0,
+              teamsCount: 0,
+              matchesCount: 0,
+              liveMatchesCount: 0,
+            };
+            const [regRes, teamRes, matchRes] = await Promise.all([
+              supabase.from('registrations').select('id', { count: 'exact', head: true }).eq('season_slug', slug),
+              supabase.from('teams').select('id', { count: 'exact', head: true }).eq('season_slug', slug),
+              supabase.from('matches').select('id, status').eq('tournament_season', slug),
+            ]);
+            const matchesArr = Array.isArray(matchRes.data) ? matchRes.data : [];
+            const liveInDb = matchesArr.filter(
+              (m: any) => m.status === 'live' || m.status === 'paused'
+            ).length;
+            out[slug] = {
+              seasonSlug: slug,
+              seasonId: s.id,
+              registeredPlayers: Math.max(prev.registeredPlayers, regRes.count || 0),
+              rosterPlayers: Math.max(prev.rosterPlayers, 0),
+              teamsCount: Math.max(prev.teamsCount, teamRes.count || 0),
+              matchesCount: Math.max(prev.matchesCount, matchesArr.length),
+              liveMatchesCount: Math.max(prev.liveMatchesCount, liveInDb),
+            };
+          })
+        );
+      } catch {}
+    }
+    return out;
+  }
+
+  static async switchGlobalActiveSeason(seasonSlugOrId: string): Promise<TournamentSeason | null> {
+    if (!this.isAvailable() || !seasonSlugOrId) return null;
+    try {
+      const hasTable = await this.hasTournamentSeasonsTable();
+      if (!hasTable) {
+        return await this.resolveSeasonContext(seasonSlugOrId);
+      }
+      const seasons = await this.fetchSeasons();
+      const target = seasons.find((s) => s.id === seasonSlugOrId || s.seasonSlug === seasonSlugOrId);
+      if (!target) return null;
+      const prevActive = seasons.find((s) => s.isActive);
+
+      const nowIso = new Date().toISOString();
+      const { error: clearErr } = await (supabase.from('tournament_seasons' as any) as any)
+        .update({ is_active: false, updated_at: nowIso })
+        .neq('id', target.id);
+      if (clearErr) return null;
+
+      const nextStatus: TournamentSeasonStatus =
+        target.status === 'archived' || target.status === 'completed' ? target.status : 'active';
+      const { data: updated, error } = await (supabase.from('tournament_seasons' as any) as any)
+        .update({ is_active: true, status: nextStatus, updated_at: nowIso })
+        .eq('id', target.id)
+        .select('*')
+        .single();
+
+      if (error || !updated) {
+        // Atomic rollback to previous active season
+        if (prevActive) {
+          await (supabase.from('tournament_seasons' as any) as any)
+            .update({ is_active: true, updated_at: nowIso })
+            .eq('id', prevActive.id);
+        }
+        return null;
+      }
+      void this.logAudit('season_switched_active', 'tournament_seasons', target.id, {
+        seasonSlug: target.seasonSlug,
+        seasonNumber: target.seasonNumber,
+      }, undefined, target.id);
+      return this.mapDbSeason(updated);
     } catch {
       return null;
     }
   }
 
-  static async upsertPlayer(player: Player): Promise<boolean> {
+  static async activateSeasonSafely(
+    seasonIdOrSlug: string,
+    options?: { checkOngoingMatches?: boolean; force?: boolean }
+  ): Promise<ActivateSeasonResult> {
+    if (!seasonIdOrSlug) {
+      return { success: false, error: 'Target season is required.' };
+    }
+    const checkOngoingMatches = options?.checkOngoingMatches !== false;
+    const force = Boolean(options?.force);
+
+    try {
+      if (this.isAvailable()) {
+        // Phase 5 Verification Gate: never report Supabase activation success if tournament_seasons table is missing
+        this.seasonsTableAvailable = null;
+        const hasTable = await this.hasTournamentSeasonsTable();
+        if (!hasTable) {
+          return {
+            success: false,
+            error:
+              'Database migration required: public.tournament_seasons table was not found in Supabase. Run supabase/migrations/20261117_multi_season_schema.sql in Supabase SQL Editor before activating globally.',
+          };
+        }
+
+        if (checkOngoingMatches && !force) {
+          const currentActive = await this.fetchActiveSeason();
+          if (
+            currentActive &&
+            currentActive.seasonSlug !== seasonIdOrSlug &&
+            currentActive.id !== seasonIdOrSlug
+          ) {
+            const { data: liveRows } = await supabase
+              .from('matches')
+              .select('id, status')
+              .eq('tournament_season', currentActive.seasonSlug)
+              .in('status', ['live', 'paused', 'postponed']);
+            const liveCount = Array.isArray(liveRows) ? liveRows.length : 0;
+            if (liveCount > 0) {
+              return {
+                success: false,
+                requiresConfirmation: true,
+                liveMatchesCount: liveCount,
+                error: `${liveCount} live or paused match(es) are in progress in SPL ${currentActive.seasonNumber}.`,
+              };
+            }
+          }
+        }
+      }
+
+      const apiRes = await fetch('/api/seasons/active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify({
+          seasonIdOrSlug,
+          checkOngoingMatches,
+          force,
+        }),
+      }).catch(() => null);
+
+      if (apiRes) {
+        const apiData = await apiRes.json().catch(() => ({}));
+        if (apiRes.status === 409 && apiData?.requiresConfirmation) {
+          return {
+            success: false,
+            requiresConfirmation: true,
+            liveMatchesCount: Number(apiData.liveMatchesCount || 1),
+            error: apiData.error || 'Live matches are currently in progress.',
+          };
+        }
+        if (!apiRes.ok) {
+          if (!this.isAvailable()) {
+            return { success: false, error: apiData?.error || 'Failed to activate season.' };
+          }
+        } else if (apiData?.activeSeason && !this.isAvailable()) {
+          return { success: true, activeSeason: apiData.activeSeason };
+        }
+      }
+
+      if (this.isAvailable()) {
+        const switched = await this.switchGlobalActiveSeason(seasonIdOrSlug);
+        if (!switched) {
+          return { success: false, error: 'Failed to switch active season in Supabase.' };
+        }
+        return { success: true, activeSeason: switched };
+      }
+
+      return { success: false, error: 'Unable to activate selected season.' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Activation failed.' };
+    }
+  }
+
+  static async createSeason(
+    input: CreateSeasonInput
+  ): Promise<{ success: boolean; season?: TournamentSeason; error?: string }> {
+    if (!this.isAvailable()) {
+      return { success: false, error: 'Supabase not configured.' };
+    }
+    const cleanSlug = input.seasonSlug.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    const cleanNumber = input.seasonNumber.trim();
+    const cleanEdition = input.editionName.trim();
+    const seasonTitle = (input.seasonTitle || `Smash Premier League — Season ${cleanNumber} (${cleanEdition})`).trim();
+    const year = input.tournamentYear || new Date().getFullYear();
+    const entryFee = input.entryFee ?? 500;
+    const maxSlots = input.maxSlots ?? 32;
+    const nowIso = new Date().toISOString();
+
+    try {
+      let sourceSeason: TournamentSeason | null = null;
+      let sourceFormRow: DbRegistrationFormConfig | null = null;
+      if (input.copySettingsFromSeasonSlug) {
+        const allSeasons = await this.fetchSeasons();
+        sourceSeason =
+          allSeasons.find((s) => s.seasonSlug === input.copySettingsFromSeasonSlug) || null;
+        sourceFormRow = await this.fetchFormConfigRow(input.copySettingsFromSeasonSlug, {
+          allowFallback: false,
+        });
+      }
+
+      const resolvedStatus: TournamentSeasonStatus = input.activateNow
+        ? 'active'
+        : input.status && ['upcoming', 'active'].includes(input.status)
+          ? input.status
+          : 'upcoming';
+
+      const hasTable = await this.hasTournamentSeasonsTable();
+      let createdSeason: TournamentSeason | null = null;
+      let seasonId = cleanSlug;
+
+      const resolvedVenue =
+        input.venue || sourceSeason?.venue || 'Maharajganj Indoor Badminton Stadium';
+      const resolvedOrganizer =
+        input.organizer || sourceSeason?.organizer || 'SPL Tournament Committee';
+      const resolvedCourts = input.courtsCount ?? sourceSeason?.courtsCount ?? 2;
+      const resolvedCourtNames =
+        input.courtNames || sourceSeason?.courtNames || ['Court 1', 'Court 2'];
+      const resolvedRegistrationEnabled =
+        input.registrationEnabled !== undefined ? Boolean(input.registrationEnabled) : true;
+      const resolvedDate = (input.date || input.startDate || '').trim();
+
+      const settingsJsonPayload: Record<string, any> = {
+        description: input.description || '',
+        startDate: input.startDate || '',
+        endDate: input.endDate || '',
+        courtNames: resolvedCourtNames,
+        registrationEnabled: resolvedRegistrationEnabled,
+        ...(input.historicalSummary ? { historicalSummary: input.historicalSummary } : {}),
+        ...(sourceSeason?.scoringRules ? { scoringRules: sourceSeason.scoringRules } : {}),
+        ...(sourceSeason?.playoffSettings ? { playoffSettings: sourceSeason.playoffSettings } : {}),
+      };
+
+      if (hasTable) {
+        if (input.activateNow) {
+          await (supabase.from('tournament_seasons' as any) as any)
+            .update({ is_active: false, updated_at: nowIso })
+            .neq('season_slug', cleanSlug);
+        }
+
+        const payload = {
+          league_name: 'SMASH PREMIER LEAGUE',
+          league_short_name: 'SPL',
+          season_number: cleanNumber,
+          edition_name: cleanEdition,
+          season_title: seasonTitle,
+          season_slug: cleanSlug,
+          tournament_year: year,
+          status: resolvedStatus,
+          is_active: Boolean(input.activateNow),
+          is_locked: false,
+          entry_fee: entryFee,
+          max_slots: maxSlots,
+          courts_count: resolvedCourts,
+          venue: resolvedVenue,
+          organizer: resolvedOrganizer,
+          date: resolvedDate || null,
+          settings_json: settingsJsonPayload,
+          updated_at: nowIso,
+        };
+
+        const { data: row, error } = await (supabase.from('tournament_seasons' as any) as any)
+          .upsert(payload, { onConflict: 'season_slug' })
+          .select('*')
+          .single();
+
+        if (error || !row) {
+          return { success: false, error: error?.message || 'Failed to create season row.' };
+        }
+        createdSeason = this.mapDbSeason(row);
+        seasonId = createdSeason.id;
+      }
+
+      // Bootstrap isolated registration_form_config & season Hero branding (never cloning players/teams/matches/registrations)
+      const existingForm = await this.fetchFormConfigRow(cleanSlug, { allowFallback: false });
+      if (!existingForm) {
+        const defaultForm = createDefaultFormConfig(cleanSlug, 'Smash Premier League', seasonTitle);
+        defaultForm.entryFee = entryFee;
+        defaultForm.maxSlots = maxSlots;
+        defaultForm.venue = resolvedVenue;
+        defaultForm.date = resolvedDate;
+        defaultForm.enabled = resolvedRegistrationEnabled;
+
+        if (sourceFormRow) {
+          if (Array.isArray(sourceFormRow.fields_json) && sourceFormRow.fields_json.length > 0) {
+            defaultForm.fields = sourceFormRow.fields_json as any;
+          }
+          if (sourceFormRow.payment_config_json && typeof sourceFormRow.payment_config_json === 'object') {
+            defaultForm.payment = {
+              ...(defaultForm.payment as any),
+              ...(sourceFormRow.payment_config_json as any),
+              baseFee: entryFee,
+            };
+          }
+        }
+
+        const initialHero = buildSeasonInitialHeroConfig({
+          seasonNumber: cleanNumber,
+          editionName: cleanEdition,
+          leagueName: 'SMASH PREMIER LEAGUE',
+          seasonSlug: cleanSlug,
+        });
+
+        (defaultForm.appearance as any).seasonNumber = cleanNumber;
+        (defaultForm.appearance as any).editionName = cleanEdition;
+        (defaultForm.appearance as any).tournamentYear = year;
+        (defaultForm.appearance as any).seasonStatus = resolvedStatus;
+        (defaultForm.appearance as any).heroPublished = { ...initialHero, status: 'published' };
+        (defaultForm.appearance as any).heroDraft = { ...initialHero, status: 'draft' };
+
+        await this.saveFormConfig(defaultForm, true, seasonId);
+      }
+
+      const resolved = createdSeason || (await this.resolveSeasonContext(cleanSlug));
+      return { success: true, season: resolved };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed creating tournament season.' };
+    }
+  }
+
+  static async updateSeason(
+    seasonIdOrSlug: string,
+    updates: UpdateSeasonInput
+  ): Promise<{ success: boolean; season?: TournamentSeason; error?: string }> {
+    if (!seasonIdOrSlug) return { success: false, error: 'Season identifier required.' };
+    try {
+      let updatedSeason: TournamentSeason | undefined;
+      if (this.isAvailable()) {
+        const hasTable = await this.hasTournamentSeasonsTable();
+        const seasons = await this.fetchSeasons();
+        const current = seasons.find(
+          (s) => s.id === seasonIdOrSlug || s.seasonSlug === seasonIdOrSlug
+        );
+        if (current) {
+          const nextStatus = updates.status || current.status;
+          if (current.isLocked && updates.status === undefined) {
+            return { success: false, error: 'Archived season is read-only. Unarchive it first to edit.' };
+          }
+          const nextNumber =
+            updates.seasonNumber !== undefined ? updates.seasonNumber.trim() : current.seasonNumber;
+          const nextEdition =
+            updates.editionName !== undefined ? updates.editionName.trim() : current.editionName;
+          const nextTitle =
+            updates.seasonTitle !== undefined
+              ? updates.seasonTitle.trim()
+              : updates.seasonNumber !== undefined || updates.editionName !== undefined
+                ? `Smash Premier League — Season ${nextNumber} (${nextEdition})`
+                : current.seasonTitle;
+
+          if (hasTable) {
+            const { data: existingRow } = await (supabase.from('tournament_seasons' as any) as any)
+              .select('settings_json')
+              .eq('id', current.id)
+              .maybeSingle();
+            const existingSettings =
+              (existingRow?.settings_json && typeof existingRow.settings_json === 'object'
+                ? existingRow.settings_json
+                : {}) as Record<string, any>;
+
+            const mergedSettings = {
+              ...existingSettings,
+              ...(updates.description !== undefined ? { description: updates.description.trim() } : {}),
+              ...(updates.startDate !== undefined ? { startDate: updates.startDate.trim() } : {}),
+              ...(updates.endDate !== undefined ? { endDate: updates.endDate.trim() } : {}),
+              ...(Array.isArray(updates.courtNames) ? { courtNames: updates.courtNames } : {}),
+              ...(updates.registrationEnabled !== undefined ? { registrationEnabled: updates.registrationEnabled } : {}),
+              ...(updates.historicalSummary !== undefined ? { historicalSummary: updates.historicalSummary } : {}),
+            };
+
+            const nowIso = new Date().toISOString();
+            const { data: updatedRow, error } = await (supabase.from('tournament_seasons' as any) as any)
+              .update({
+                season_number: nextNumber || current.seasonNumber,
+                edition_name: nextEdition || current.editionName,
+                season_title: nextTitle || current.seasonTitle,
+                tournament_year: updates.tournamentYear ?? current.tournamentYear,
+                entry_fee: updates.entryFee ?? current.entryFee,
+                max_slots: updates.maxSlots ?? current.maxSlots,
+                courts_count: updates.courtsCount ?? current.courtsCount,
+                venue: updates.venue !== undefined ? updates.venue.trim() : current.venue,
+                organizer: updates.organizer !== undefined ? updates.organizer.trim() : current.organizer,
+                date: updates.date !== undefined ? (updates.date.trim() || null) : (current.date || null),
+                status: nextStatus,
+                is_locked: nextStatus === 'archived',
+                settings_json: mergedSettings,
+                updated_at: nowIso,
+              })
+              .eq('id', current.id)
+              .select('*')
+              .single();
+
+            if (error || !updatedRow) {
+              return { success: false, error: error?.message || 'Failed to update season in database.' };
+            }
+            updatedSeason = this.mapDbSeason(updatedRow);
+          }
+
+          // Also sync form_config metadata & auto-generated hero texts if edition/number changed
+          const formRow = await this.fetchFormConfigRow(current.seasonSlug, { allowFallback: false });
+          if (formRow) {
+            const app = ((formRow.appearance_json as any) || {}) as Record<string, any>;
+            const patchHero = (rawHero: any) => {
+              if (!rawHero || typeof rawHero !== 'object') return rawHero;
+              const copy = cloneHeroConfig(normalizeHeroConfig(rawHero));
+              if (copy.text.kickerText.toUpperCase() === current.editionName.toUpperCase()) {
+                copy.text.kickerText = nextEdition.toUpperCase();
+              }
+              if (
+                copy.logo.subtitle.toUpperCase() ===
+                `SPL ${current.seasonNumber} · ${current.editionName}`.toUpperCase()
+              ) {
+                copy.logo.subtitle = `SPL ${nextNumber} · ${nextEdition.toUpperCase()}`;
+              }
+              if (copy.text.mainHeading.text.includes(current.seasonNumber)) {
+                copy.text.mainHeading.text = copy.text.mainHeading.text.replace(
+                  current.seasonNumber,
+                  nextNumber
+                );
+              }
+              return copy;
+            };
+            const nextApp = {
+              ...app,
+              seasonNumber: nextNumber,
+              editionName: nextEdition,
+              tournamentYear: updates.tournamentYear ?? current.tournamentYear,
+              seasonStatus: nextStatus,
+              ...(app.heroPublished ? { heroPublished: patchHero(app.heroPublished) } : {}),
+              ...(app.heroDraft ? { heroDraft: patchHero(app.heroDraft) } : {}),
+            };
+            await (supabase.from('registration_form_config') as any)
+              .update({
+                season_title: nextTitle,
+                entry_fee: updates.entryFee ?? current.entryFee,
+                max_slots: updates.maxSlots ?? current.maxSlots,
+                venue: updates.venue !== undefined ? updates.venue.trim() : current.venue,
+                date: updates.date !== undefined ? updates.date.trim() : current.date,
+                appearance_json: nextApp,
+                updated_at: new Date().toISOString(),
+              })
+              .eq('id', formRow.id);
+          }
+        }
+      }
+
+      const apiRes = await fetch(`/api/seasons/${encodeURIComponent(seasonIdOrSlug)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...AuthService.getAuthHeader() },
+        body: JSON.stringify(updates),
+      }).catch(() => null);
+      if (apiRes) {
+        const apiData = await apiRes.json().catch(() => ({}));
+        if (!apiRes.ok && !updatedSeason) {
+          return { success: false, error: apiData?.error || 'Failed to update season.' };
+        }
+        if (apiData?.season && !updatedSeason) {
+          updatedSeason = apiData.season;
+        }
+      }
+
+      if (!updatedSeason) {
+        return { success: false, error: 'Unable to update season metadata.' };
+      }
+      return { success: true, season: updatedSeason };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Error updating season.' };
+    }
+  }
+
+  static async updateSeasonStatus(
+    seasonIdOrSlug: string,
+    status: TournamentSeasonStatus
+  ): Promise<boolean> {
+    if (!this.isAvailable() || !seasonIdOrSlug) return false;
+    try {
+      const hasTable = await this.hasTournamentSeasonsTable();
+      const nowIso = new Date().toISOString();
+      if (hasTable) {
+        const isLocked = status === 'archived';
+        const { error } = await (supabase.from('tournament_seasons' as any) as any)
+          .update({ status, is_locked: isLocked, updated_at: nowIso })
+          .or(`id.eq.${seasonIdOrSlug},season_slug.eq.${seasonIdOrSlug}`);
+        return !error;
+      }
+      const row = await this.fetchFormConfigRow(seasonIdOrSlug, { allowFallback: false });
+      if (!row) return false;
+      const app = (row.appearance_json as any) || {};
+      const { error } = await (supabase.from('registration_form_config') as any)
+        .update({
+          appearance_json: { ...app, seasonStatus: status },
+          updated_at: nowIso,
+        })
+        .eq('id', row.id);
+      return !error;
+    } catch {
+      return false;
+    }
+  }
+
+  static async checkSeasonActivationReadiness(
+    targetSeasonSlug: string
+  ): Promise<SeasonActivationCheckResult> {
+    const blockers: string[] = [];
+    const warnings: string[] = [];
+    let dbMigrationReady = true;
+    let historicalDataVerified = false;
+    let liveMatchesCount = 0;
+    let designConfigReady = false;
+    let targetSeasonExists = false;
+    let currentActiveSlug = 'season-4';
+    let spl3Summary: SeasonActivationCheckResult['spl3Summary'];
+
+    try {
+      const seasons = await this.fetchSeasons();
+      const active = seasons.find((s) => s.isActive) || seasons[0];
+      if (active) currentActiveSlug = active.seasonSlug;
+
+      const target = seasons.find(
+        (s) => s.seasonSlug === targetSeasonSlug || s.id === targetSeasonSlug
+      );
+      targetSeasonExists = Boolean(target);
+      if (!targetSeasonExists) {
+        blockers.push(`Target season "${targetSeasonSlug}" does not exist yet.`);
+      }
+
+      if (this.isAvailable()) {
+        this.seasonsTableAvailable = null;
+        dbMigrationReady = await this.hasTournamentSeasonsTable();
+        if (!dbMigrationReady) {
+          blockers.push(
+            'Supabase database migration pending: public.tournament_seasons table is missing. Execute supabase/migrations/20261117_multi_season_schema.sql in Supabase SQL Editor.'
+          );
+        }
+
+        const [spl3Players, spl3Teams, spl3Matches, spl3Regs, activeMatchesRes] = await Promise.all([
+          this.fetchPlayers('season-4'),
+          this.fetchTeams('season-4'),
+          this.fetchMatches('season-4'),
+          this.fetchRegistrations('season-4'),
+          supabase
+            .from('matches')
+            .select('id, status')
+            .eq('tournament_season', currentActiveSlug)
+            .in('status', ['live', 'paused', 'postponed']),
+        ]);
+
+        liveMatchesCount = Array.isArray(activeMatchesRes.data) ? activeMatchesRes.data.length : 0;
+        const regsArr = spl3Regs || [];
+        const revenueStats = calculateRegistrationStats(regsArr);
+        spl3Summary = {
+          players: (spl3Players || []).length,
+          teams: (spl3Teams || []).length,
+          matches:
+            ((spl3Matches?.matches || []).length) + ((spl3Matches?.knockout || []).length),
+          registrations: regsArr.length,
+          revenue: revenueStats.collected,
+        };
+        historicalDataVerified =
+          spl3Summary.players > 0 || spl3Summary.teams > 0 || spl3Summary.registrations > 0;
+        if (!historicalDataVerified) {
+          warnings.push('Historical SPL 3.0 summary counts could not be verified from Supabase.');
+        }
+
+        if (target) {
+          const hero = await this.fetchPublishedHeroConfig(target.seasonSlug);
+          designConfigReady = Boolean(
+            hero?.text?.mainHeading?.text?.includes(target.seasonNumber)
+          );
+        }
+      } else {
+        // Local Express server mode verification
+        const [sumRes, snapRes] = await Promise.all([
+          fetch(`/api/seasons/summaries?t=${Date.now()}`, { cache: 'no-store' }).catch(() => null),
+          fetch(`/api/seasons/season-4/snapshot?t=${Date.now()}`, {
+            headers: { ...AuthService.getAuthHeader() },
+            cache: 'no-store',
+          }).catch(() => null),
+        ]);
+        if (sumRes?.ok) {
+          const sd = await sumRes.json().catch(() => null);
+          const curSum = sd?.summaries?.[currentActiveSlug];
+          if (curSum) liveMatchesCount = Number(curSum.liveMatchesCount || 0);
+        }
+        if (snapRes?.ok) {
+          const snap = await snapRes.json().catch(() => null);
+          if (snap) {
+            spl3Summary = {
+              players: Array.isArray(snap.players) ? snap.players.length : 0,
+              teams: Array.isArray(snap.teams) ? snap.teams.length : 0,
+              matches:
+                (Array.isArray(snap.matches) ? snap.matches.length : 0) +
+                (Array.isArray(snap.knockout?.matches) ? snap.knockout.matches.length : 0),
+              registrations: Array.isArray(snap.registrations) ? snap.registrations.length : 0,
+              revenue: Number(snap.revenueCollected || 0),
+            };
+            historicalDataVerified = true;
+          }
+        } else {
+          historicalDataVerified = seasons.some((s) => s.seasonSlug === 'season-4');
+        }
+        if (target) {
+          const hero = await this.fetchPublishedHeroConfig(target.seasonSlug);
+          designConfigReady = Boolean(
+            hero?.text?.mainHeading?.text?.includes(target.seasonNumber)
+          );
+        }
+      }
+
+      if (liveMatchesCount > 0) {
+        warnings.push(`${liveMatchesCount} live or paused match(es) detected in active season.`);
+      }
+      if (target && !designConfigReady) {
+        warnings.push(`Target season Hero heading should display SPL ${target.seasonNumber}.`);
+      }
+    } catch (err: any) {
+      blockers.push(err?.message || 'Unable to verify activation readiness.');
+    }
+
+    const zeroLiveMatches = liveMatchesCount === 0;
+    const seasonIsolationReady = targetSeasonExists;
+    const ready = dbMigrationReady && targetSeasonExists && blockers.length === 0;
+
+    return {
+      ready,
+      dbMigrationReady,
+      historicalDataVerified,
+      zeroLiveMatches,
+      liveMatchesCount,
+      designConfigReady,
+      seasonIsolationReady,
+      blockers,
+      warnings,
+      targetSeasonExists,
+      currentActiveSlug,
+      spl3Summary,
+    };
+  }
+
+  static async fetchSeasonArchiveSnapshot(
+    seasonSlug: string,
+    seasonId?: string
+  ): Promise<SeasonArchiveSnapshot | null> {
+    if (!seasonSlug) return null;
+    try {
+      const seasons = await this.fetchSeasons();
+      const matchedSeason =
+        seasons.find((s) => s.seasonSlug === seasonSlug || s.id === seasonId) ||
+        (await this.resolveSeasonContext(seasonSlug));
+
+      if (!this.isAvailable()) {
+        const res = await fetch(
+          `/api/seasons/${encodeURIComponent(seasonSlug)}/snapshot?t=${Date.now()}`,
+          {
+            headers: { ...AuthService.getAuthHeader() },
+            cache: 'no-store',
+          }
+        ).catch(() => null);
+        if (res?.ok) {
+          const data = await res.json().catch(() => null);
+          if (data) return data as SeasonArchiveSnapshot;
+        }
+        return null;
+      }
+
+      const [players, teams, matchBundle, regs, dbStandings] = await Promise.all([
+        this.fetchPlayers(matchedSeason.seasonSlug, matchedSeason.id),
+        this.fetchTeams(matchedSeason.seasonSlug, matchedSeason.id),
+        this.fetchMatches(matchedSeason.seasonSlug, matchedSeason.id),
+        this.fetchRegistrations(matchedSeason.seasonSlug, matchedSeason.id),
+        this.fetchStandings(matchedSeason.seasonSlug, matchedSeason.id),
+      ]);
+
+      const registrations = regs || [];
+      const stats = calculateRegistrationStats(registrations);
+      const matches = matchBundle?.matches || [];
+      const koMatches = matchBundle?.knockout || [];
+
+      return {
+        season: matchedSeason,
+        players: players || [],
+        teams: teams || [],
+        matches,
+        knockout: {
+          format: matchedSeason.playoffSettings?.format || 'top4',
+          published: true,
+          showOnPublicHomepage: true,
+          matches: koMatches,
+        },
+        standings: dbStandings || [],
+        registrations,
+        revenueCollected: stats.collected,
+        paidCount: stats.paidCount,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // ============================================================================
+  // 1. PLAYERS
+  // ============================================================================
+  private static mapDbPlayerRow(p: any, seasonSlug?: string, seasonId?: string): Player {
+    return {
+      id: p.id,
+      name: p.name,
+      mobile: p.mobile || undefined,
+      age: p.age || undefined,
+      gender: p.gender,
+      skillLevel: p.skill_level === 'Pro' ? 'Pro' : p.skill_level === 'Intermediate' ? 'Intermediate' : 'Advanced',
+      photoUrl: p.photo_url || undefined,
+      registrationStatus: p.registration_status || 'direct',
+      registrationId: p.registration_id || undefined,
+      city: p.city || undefined,
+      category: p.category || undefined,
+      style: p.style || undefined,
+      seasonId: seasonId || p.season_id || undefined,
+      seasonSlug: seasonSlug || undefined,
+    };
+  }
+
+  static async fetchPlayers(seasonSlug?: string, seasonId?: string): Promise<Player[] | null> {
+    if (!this.isAvailable()) return null;
+    try {
+      if (!seasonSlug) {
+        const { data, error } = await supabase
+          .from('players')
+          .select('*')
+          .order('name', { ascending: true });
+        if (error || !data) return null;
+        return (data as DbPlayer[]).map((p) => this.mapDbPlayerRow(p));
+      }
+
+      // Season-scoped player resolution: collect player IDs belonging to this season's registrations and teams
+      const [seasons, hasTeamSeasonCol, seasonTeams] = await Promise.all([
+        this.fetchSeasons(),
+        this.hasSeasonIdColumn('teams'),
+        this.fetchTeams(seasonSlug, seasonId),
+      ]);
+
+      let regQuery = supabase
+        .from('registrations')
+        .select('player_id, reg_id, status')
+        .eq('season_slug', seasonSlug);
+      if (seasonId && (await this.hasSeasonIdColumn('registrations'))) {
+        regQuery = (regQuery as any).or(`season_slug.eq.${seasonSlug},season_id.eq.${seasonId}`);
+      }
+      const { data: seasonRegs } = await regQuery;
+
+      const seasonPlayerIds = new Set<string>();
+      const regByPlayerId = new Map<string, { regId?: string; status?: string }>();
+
+      for (const r of (seasonRegs || []) as any[]) {
+        if (r.player_id) {
+          seasonPlayerIds.add(String(r.player_id));
+          regByPlayerId.set(String(r.player_id), {
+            regId: r.reg_id || undefined,
+            status: r.status || undefined,
+          });
+        }
+      }
+      for (const t of seasonTeams || []) {
+        for (const pid of t.players || []) {
+          if (pid) seasonPlayerIds.add(pid);
+        }
+        if (t.captainId) seasonPlayerIds.add(t.captainId);
+      }
+
+      const hasPlayerSeasonCol = await this.hasSeasonIdColumn('players');
+      if (hasPlayerSeasonCol && seasonId) {
+        const { data: directSeasonPlayers } = await (supabase.from('players') as any)
+          .select('id')
+          .eq('season_id', seasonId);
+        for (const p of directSeasonPlayers || []) {
+          if (p?.id) seasonPlayerIds.add(String(p.id));
+        }
+      }
+
+      // Also inspect explicit seasonPlayerIds saved on form config appearance_json (direct-added players)
+      const formRow = await this.fetchFormConfigRow(seasonSlug, { allowFallback: false });
+      const trackedDirectIds: string[] = Array.isArray((formRow?.appearance_json as any)?.seasonPlayerIds)
+        ? (formRow?.appearance_json as any).seasonPlayerIds
+        : [];
+      for (const pid of trackedDirectIds) {
+        if (pid) seasonPlayerIds.add(String(pid));
+      }
+
+      // Single-season legacy compatibility: if only 1 season exists and team_players/registrations haven't tracked direct players yet
+      const isSingleLegacySeason =
+        seasons.length <= 1 && !hasTeamSeasonCol && seasons[0]?.seasonSlug === seasonSlug;
+
+      if (seasonPlayerIds.size === 0 && !isSingleLegacySeason) {
+        return [];
+      }
+
+      let playerQuery = supabase.from('players').select('*').order('name', { ascending: true });
+      if (!isSingleLegacySeason || seasonPlayerIds.size > 0) {
+        if (isSingleLegacySeason && trackedDirectIds.length === 0) {
+          // Return all legacy players in single-season mode while enriching registration links
+        } else {
+          playerQuery = playerQuery.in('id', Array.from(seasonPlayerIds));
+        }
+      }
+
+      const { data, error } = await playerQuery;
+      if (error || !data) return null;
+
+      return (data as DbPlayer[]).map((p) => {
+        const mapped = this.mapDbPlayerRow(p, seasonSlug, seasonId);
+        const regMeta = regByPlayerId.get(mapped.id);
+        if (regMeta) {
+          mapped.registrationId = regMeta.regId || mapped.registrationId;
+          mapped.registrationStatus = (regMeta.status as any) || mapped.registrationStatus;
+        }
+        return mapped;
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  static async findPlayerByMobileGlobal(mobile: string): Promise<Player | null> {
+    if (!this.isAvailable()) return null;
+    const clean = String(mobile || '').replace(/\D/g, '');
+    if (!clean) return null;
+    try {
+      const { data, error } = await supabase
+        .from('players')
+        .select('*')
+        .eq('mobile', clean)
+        .limit(1)
+        .maybeSingle();
+      if (error || !data) return null;
+      return this.mapDbPlayerRow(data);
+    } catch {
+      return null;
+    }
+  }
+
+  static async upsertPlayer(player: Player, seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('players') : false;
       const payload: Record<string, any> = {
         id: player.id,
         name: player.name.trim(),
@@ -93,12 +1165,17 @@ export class SupabaseService {
         photo_url: player.photoUrl || null,
         status: 'active',
         updated_at: new Date().toISOString(),
+        ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
       };
 
       const { error } = await supabase.from('players').upsert(payload as any);
       if (error) {
         console.error('Supabase upsertPlayer error:', error.message);
         return false;
+      }
+
+      if (seasonSlug) {
+        void this.trackSeasonEntityIds(seasonSlug, 'seasonPlayerIds', [player.id], 'merge');
       }
       return true;
     } catch (e: any) {
@@ -107,9 +1184,10 @@ export class SupabaseService {
     }
   }
 
-  static async upsertPlayersBulk(players: Player[]): Promise<boolean> {
+  static async upsertPlayersBulk(players: Player[], seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable() || players.length === 0) return false;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('players') : false;
       const rows = players.map((player) => ({
         id: player.id,
         name: player.name.trim(),
@@ -120,12 +1198,21 @@ export class SupabaseService {
         photo_url: player.photoUrl || null,
         status: 'active',
         updated_at: new Date().toISOString(),
+        ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
       }));
 
       const { error } = await supabase.from('players').upsert(rows as any);
       if (error) {
         console.error('Supabase upsertPlayersBulk error:', error.message);
         return false;
+      }
+      if (seasonSlug) {
+        void this.trackSeasonEntityIds(
+          seasonSlug,
+          'seasonPlayerIds',
+          players.map((p) => p.id).filter(Boolean),
+          'merge'
+        );
       }
       return true;
     } catch (e: any) {
@@ -134,14 +1221,39 @@ export class SupabaseService {
     }
   }
 
-  static async deletePlayer(id: string): Promise<boolean> {
+  static async deletePlayer(id: string, seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      // 1. Remove captaincy references to prevent FK violation
-      await (supabase.from('teams') as any).update({ captain_id: null }).eq('captain_id', id);
-      // 2. Remove from roster junction
-      await supabase.from('team_players').delete().eq('player_id', id);
-      // 3. Delete player
+      if (seasonSlug) {
+        // Scope removal to current season first; delete athlete row only if unreferenced in other seasons
+        const seasonTeams = (await this.fetchTeams(seasonSlug, seasonId)) || [];
+        const seasonTeamIds = seasonTeams.map((t) => t.id).filter(Boolean);
+        if (seasonTeamIds.length > 0) {
+          await (supabase.from('teams') as any)
+            .update({ captain_id: null })
+            .in('id', seasonTeamIds)
+            .eq('captain_id', id);
+          await supabase.from('team_players').delete().in('team_id', seasonTeamIds).eq('player_id', id);
+        }
+        await (supabase.from('registrations') as any)
+          .update({ player_id: null })
+          .eq('season_slug', seasonSlug)
+          .eq('player_id', id);
+
+        await this.trackSeasonEntityIds(seasonSlug, 'seasonPlayerIds', [id], 'remove');
+
+        const [{ data: otherTeamRefs }, { data: otherRegRefs }] = await Promise.all([
+          supabase.from('team_players').select('id').eq('player_id', id).limit(1),
+          supabase.from('registrations').select('id').eq('player_id', id).limit(1),
+        ]);
+        if ((otherTeamRefs && otherTeamRefs.length > 0) || (otherRegRefs && otherRegRefs.length > 0)) {
+          return true;
+        }
+      } else {
+        await (supabase.from('teams') as any).update({ captain_id: null }).eq('captain_id', id);
+        await supabase.from('team_players').delete().eq('player_id', id);
+      }
+
       const { error } = await supabase.from('players').delete().eq('id', id);
       if (error) {
         console.error('Supabase deletePlayer error:', error.message);
@@ -153,14 +1265,41 @@ export class SupabaseService {
     }
   }
 
-  static async deletePlayersBulk(ids: string[]): Promise<boolean> {
+  static async deletePlayersBulk(ids: string[], seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable() || ids.length === 0) return false;
     try {
-      // 1. Remove captaincy references
+      if (seasonSlug) {
+        const seasonTeams = (await this.fetchTeams(seasonSlug, seasonId)) || [];
+        const seasonTeamIds = seasonTeams.map((t) => t.id).filter(Boolean);
+        if (seasonTeamIds.length > 0) {
+          await (supabase.from('teams') as any)
+            .update({ captain_id: null })
+            .in('id', seasonTeamIds)
+            .in('captain_id', ids);
+          await supabase.from('team_players').delete().in('team_id', seasonTeamIds).in('player_id', ids);
+        }
+        await (supabase.from('registrations') as any)
+          .update({ player_id: null })
+          .eq('season_slug', seasonSlug)
+          .in('player_id', ids);
+        await this.trackSeasonEntityIds(seasonSlug, 'seasonPlayerIds', ids, 'remove');
+
+        const [{ data: remainingTeamRefs }, { data: remainingRegRefs }] = await Promise.all([
+          supabase.from('team_players').select('player_id').in('player_id', ids),
+          supabase.from('registrations').select('player_id').in('player_id', ids),
+        ]);
+        const stillReferenced = new Set<string>([
+          ...((remainingTeamRefs || []).map((r: any) => String(r.player_id))),
+          ...((remainingRegRefs || []).map((r: any) => String(r.player_id))),
+        ]);
+        const deletableIds = ids.filter((pid) => !stillReferenced.has(pid));
+        if (deletableIds.length === 0) return true;
+        const { error } = await supabase.from('players').delete().in('id', deletableIds);
+        return !error;
+      }
+
       await (supabase.from('teams') as any).update({ captain_id: null }).in('captain_id', ids);
-      // 2. Remove roster assignments
       await supabase.from('team_players').delete().in('player_id', ids);
-      // 3. Bulk delete players
       const { error } = await supabase.from('players').delete().in('id', ids);
       if (error) {
         console.error('Supabase deletePlayersBulk error:', error.message);
@@ -172,16 +1311,76 @@ export class SupabaseService {
     }
   }
 
-  static async clearPlayers(): Promise<boolean> {
+  static async clearPlayers(seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      await (supabase.from('teams') as any).update({ captain_id: null }).neq('id', '___none___');
-      await supabase.from('team_players').delete().neq('id', '___none___');
-      const { error } = await supabase.from('players').delete().neq('id', '___none___');
+      const targetSlug = seasonSlug || 'season-4';
+      const seasonPlayers = (await this.fetchPlayers(targetSlug, seasonId)) || [];
+      const playerIds = seasonPlayers.map((p) => p.id).filter(Boolean);
+      const seasonTeams = (await this.fetchTeams(targetSlug, seasonId)) || [];
+      const seasonTeamIds = seasonTeams.map((t) => t.id).filter(Boolean);
+
+      if (seasonTeamIds.length > 0) {
+        await (supabase.from('teams') as any)
+          .update({ captain_id: null })
+          .in('id', seasonTeamIds);
+        await supabase.from('team_players').delete().in('team_id', seasonTeamIds);
+      }
+
+      await (supabase.from('registrations') as any)
+        .update({ player_id: null })
+        .eq('season_slug', targetSlug);
+      await this.trackSeasonEntityIds(targetSlug, 'seasonPlayerIds', [], 'replace');
+
+      if (playerIds.length === 0) return true;
+
+      // Only delete athlete rows that have zero references remaining in other seasons
+      const [{ data: otherTeamRefs }, { data: otherRegRefs }] = await Promise.all([
+        supabase.from('team_players').select('player_id').in('player_id', playerIds),
+        supabase.from('registrations').select('player_id').in('player_id', playerIds),
+      ]);
+      const referencedElsewhere = new Set<string>([
+        ...((otherTeamRefs || []).map((r: any) => String(r.player_id))),
+        ...((otherRegRefs || []).map((r: any) => String(r.player_id))),
+      ]);
+      const orphanPlayerIds = playerIds.filter((pid) => !referencedElsewhere.has(pid));
+      if (orphanPlayerIds.length === 0) return true;
+
+      const { error } = await supabase.from('players').delete().in('id', orphanPlayerIds);
       return !error;
     } catch {
       return false;
     }
+  }
+
+  private static async trackSeasonEntityIds(
+    seasonSlug: string,
+    key: 'seasonTeamIds' | 'seasonPlayerIds',
+    ids: string[],
+    mode: 'replace' | 'merge' | 'remove'
+  ): Promise<void> {
+    if (!this.isAvailable() || !seasonSlug) return;
+    try {
+      const row = await this.fetchFormConfigRow(seasonSlug, { allowFallback: false });
+      if (!row) return;
+      const app = (row.appearance_json as any) || {};
+      const existing: string[] = Array.isArray(app[key]) ? app[key].map(String) : [];
+      let next: string[];
+      if (mode === 'replace') {
+        next = Array.from(new Set(ids.filter(Boolean)));
+      } else if (mode === 'merge') {
+        next = Array.from(new Set([...existing, ...ids.filter(Boolean)]));
+      } else {
+        const removeSet = new Set(ids);
+        next = existing.filter((x) => !removeSet.has(x));
+      }
+      await (supabase.from('registration_form_config') as any)
+        .update({
+          appearance_json: { ...app, [key]: next },
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', row.id);
+    } catch {}
   }
 
   private static encodeShortName(token?: string, lockedPlayerIds?: string[]): string | null {
@@ -210,33 +1409,80 @@ export class SupabaseService {
   // ============================================================================
   // 2. TEAMS & ROSTERS
   // ============================================================================
-  static async fetchTeams(): Promise<Team[] | null> {
+  static async fetchTeams(seasonSlug?: string, seasonId?: string): Promise<Team[] | null> {
     if (!this.isAvailable()) return null;
     try {
-      const { data: teamsData, error: teamsErr } = await supabase
+      const hasTeamSeasonId = seasonId ? await this.hasSeasonIdColumn('teams') : false;
+      let teamsQuery = supabase
         .from('teams')
         .select('*')
         .order('created_at', { ascending: true });
 
+      if (hasTeamSeasonId && seasonId) {
+        teamsQuery = teamsQuery.eq('season_id', seasonId);
+      }
+
+      const { data: teamsData, error: teamsErr } = await teamsQuery;
       if (teamsErr || !teamsData) return null;
 
-      const { data: rostersData } = await supabase
-        .from('team_players')
-        .select('*')
-        .order('slot_index', { ascending: true });
+      let filteredTeamsData = teamsData as DbTeam[];
 
+      // Pre-Phase-2 fallback scoping when teams table doesn't yet have season_id
+      if (seasonSlug && !hasTeamSeasonId) {
+        const [seasons, formRow] = await Promise.all([
+          this.fetchSeasons(),
+          this.fetchFormConfigRow(seasonSlug, { allowFallback: false }),
+        ]);
+        const trackedTeamIds: string[] | undefined = Array.isArray((formRow?.appearance_json as any)?.seasonTeamIds)
+          ? (formRow?.appearance_json as any).seasonTeamIds
+          : undefined;
+
+        if (trackedTeamIds) {
+          const trackedSet = new Set(trackedTeamIds.map(String));
+          filteredTeamsData = filteredTeamsData.filter((t) => trackedSet.has(t.id));
+        } else if (seasons.length > 1) {
+          // If multiple seasons exist without season_id column, check matches/standings belonging to this season
+          const [{ data: seasonMatches }, { data: seasonStandings }] = await Promise.all([
+            supabase.from('matches').select('team_a_id, team_b_id').eq('tournament_season', seasonSlug),
+            supabase.from('tournament_standings').select('team_id').eq('season_slug', seasonSlug),
+          ]);
+          const ownedIds = new Set<string>();
+          for (const m of (seasonMatches || []) as any[]) {
+            if (m.team_a_id) ownedIds.add(String(m.team_a_id));
+            if (m.team_b_id) ownedIds.add(String(m.team_b_id));
+          }
+          for (const s of (seasonStandings || []) as any[]) {
+            if (s.team_id) ownedIds.add(String(s.team_id));
+          }
+          // Only claim untagged legacy teams for the first/default season when no explicit season_id exists
+          const primaryLegacySlug = seasons[seasons.length - 1]?.seasonSlug || 'season-4';
+          if (seasonSlug !== primaryLegacySlug) {
+            filteredTeamsData = filteredTeamsData.filter((t) => ownedIds.has(t.id));
+          }
+        }
+      }
+
+      const teamIds = filteredTeamsData.map((t) => t.id).filter(Boolean);
       const rosterMap = new Map<string, string[]>();
-      if (rostersData) {
-        for (const item of rostersData as any[]) {
-          const list = rosterMap.get(item.team_id) || [];
-          list.push(item.player_id);
-          rosterMap.set(item.team_id, list);
+      if (teamIds.length > 0) {
+        const { data: rostersData } = await supabase
+          .from('team_players')
+          .select('*')
+          .in('team_id', teamIds)
+          .order('slot_index', { ascending: true });
+
+        if (rostersData) {
+          for (const item of rostersData as any[]) {
+            const list = rosterMap.get(item.team_id) || [];
+            list.push(item.player_id);
+            rosterMap.set(item.team_id, list);
+          }
         }
       }
 
       const seenIds = new Set<string>();
       const uniqueTeams: Team[] = [];
-      for (const t of teamsData as DbTeam[]) {
+      for (const t of filteredTeamsData) {
         if (!t.id || seenIds.has(t.id)) continue;
         seenIds.add(t.id);
         const decoded = this.decodeShortName(t.short_name);
@@ -250,6 +1496,8 @@ export class SupabaseService {
           badge: t.badge || '🏸',
           locked: t.locked,
           players: rosterMap.get(t.id) || [],
+          seasonId: seasonId || t.season_id || undefined,
+          seasonSlug: seasonSlug || t.season_slug || undefined,
         });
       }
       return uniqueTeams;
@@ -314,7 +1562,11 @@ export class SupabaseService {
 
       // If the team row does not exist yet in Supabase, upsert the full team record safely
       if ((!updatedRows || updatedRows.length === 0) && fallbackTeam) {
-        return await this.saveTeam({ ...fallbackTeam, ...updates, id });
+        return await this.saveTeam(
+          { ...fallbackTeam, ...updates, id },
+          fallbackTeam.seasonSlug,
+          fallbackTeam.seasonId
+        );
       }
 
       // Only touch team_players if roster array was explicitly included in updates
@@ -324,11 +1576,14 @@ export class SupabaseService {
           const uniquePlayers = Array.from(new Set(updates.players.filter(Boolean)));
           const effectiveCaptain =
             updates.captainId !== undefined ? updates.captainId : fallbackTeam?.captainId;
+          const resolvedSeasonId = fallbackTeam?.seasonId;
+          const hasTpSeasonCol = resolvedSeasonId ? await this.hasSeasonIdColumn('team_players') : false;
           const rows = uniquePlayers.map((playerId, idx) => ({
             team_id: id,
             player_id: playerId,
             slot_index: idx,
             is_captain: effectiveCaptain === playerId,
+            ...(hasTpSeasonCol && resolvedSeasonId ? { season_id: resolvedSeasonId } : {}),
           }));
           await supabase.from('team_players').insert(rows as any);
         }
@@ -340,9 +1595,18 @@ export class SupabaseService {
     }
   }
 
-  static async saveTeam(team: Team): Promise<boolean> {
+  static async saveTeam(team: Team, seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable() || !team?.id) return false;
     try {
+      const resolvedSeasonId = seasonId || team.seasonId;
+      const resolvedSeasonSlug = seasonSlug || team.seasonSlug;
+      const [hasTeamSeasonId, hasTpSeasonId] = resolvedSeasonId
+        ? await Promise.all([
+            this.hasSeasonIdColumn('teams'),
+            this.hasSeasonIdColumn('team_players'),
+          ])
+        : [false, false];
+
       const teamPayload = {
         id: team.id,
         name: team.name,
@@ -352,13 +1616,13 @@ export class SupabaseService {
         badge: team.badge || '🏸',
         locked: Boolean(team.locked),
         updated_at: new Date().toISOString(),
+        ...(hasTeamSeasonId && resolvedSeasonId ? { season_id: resolvedSeasonId } : {}),
       };
 
       let { error } = await supabase
         .from('teams')
         .upsert(teamPayload as any, { onConflict: 'id' });
 
-      // Fallback if captain_id foreign key fails because player record is not in public.players yet
       if (error && teamPayload.captain_id) {
         const retry = await supabase
           .from('teams')
@@ -371,7 +1635,6 @@ export class SupabaseService {
         return false;
       }
 
-      // Replace roster junction
       await supabase.from('team_players').delete().eq('team_id', team.id);
 
       if (team.players && team.players.length > 0) {
@@ -381,8 +1644,13 @@ export class SupabaseService {
           player_id: playerId,
           slot_index: idx,
           is_captain: team.captainId === playerId,
+          ...(hasTpSeasonId && resolvedSeasonId ? { season_id: resolvedSeasonId } : {}),
         }));
         await supabase.from('team_players').insert(rows as any);
+      }
+
+      if (resolvedSeasonSlug) {
+        void this.trackSeasonEntityIds(resolvedSeasonSlug, 'seasonTeamIds', [team.id], 'merge');
       }
       return true;
     } catch {
@@ -390,10 +1658,9 @@ export class SupabaseService {
     }
   }
 
-  static async saveTeamsBulk(teams: Team[]): Promise<boolean> {
+  static async saveTeamsBulk(teams: Team[], seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      // Deduplicate by team.id to strictly prevent duplicate records
       const uniqueMap = new Map<string, Team>();
       for (const t of teams) {
         if (t && t.id) {
@@ -401,11 +1668,18 @@ export class SupabaseService {
         }
       }
       const uniqueTeams = Array.from(uniqueMap.values());
+      const targetSlug = seasonSlug || uniqueTeams[0]?.seasonSlug || 'season-4';
+      const targetSeasonId = seasonId || uniqueTeams[0]?.seasonId;
+
       if (uniqueTeams.length === 0) {
-        await supabase.from('team_players').delete().neq('id', '___none___');
-        await supabase.from('teams').delete().neq('id', '___none___');
-        return true;
+        return await this.clearTeams(targetSlug, targetSeasonId);
       }
+
+      const [hasTeamSeasonId, hasTpSeasonId, existingSeasonTeams] = await Promise.all([
+        targetSeasonId ? this.hasSeasonIdColumn('teams') : Promise.resolve(false),
+        targetSeasonId ? this.hasSeasonIdColumn('team_players') : Promise.resolve(false),
+        this.fetchTeams(targetSlug, targetSeasonId),
+      ]);
 
       const keepIds = uniqueTeams.map((t) => t.id);
       const keepIdSet = new Set(keepIds);
@@ -420,15 +1694,10 @@ export class SupabaseService {
         badge: team.badge || '🏸',
         locked: Boolean(team.locked),
         updated_at: nowIso,
+        ...(hasTeamSeasonId && targetSeasonId ? { season_id: targetSeasonId } : {}),
       }));
 
-      // Build all team_players rows in a single flat array
-      const allRosterRows: {
-        team_id: string;
-        player_id: string;
-        slot_index: number;
-        is_captain: boolean;
-      }[] = [];
+      const allRosterRows: Record<string, any>[] = [];
 
       for (const t of uniqueTeams) {
         if (t.players && t.players.length > 0) {
@@ -439,40 +1708,33 @@ export class SupabaseService {
               player_id: playerId,
               slot_index: idx,
               is_captain: t.captainId === playerId,
+              ...(hasTpSeasonId && targetSeasonId ? { season_id: targetSeasonId } : {}),
             });
           });
         }
       }
 
-      // Run team upsert and existing ID check in parallel
-      const [upsertRes, { data: existingRows }] = await Promise.all([
-        supabase.from('teams').upsert(teamPayloads as any, { onConflict: 'id' }),
-        supabase.from('teams').select('id'),
-      ]);
-
+      const upsertRes = await supabase.from('teams').upsert(teamPayloads as any, { onConflict: 'id' });
       if (upsertRes.error) {
-        // Retry with captain_id nulled on FK mismatch so every team row and badge still saves
         const safeTeamPayloads = teamPayloads.map((tp) => ({ ...tp, captain_id: null }));
         await supabase.from('teams').upsert(safeTeamPayloads as any, { onConflict: 'id' });
       }
 
-      // Replace all roster rows in 1 bulk delete + 1 bulk insert
       await supabase.from('team_players').delete().in('team_id', keepIds);
       if (allRosterRows.length > 0) {
         await supabase.from('team_players').insert(allRosterRows as any);
       }
 
-      // Clean up any stale/orphan teams in background if present
-      if (existingRows && existingRows.length > 0) {
-        const orphanIds = existingRows
-          .map((r: any) => String(r.id))
-          .filter((id: string) => id && !keepIdSet.has(id));
-        if (orphanIds.length > 0) {
-          await supabase.from('team_players').delete().in('team_id', orphanIds);
-          await supabase.from('teams').delete().in('id', orphanIds);
-        }
+      // Clean up ONLY stale teams belonging strictly to THIS season (never touch other seasons!)
+      const staleSeasonIds = (existingSeasonTeams || [])
+        .map((t) => t.id)
+        .filter((id) => id && !keepIdSet.has(id));
+      if (staleSeasonIds.length > 0) {
+        await supabase.from('team_players').delete().in('team_id', staleSeasonIds);
+        await supabase.from('teams').delete().in('id', staleSeasonIds);
       }
 
+      await this.trackSeasonEntityIds(targetSlug, 'seasonTeamIds', keepIds, 'replace');
       return true;
     } catch {
       return false;
@@ -483,8 +1745,10 @@ export class SupabaseService {
     affectedTeams: Team[];
     baselineRostersByTeamId?: Record<string, string[]>;
     auditDetails?: Record<string, any>;
+    seasonSlug?: string;
+    seasonId?: string;
   }): Promise<{ success: boolean; conflict?: boolean; error?: string }> {
-    const { affectedTeams, baselineRostersByTeamId, auditDetails } = params;
+    const { affectedTeams, baselineRostersByTeamId, auditDetails, seasonSlug, seasonId } = params;
     if (!this.isAvailable()) {
       return { success: true };
     }
@@ -493,13 +1757,23 @@ export class SupabaseService {
     }
 
     try {
+      const targetSlug = seasonSlug || affectedTeams[0]?.seasonSlug;
+      const targetSeasonId = seasonId || affectedTeams[0]?.seasonId;
+      const seasonTeams = targetSlug ? (await this.fetchTeams(targetSlug, targetSeasonId)) || [] : [];
+      const seasonTeamIds = seasonTeams.map((t) => t.id).filter(Boolean);
+      const seasonTeamIdSet = new Set(seasonTeamIds);
+
       const affectedTeamIds = affectedTeams.map((t) => t.id).filter(Boolean);
       const affectedTeamIdSet = new Set(affectedTeamIds);
       const proposedPlayerIds = Array.from(
         new Set(affectedTeams.flatMap((t) => (t.players || []).filter(Boolean)))
       );
 
-      // 1. Concurrency check against authoritative Supabase state
+      const [hasTeamSeasonCol, hasTpSeasonCol] = targetSeasonId
+        ? await Promise.all([this.hasSeasonIdColumn('teams'), this.hasSeasonIdColumn('team_players')])
+        : [false, false];
+
+      // 1. Concurrency check against authoritative Supabase state (scoped to this season's teams)
       if (baselineRostersByTeamId && Object.keys(baselineRostersByTeamId).length > 0) {
         const [{ data: currentTeamRosters }, { data: currentPlayerBindings }] = await Promise.all([
           supabase
@@ -508,10 +1782,13 @@ export class SupabaseService {
             .in('team_id', affectedTeamIds)
             .order('slot_index', { ascending: true }),
           proposedPlayerIds.length > 0
-            ? supabase
-                .from('team_players')
-                .select('team_id, player_id')
-                .in('player_id', proposedPlayerIds)
+            ? seasonTeamIds.length > 0
+              ? supabase
+                  .from('team_players')
+                  .select('team_id, player_id')
+                  .in('player_id', proposedPlayerIds)
+                  .in('team_id', seasonTeamIds)
+              : Promise.resolve({ data: [] as any[] })
             : Promise.resolve({ data: [] as any[] }),
         ]);
 
@@ -526,7 +1803,6 @@ export class SupabaseService {
           for (const teamId of affectedTeamIds) {
             const expected = baselineRostersByTeamId[teamId];
             const actual = dbRosterByTeam.get(teamId);
-            // Only flag a conflict if the team already existed in DB with a different roster set
             if (expected && actual && actual.length > 0) {
               const expectedSorted = [...expected].sort().join(',');
               const actualSorted = [...actual].sort().join(',');
@@ -544,7 +1820,7 @@ export class SupabaseService {
 
         if (currentPlayerBindings && currentPlayerBindings.length > 0) {
           for (const row of currentPlayerBindings as any[]) {
-            if (row.team_id && !affectedTeamIdSet.has(row.team_id)) {
+            if (row.team_id && !affectedTeamIdSet.has(row.team_id) && (!targetSlug || seasonTeamIdSet.has(row.team_id))) {
               return {
                 success: false,
                 conflict: true,
@@ -566,15 +1842,14 @@ export class SupabaseService {
         badge: team.badge || '🏸',
         locked: Boolean(team.locked),
         updated_at: nowIso,
+        ...(hasTeamSeasonCol && targetSeasonId ? { season_id: targetSeasonId } : {}),
       }));
 
-      // 2. Upsert only affected teams
       let { error: teamUpsertErr } = await supabase
         .from('teams')
         .upsert(teamPayloads as any, { onConflict: 'id' });
 
       if (teamUpsertErr) {
-        // Fallback with captain_id nulled if captain player row is not yet in public.players
         const safePayloads = teamPayloads.map((tp) => ({ ...tp, captain_id: null }));
         const retryRes = await supabase
           .from('teams')
@@ -587,19 +1862,24 @@ export class SupabaseService {
         return { success: false, error: teamUpsertErr.message };
       }
 
-      // 3. Remove previous player bindings for affected teams AND any stale bindings for proposed players
+      // 3. Remove previous player bindings for affected teams AND stale bindings ONLY within the same season
       await supabase.from('team_players').delete().in('team_id', affectedTeamIds);
       if (proposedPlayerIds.length > 0) {
-        await supabase.from('team_players').delete().in('player_id', proposedPlayerIds);
+        if (targetSlug) {
+          if (seasonTeamIds.length > 0) {
+            await supabase
+              .from('team_players')
+              .delete()
+              .in('player_id', proposedPlayerIds)
+              .in('team_id', seasonTeamIds);
+          }
+        } else {
+          await supabase.from('team_players').delete().in('player_id', proposedPlayerIds);
+        }
       }
 
       // 4. Insert updated team_players rows for affected teams
-      const rosterRows: {
-        team_id: string;
-        player_id: string;
-        slot_index: number;
-        is_captain: boolean;
-      }[] = [];
+      const rosterRows: Record<string, any>[] = [];
 
       for (const team of affectedTeams) {
         const uniquePlayers = Array.from(new Set((team.players || []).filter(Boolean)));
@@ -609,6 +1889,7 @@ export class SupabaseService {
             player_id: playerId,
             slot_index: idx,
             is_captain: team.captainId === playerId,
+            ...(hasTpSeasonCol && targetSeasonId ? { season_id: targetSeasonId } : {}),
           });
         });
       }
@@ -624,8 +1905,12 @@ export class SupabaseService {
         }
       }
 
+      if (targetSlug) {
+        void this.trackSeasonEntityIds(targetSlug, 'seasonTeamIds', affectedTeamIds, 'merge');
+      }
+
       if (auditDetails) {
-        void this.logAudit('team_manual_edit', 'team', affectedTeams[0]?.id, auditDetails);
+        void this.logAudit('team_manual_edit', 'team', affectedTeams[0]?.id, auditDetails, undefined, targetSeasonId);
       }
 
       return { success: true };
@@ -635,46 +1920,69 @@ export class SupabaseService {
     }
   }
 
-  static async deleteTeam(id: string): Promise<boolean> {
+  static async deleteTeam(id: string, seasonSlug?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      // First delete junction rows
       await supabase.from('team_players').delete().eq('team_id', id);
       const { error } = await supabase.from('teams').delete().eq('id', id);
+      if (!error && seasonSlug) {
+        void this.trackSeasonEntityIds(seasonSlug, 'seasonTeamIds', [id], 'remove');
+      }
       return !error;
     } catch {
       return false;
     }
   }
 
-  static async deleteTeamsBulk(ids: string[]): Promise<boolean> {
+  static async deleteTeamsBulk(ids: string[], seasonSlug?: string): Promise<boolean> {
     if (!this.isAvailable() || ids.length === 0) return false;
     try {
       await supabase.from('team_players').delete().in('team_id', ids);
       const { error } = await supabase.from('teams').delete().in('id', ids);
+      if (!error && seasonSlug) {
+        void this.trackSeasonEntityIds(seasonSlug, 'seasonTeamIds', ids, 'remove');
+      }
       return !error;
     } catch {
       return false;
     }
   }
 
-  static async clearTeams(): Promise<boolean> {
+  static async clearTeams(seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      await supabase.from('team_players').delete().neq('id', '___none___');
-      const { error } = await supabase.from('teams').delete().neq('id', '___none___');
-      return !error;
+      const targetSlug = seasonSlug || 'season-4';
+      const seasonTeams = (await this.fetchTeams(targetSlug, seasonId)) || [];
+      const seasonTeamIds = seasonTeams.map((t) => t.id).filter(Boolean);
+      if (seasonTeamIds.length > 0) {
+        await supabase.from('team_players').delete().in('team_id', seasonTeamIds);
+        const { error } = await supabase.from('teams').delete().in('id', seasonTeamIds);
+        if (error) return false;
+      }
+      await this.trackSeasonEntityIds(targetSlug, 'seasonTeamIds', [], 'replace');
+      return true;
     } catch {
       return false;
     }
   }
 
-  static async assignPlayerToTeam(teamId: string, playerId: string): Promise<boolean> {
+  static async assignPlayerToTeam(teamId: string, playerId: string, seasonSlug?: string, seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
-      // Remove any existing assignment for this player to prevent duplicates
-      await supabase.from('team_players').delete().eq('player_id', playerId);
-      // Query highest current slot_index in destination team
+      const hasTpSeasonCol = seasonId ? await this.hasSeasonIdColumn('team_players') : false;
+      if (seasonSlug) {
+        const seasonTeams = (await this.fetchTeams(seasonSlug, seasonId)) || [];
+        const seasonTeamIds = seasonTeams.map((t) => t.id).filter(Boolean);
+        if (seasonTeamIds.length > 0) {
+          await supabase
+            .from('team_players')
+            .delete()
+            .eq('player_id', playerId)
+            .in('team_id', seasonTeamIds);
+        }
+      } else {
+        await supabase.from('team_players').delete().eq('player_id', playerId);
+      }
       const { data } = await supabase
         .from('team_players')
         .select('slot_index')
@@ -688,6 +1996,7 @@ export class SupabaseService {
         player_id: playerId,
         slot_index: nextSlot,
         is_captain: false,
+        ...(hasTpSeasonCol && seasonId ? { season_id: seasonId } : {}),
       } as any);
 
       return !error;
@@ -713,14 +2022,22 @@ export class SupabaseService {
   // ============================================================================
   // 3. MATCHES & REAL-TIME SCORES
   // ============================================================================
-  static async fetchMatches(season = 'season-4'): Promise<{ matches: Match[]; knockout: KnockoutMatch[] } | null> {
+  static async fetchMatches(season = 'season-4', seasonId?: string): Promise<{ matches: Match[]; knockout: KnockoutMatch[] } | null> {
     if (!this.isAvailable()) return null;
     try {
-      const { data, error } = await supabase
+      const hasMatchSeasonId = seasonId ? await this.hasSeasonIdColumn('matches') : false;
+      let query = supabase
         .from('matches')
         .select('*')
-        .eq('tournament_season', season)
         .order('created_at', { ascending: true });
+
+      if (hasMatchSeasonId && seasonId) {
+        query = (query as any).or(`tournament_season.eq.${season},season_id.eq.${seasonId}`);
+      } else {
+        query = query.eq('tournament_season', season);
+      }
+
+      const { data, error } = await query;
 
       if (error || !data) return null;
 
@@ -785,6 +2102,8 @@ export class SupabaseService {
                 : undefined,
             sets: m.sets_json || undefined,
             mvpPlayerId: m.mvp_player_id || undefined,
+            seasonId: seasonId || m.season_id || undefined,
+            seasonSlug: m.tournament_season || season,
           });
         } else {
           const parsedTime = parseMatchScheduleTime(m.time || undefined);
@@ -806,6 +2125,8 @@ export class SupabaseService {
             startTime: parsedTime.startTime,
             sets: m.sets_json || undefined,
             mvpPlayerId: m.mvp_player_id || undefined,
+            seasonId: seasonId || m.season_id || undefined,
+            seasonSlug: m.tournament_season || season,
           });
         }
       }
@@ -874,18 +2195,20 @@ export class SupabaseService {
     matchId: string,
     updates: Partial<Match | KnockoutMatch>,
     isKnockout = false,
-    season = 'season-4'
+    season = 'season-4',
+    seasonId?: string
   ): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('matches') : false;
       const payload: Record<string, any> = {
         updated_at: new Date().toISOString(),
+        ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
       };
 
       if ('scoreA' in updates) payload.score_a = updates.scoreA ?? null;
       if ('scoreB' in updates) payload.score_b = updates.scoreB ?? null;
       if (updates.status !== undefined) {
-        // DB CHECK allows: 'upcoming', 'live', 'completed', 'postponed'
         payload.status = updates.status === 'paused' ? 'postponed' : updates.status;
       }
       if ('winner' in updates) payload.winner_id = updates.winner || null;
@@ -918,7 +2241,6 @@ export class SupabaseService {
       return await new Promise<boolean>((resolve) => {
         const existing = this.matchScorePending.get(matchId);
         if (existing) {
-          // Merge latest updates on top of pending write so the newest score always wins
           existing.payload = { ...existing.payload, ...payload };
           existing.season = season;
           existing.resolvers.push(resolve);
@@ -939,11 +2261,13 @@ export class SupabaseService {
   static async replaceSeasonMatches(
     newMatches: Match[],
     season = 'season-4',
-    courtSettings?: { courts: number; courtNames?: string[] }
+    courtSettings?: { courts: number; courtNames?: string[] },
+    seasonId?: string
   ): Promise<{ success: boolean; error?: string }> {
     if (!this.isAvailable()) return { success: true };
     try {
-      // 1. Identify existing group matches to clear dependent match_scores
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('matches') : false;
+
       const { data: existingMatches } = await supabase
         .from('matches')
         .select('id')
@@ -952,7 +2276,6 @@ export class SupabaseService {
 
       const existingIds = (existingMatches || []).map((m: any) => m.id);
 
-      // 2. Delete dependent match score rows
       if (existingIds.length > 0) {
         await supabase
           .from('match_scores')
@@ -960,7 +2283,6 @@ export class SupabaseService {
           .in('match_id', existingIds);
       }
 
-      // 3. Delete existing group matches
       const { error: delError } = await supabase
         .from('matches')
         .delete()
@@ -972,11 +2294,11 @@ export class SupabaseService {
         return { success: false, error: delError.message };
       }
 
-      // 4. Insert new matches
       if (newMatches.length > 0) {
         const rows = newMatches.map((m) => ({
           id: m.id,
           tournament_season: season,
+          ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
           round: m.round,
           court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
           match_type: 'group' as const,
@@ -1000,7 +2322,6 @@ export class SupabaseService {
         }
       }
 
-      // 5. Update court configuration in registration_form_config
       if (courtSettings) {
         const { data: currentForm } = await (supabase
           .from('registration_form_config') as any)
@@ -1022,7 +2343,11 @@ export class SupabaseService {
           .eq('season_slug', season);
       }
 
-      await this.logAudit('matches_schedule_regenerated', 'matches', `Generated ${newMatches.length} matches with ${courtSettings?.courts || 1} courts`);
+      await this.logAudit('matches_schedule_regenerated', 'matches', season, {
+        seasonSlug: season,
+        matchesCount: newMatches.length,
+        courts: courtSettings?.courts || 1,
+      }, undefined, seasonId);
       return { success: true };
     } catch (err: any) {
       console.error('Exception in replaceSeasonMatches:', err);
@@ -1032,13 +2357,16 @@ export class SupabaseService {
 
   static async batchSaveMatches(
     matches: Match[],
-    season = 'season-4'
+    season = 'season-4',
+    seasonId?: string
   ): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('matches') : false;
       const rows = matches.map((m, idx) => ({
         id: m.id,
         tournament_season: season,
+        ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
         round: m.round || 1,
         court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10),
         match_type: 'group' as const,
@@ -1066,6 +2394,7 @@ export class SupabaseService {
     draftMatches: Match[];
     removedMatchIds: string[];
     season?: string;
+    seasonId?: string;
     auditDetails?: Record<string, any>;
   }): Promise<{
     success: boolean;
@@ -1073,12 +2402,13 @@ export class SupabaseService {
     error?: string;
     matches?: Match[];
   }> {
-    const { draftMatches, removedMatchIds = [], season = 'season-4', auditDetails } = params;
+    const { draftMatches, removedMatchIds = [], season = 'season-4', seasonId, auditDetails } = params;
     if (!this.isAvailable()) {
       return { success: true, matches: draftMatches };
     }
 
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('matches') : false;
       // 1. Fetch authoritative current group matches from Supabase to protect concurrent live/completed updates
       const { data: currentDbRows, error: fetchErr } = await supabase
         .from('matches')
@@ -1161,6 +2491,7 @@ export class SupabaseService {
         const rows = mergedDraftMatches.map((m, idx) => ({
           id: m.id,
           tournament_season: season,
+          ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
           round: Math.max(1, Number(m.round) || 1),
           court:
             typeof m.court === 'number'
@@ -1195,7 +2526,9 @@ export class SupabaseService {
           'schedule_manual_edit',
           'matches',
           `Edited schedule (${mergedDraftMatches.length} fixtures)`,
-          auditDetails
+          auditDetails,
+          undefined,
+          seasonId
         );
       }
 
@@ -1243,9 +2576,10 @@ export class SupabaseService {
     }
   }
 
-  static async batchSaveKnockoutMatches(matches: KnockoutMatch[], season = 'season-4'): Promise<boolean> {
+  static async batchSaveKnockoutMatches(matches: KnockoutMatch[], season = 'season-4', seasonId?: string): Promise<boolean> {
     if (!this.isAvailable() || matches.length === 0) return false;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('matches') : false;
       const rows = matches.map((m) => {
         const pr = inferPlayoffRound(m);
         const safeDbStage =
@@ -1275,6 +2609,7 @@ export class SupabaseService {
         return {
           id: m.id,
           tournament_season: season,
+          ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
           round: 99,
           court: typeof m.court === 'number' ? m.court : parseInt(String(m.court || '').replace(/\D/g, '') || '1', 10) || 1,
           match_type: 'knockout' as const,
@@ -1299,12 +2634,12 @@ export class SupabaseService {
     }
   }
 
-  static async replaceKnockoutMatches(matches: KnockoutMatch[], season = 'season-4'): Promise<boolean> {
+  static async replaceKnockoutMatches(matches: KnockoutMatch[], season = 'season-4', seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
       await this.clearKnockoutMatches(season);
       if (matches.length === 0) return true;
-      return await this.batchSaveKnockoutMatches(matches, season);
+      return await this.batchSaveKnockoutMatches(matches, season, seasonId);
     } catch {
       return false;
     }
@@ -1394,6 +2729,8 @@ export class SupabaseService {
       method: r.method,
       txnId: r.txn_id || undefined,
       season: r.season_slug,
+      seasonSlug: r.season_slug,
+      seasonId: r.season_id || undefined,
       createdAt: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
       paidAt: r.paid_at ? new Date(r.paid_at).getTime() : undefined,
       approvedAt: r.approved_at ? new Date(r.approved_at).getTime() : undefined,
@@ -1407,16 +2744,23 @@ export class SupabaseService {
     };
   }
 
-  static async fetchRegistrations(season = 'all'): Promise<Registration[] | null> {
+  static async fetchRegistrations(season = 'season-4', seasonId?: string): Promise<Registration[] | null> {
     if (!this.isAvailable()) return null;
     try {
+      const targetSeason = !season || season === 'all' || season === 'any'
+        ? (await this.fetchActiveSeason()).seasonSlug
+        : season;
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('registrations') : false;
+
       let query = supabase
         .from('registrations')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (season && season !== 'all' && season !== 'any') {
-        query = query.eq('season_slug', season);
+      if (hasSeasonCol && seasonId) {
+        query = (query as any).or(`season_slug.eq.${targetSeason},season_id.eq.${seasonId}`);
+      } else {
+        query = query.eq('season_slug', targetSeason);
       }
 
       const { data, error } = await query;
@@ -1429,20 +2773,33 @@ export class SupabaseService {
     }
   }
 
+  static async fetchTournamentRevenue(seasonSlug = 'season-4', seasonId?: string) {
+    const regs = (await this.fetchRegistrations(seasonSlug, seasonId)) || [];
+    return calculateRegistrationStats(regs);
+  }
+
   static async checkDuplicateRegistration(
     mobile: string,
-    seasonSlug = 'season-4'
+    seasonSlug = 'season-4',
+    seasonId?: string
   ): Promise<{ isDuplicate: boolean; regId?: string } | null> {
     if (!this.isAvailable()) return null;
     try {
       const clean = mobile.replace(/\D/g, '');
-      const { data, error } = await supabase
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('registrations') : false;
+      let query = supabase
         .from('registrations')
         .select('id, reg_id, status')
-        .eq('season_slug', seasonSlug)
         .eq('mobile', clean)
-        .neq('status', 'rejected')
-        .maybeSingle();
+        .neq('status', 'rejected');
+
+      if (hasSeasonCol && seasonId) {
+        query = (query as any).or(`season_slug.eq.${seasonSlug},season_id.eq.${seasonId}`);
+      } else {
+        query = query.eq('season_slug', seasonSlug);
+      }
+
+      const { data, error } = await query.maybeSingle();
 
       if (error || !data) return { isDuplicate: false };
       return { isDuplicate: true, regId: (data as any).reg_id };
@@ -1451,11 +2808,13 @@ export class SupabaseService {
     }
   }
 
-  static async generateCollisionFreeRegId(prefix = 'SPL-2026'): Promise<string> {
+  static async generateCollisionFreeRegId(prefix = 'SPL-2026', seasonSlug?: string): Promise<string> {
     try {
-      const { count } = await supabase
-        .from('registrations')
-        .select('*', { count: 'exact', head: true });
+      let query = supabase.from('registrations').select('*', { count: 'exact', head: true });
+      if (seasonSlug) {
+        query = query.eq('season_slug', seasonSlug);
+      }
+      const { count } = await query;
       const seq = String((count || 0) + 1).padStart(3, '0');
       const salt = Math.floor(100 + Math.random() * 900);
       return `${prefix}-${seq}-${salt}`;
@@ -1466,30 +2825,30 @@ export class SupabaseService {
     }
   }
 
-  static async saveRegistration(reg: Registration): Promise<boolean> {
-    const res = await this.saveRegistrationWithDetail(reg);
+  static async saveRegistration(reg: Registration, seasonId?: string): Promise<boolean> {
+    const res = await this.saveRegistrationWithDetail(reg, seasonId);
     return res.success;
   }
 
   static async saveRegistrationWithDetail(
-    reg: Registration
+    reg: Registration,
+    seasonId?: string
   ): Promise<{ success: boolean; error?: string; registrationClosed?: boolean }> {
     if (!this.isAvailable()) return { success: false, error: 'Supabase credentials not configured' };
     try {
-      // Enforce Registration Open/Closed status at database persistence layer
-      const targetSeason = reg.season || 'season-4';
-      const cfgRow = await this.fetchFormConfigRow(targetSeason);
+      const targetSeason = reg.seasonSlug || reg.season || 'season-4';
+      const resolvedSeasonId = reg.seasonId || seasonId;
+      const cfgRow = await this.fetchFormConfigRow(targetSeason, { allowFallback: false });
       if (cfgRow && cfgRow.enabled === false) {
         return {
           success: false,
           registrationClosed: true,
           error:
             cfgRow.closed_notice ||
-            'Registration for Smash Premier League 3.0 is currently closed.',
+            `Registration for ${cfgRow.tournament_name || 'Smash Premier League'} (${cfgRow.season_title || targetSeason}) is currently closed.`,
         };
       }
 
-      // 1. Normalize gender to match PostgreSQL CHECK (gender IN ('M', 'F', 'Other'))
       const rawGender = String(reg.gender || '').trim().toLowerCase();
       let normalizedGender: 'M' | 'F' | 'Other' = 'M';
       if (rawGender === 'm' || rawGender === 'male') {
@@ -1500,11 +2859,9 @@ export class SupabaseService {
         normalizedGender = 'Other';
       }
 
-      // 2. Normalize status to match PostgreSQL CHECK (status IN ('pending', 'approved', 'rejected', 'paid', 'complimentary'))
       const validStatuses = ['pending', 'approved', 'rejected', 'paid', 'complimentary'];
       const normalizedStatus = validStatuses.includes(reg.status) ? reg.status : 'pending';
 
-      // 3. Normalize payment_status to match PostgreSQL CHECK
       const validPaymentStatuses = [
         'unpaid',
         'pending',
@@ -1519,7 +2876,6 @@ export class SupabaseService {
         ? (reg.paymentStatus as any)
         : 'unpaid';
 
-      // 4. Normalize method to match PostgreSQL CHECK
       const validMethods = ['cash', 'upi', 'bank', 'complimentary'];
       const normalizedMethod = validMethods.includes(reg.method as any) ? (reg.method as any) : 'upi';
 
@@ -1534,10 +2890,13 @@ export class SupabaseService {
         delete nextAnswers._paidAmount;
       }
 
+      const hasSeasonCol = resolvedSeasonId ? await this.hasSeasonIdColumn('registrations') : false;
+
       const payload = {
         id: reg.id,
         reg_id: reg.regId,
-        season_slug: reg.season || 'season-4',
+        season_slug: targetSeason,
+        ...(hasSeasonCol && resolvedSeasonId ? { season_id: resolvedSeasonId } : {}),
         player_id: reg.playerId || null,
         name: reg.name.trim(),
         mobile: reg.mobile.replace(/\D/g, ''),
@@ -1902,15 +3261,71 @@ export class SupabaseService {
     return raw;
   }
 
-  static async savePlayoffState(
+  static extractTeamFormationFromConfig(
+    config: RegistrationFormConfig | null
+  ): {
+    teamFormationMode?: 'random' | 'predefined' | 'mixed';
+    predefinedTeams?: PredefinedTeam[];
+  } {
+    const raw = (config?.appearance as any)?.teamFormation;
+    if (!raw || typeof raw !== 'object') return {};
+    const mode =
+      raw.mode === 'predefined' || raw.mode === 'mixed' || raw.mode === 'random'
+        ? raw.mode
+        : undefined;
+    const predefinedTeams = Array.isArray(raw.predefinedTeams) ? raw.predefinedTeams : undefined;
+    return { teamFormationMode: mode, predefinedTeams };
+  }
+
+  static async saveTeamFormationConfig(
     seasonSlug = 'season-4',
-    knockout: KnockoutData
+    teamFormationMode: 'random' | 'predefined' | 'mixed',
+    predefinedTeams: PredefinedTeam[],
+    seasonId?: string
   ): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
       const targetSlug = seasonSlug || 'season-4';
       const nowIso = new Date().toISOString();
-      const existingRow = await this.fetchFormConfigRow(targetSlug);
+      const existingRow = await this.fetchFormConfigRow(targetSlug, { allowFallback: false });
+      const snapshot = {
+        mode: teamFormationMode,
+        predefinedTeams: Array.isArray(predefinedTeams) ? predefinedTeams : [],
+        updatedAt: Date.now(),
+      };
+
+      if (existingRow) {
+        const existingApp = (existingRow.appearance_json as any) || {};
+        const { error } = await (supabase.from('registration_form_config') as any)
+          .update({
+            appearance_json: {
+              ...existingApp,
+              teamFormation: snapshot,
+            },
+            updated_at: nowIso,
+          })
+          .eq('id', existingRow.id);
+        return !error;
+      }
+
+      const defaultForm = createDefaultFormConfig(targetSlug);
+      (defaultForm.appearance as any).teamFormation = snapshot;
+      return await this.saveFormConfig(defaultForm, false, seasonId);
+    } catch {
+      return false;
+    }
+  }
+
+  static async savePlayoffState(
+    seasonSlug = 'season-4',
+    knockout: KnockoutData,
+    seasonId?: string
+  ): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+    try {
+      const targetSlug = seasonSlug || 'season-4';
+      const nowIso = new Date().toISOString();
+      const existingRow = await this.fetchFormConfigRow(targetSlug, { allowFallback: false });
 
       const matchMetaById: Record<string, Partial<KnockoutMatch>> = {};
       for (const m of knockout.matches || []) {
@@ -2052,7 +3467,10 @@ export class SupabaseService {
     }
   }
 
-  static async fetchFormConfigRow(seasonSlug = 'season-4'): Promise<DbRegistrationFormConfig | null> {
+  static async fetchFormConfigRow(
+    seasonSlug = 'season-4',
+    options?: { allowFallback?: boolean }
+  ): Promise<DbRegistrationFormConfig | null> {
     if (!this.isAvailable()) return null;
     try {
       const { data, error } = await supabase
@@ -2063,6 +3481,10 @@ export class SupabaseService {
 
       if (!error && data) {
         return data as DbRegistrationFormConfig;
+      }
+
+      if (!options?.allowFallback) {
+        return null;
       }
 
       const { data: fallbackData } = await supabase
@@ -2077,14 +3499,6 @@ export class SupabaseService {
         return fallbackData as DbRegistrationFormConfig;
       }
 
-      const { data: season4Data } = await supabase
-        .from('registration_form_config')
-        .select('*')
-        .eq('season_slug', 'season-4')
-        .maybeSingle();
-
-      if (season4Data) return season4Data as DbRegistrationFormConfig;
-
       const { data: anyRow } = await supabase
         .from('registration_form_config')
         .select('*')
@@ -2098,29 +3512,39 @@ export class SupabaseService {
     }
   }
 
-  static async fetchFormConfig(seasonSlug = 'season-4'): Promise<RegistrationFormConfig | null> {
-    const row = await this.fetchFormConfigRow(seasonSlug);
+  static async fetchFormConfig(
+    seasonSlug = 'season-4',
+    allowFallback = false
+  ): Promise<RegistrationFormConfig | null> {
+    const row = await this.fetchFormConfigRow(seasonSlug, { allowFallback });
     if (!row) return null;
     return this.mapDbFormRow(row);
   }
 
-  static async saveFormConfig(config: RegistrationFormConfig, publish = false): Promise<boolean> {
+  static async saveFormConfig(
+    config: RegistrationFormConfig,
+    publish = false,
+    seasonId?: string
+  ): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
       const slug = config.seasonSlug || 'season-4';
       const now = new Date().toISOString();
 
-      const { data } = await supabase
-        .from('registration_form_config')
-        .select('id, version, appearance_json, published_at')
-        .eq('season_slug', slug)
-        .maybeSingle();
+      const [{ data }, hasFormSeasonCol] = await Promise.all([
+        supabase
+          .from('registration_form_config')
+          .select('id, version, appearance_json, published_at')
+          .eq('season_slug', slug)
+          .maybeSingle(),
+        seasonId ? this.hasSeasonIdColumn('registration_form_config') : Promise.resolve(false),
+      ]);
 
       const existing = data as any;
       const existingId = existing?.id || slug;
       const nextVersion = existing ? (existing.version || 1) + 1 : 1;
 
-      // Preserve persisted tournamentSettings and Hero Section metadata inside appearance_json
+      // Preserve persisted tournamentSettings, teamFormation, Hero Section & Playoff metadata inside appearance_json
       const existingApp = (existing?.appearance_json as any) || {};
       const existingTournamentSettings = existingApp.tournamentSettings;
       const incomingTournamentSettings = (config.appearance as any)?.tournamentSettings;
@@ -2132,6 +3556,12 @@ export class SupabaseService {
         ...(existingApp.heroPublishedBy ? { heroPublishedBy: existingApp.heroPublishedBy } : {}),
         ...(existingApp.youtubeLive ? { youtubeLive: existingApp.youtubeLive } : {}),
         ...(existingApp.playoffState ? { playoffState: existingApp.playoffState } : {}),
+        ...(existingApp.teamFormation ? { teamFormation: existingApp.teamFormation } : {}),
+        ...(existingApp.seasonTeamIds ? { seasonTeamIds: existingApp.seasonTeamIds } : {}),
+        ...(existingApp.seasonPlayerIds ? { seasonPlayerIds: existingApp.seasonPlayerIds } : {}),
+        ...(existingApp.seasonNumber && !(config.appearance as any)?.seasonNumber ? { seasonNumber: existingApp.seasonNumber } : {}),
+        ...(existingApp.editionName && !(config.appearance as any)?.editionName ? { editionName: existingApp.editionName } : {}),
+        ...(existingApp.seasonStatus && !(config.appearance as any)?.seasonStatus ? { seasonStatus: existingApp.seasonStatus } : {}),
         ...(existingTournamentSettings || incomingTournamentSettings
           ? {
               tournamentSettings: {
@@ -2145,6 +3575,7 @@ export class SupabaseService {
       const payload: Record<string, any> = {
         id: existingId,
         season_slug: slug,
+        ...(hasFormSeasonCol && seasonId ? { season_id: seasonId } : {}),
         tournament_name: config.tournamentName,
         season_title: config.seasonTitle,
         deadline: config.deadline ? new Date(config.deadline).toISOString() : null,
@@ -2575,11 +4006,13 @@ export class SupabaseService {
   // ============================================================================
   // 7. TOURNAMENT STANDINGS
   // ============================================================================
-  static async syncStandings(season = 'season-4', standings: StandingsRecord[]): Promise<boolean> {
+  static async syncStandings(season = 'season-4', standings: StandingsRecord[], seasonId?: string): Promise<boolean> {
     if (!this.isAvailable()) return false;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('tournament_standings') : false;
       const rows = standings.map((s, idx) => ({
         season_slug: season,
+        ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
         team_id: s.team.id,
         played: s.played,
         won: s.won,
@@ -2605,14 +4038,22 @@ export class SupabaseService {
     }
   }
 
-  static async fetchStandings(season = 'season-4'): Promise<StandingsRecord[] | null> {
+  static async fetchStandings(season = 'season-4', seasonId?: string): Promise<StandingsRecord[] | null> {
     if (!this.isAvailable()) return null;
     try {
-      const { data, error } = await supabase
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('tournament_standings') : false;
+      let query = supabase
         .from('tournament_standings')
         .select('*, teams(*)')
-        .eq('season_slug', season)
         .order('rank', { ascending: true });
+
+      if (hasSeasonCol && seasonId) {
+        query = (query as any).or(`season_slug.eq.${season},season_id.eq.${seasonId}`);
+      } else {
+        query = query.eq('season_slug', season);
+      }
+
+      const { data, error } = await query;
       if (error || !data) return null;
       return (data as any[]).map((r) => ({
         team: {
@@ -2639,9 +4080,10 @@ export class SupabaseService {
   // ============================================================================
   // 8. AUDIT LOGGING
   // ============================================================================
-  static async logAudit(action: string, entityType: string, entityId?: string, details?: any, user?: any): Promise<void> {
+  static async logAudit(action: string, entityType: string, entityId?: string, details?: any, user?: any, seasonId?: string): Promise<void> {
     if (!this.isAvailable()) return;
     try {
+      const hasSeasonCol = seasonId ? await this.hasSeasonIdColumn('audit_logs') : false;
       await supabase.from('audit_logs').insert({
         action,
         entity_type: entityType,
@@ -2649,6 +4091,7 @@ export class SupabaseService {
         user_id: user?.id || null,
         user_email: user?.email || null,
         details_json: details || {},
+        ...(hasSeasonCol && seasonId ? { season_id: seasonId } : {}),
         created_at: new Date().toISOString(),
       } as any);
     } catch {}
@@ -2751,7 +4194,9 @@ export class SupabaseService {
     if (!this.isAvailable()) return () => {};
     let disposed = false;
     try {
-      const channelName = 'spl-master-realtime-channel';
+      const channelName = handlers.seasonSlug
+        ? `spl-master-realtime-${handlers.seasonSlug}`
+        : 'spl-master-realtime-channel';
       this.cleanupExistingChannels(channelName);
 
       const channel = supabase
@@ -2819,6 +4264,13 @@ export class SupabaseService {
             if (!disposed) handlers.onPlayoffChange?.(payload);
           }
         )
+        .on(
+          'postgres_changes',
+          { event: '*', schema: 'public', table: 'tournament_seasons' },
+          (payload: any) => {
+            if (!disposed) handlers.onSeasonChange?.(payload);
+          }
+        )
         .subscribe((status) => {
           if (!disposed) handlers.onStatusChange?.(status);
         });
@@ -2883,6 +4335,13 @@ export class SupabaseService {
         }
       }
     } catch {}
+
+    if (seasonSlug && seasonSlug !== 'season-4') {
+      const seasonMeta = await this.resolveSeasonContext(seasonSlug).catch(() => null);
+      if (seasonMeta && seasonMeta.seasonSlug === seasonSlug) {
+        return buildSeasonInitialHeroConfig(seasonMeta);
+      }
+    }
 
     return cloneHeroConfig(DEFAULT_HERO_CONFIG);
   }
@@ -3336,6 +4795,8 @@ export interface RealtimeChangeEvent<T = any> {
 }
 
 export interface TournamentRealtimeHandlers {
+  seasonSlug?: string;
+  seasonId?: string;
   onMatchChange?: (payload: RealtimeChangeEvent) => void;
   onPlayerChange?: (payload: RealtimeChangeEvent) => void;
   onTeamChange?: (payload: RealtimeChangeEvent) => void;
@@ -3344,5 +4805,6 @@ export interface TournamentRealtimeHandlers {
   onFormConfigChange?: (payload: RealtimeChangeEvent) => void;
   onStandingsChange?: (payload: RealtimeChangeEvent) => void;
   onPlayoffChange?: (payload: RealtimeChangeEvent) => void;
+  onSeasonChange?: (payload: RealtimeChangeEvent) => void;
   onStatusChange?: (status: string) => void;
 }

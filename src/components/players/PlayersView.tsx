@@ -35,6 +35,8 @@ export const PlayersView: React.FC = () => {
     deletePlayersBulk,
     assignPlayerToTeam,
     removePlayerFromTeam,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -301,7 +303,8 @@ export const PlayersView: React.FC = () => {
         <div className="flex items-center gap-2">
           <button
             onClick={() => setBulkModalOpen(true)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-200 hover:text-white bg-white/10 hover:bg-white/15 rounded-xl transition-colors border border-white/10 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <UserPlus className="w-4 h-4 text-amber-400" />
             <span>Bulk Add</span>
@@ -309,13 +312,20 @@ export const PlayersView: React.FC = () => {
 
           <button
             onClick={() => setAddModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
             <span>Add Player</span>
           </button>
         </div>
       </div>
+
+      {isSeasonLocked && (
+        <div className="rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
+          <strong>SPL {activeSeason.seasonNumber} is Archived (Read-Only):</strong> Player additions and edits are locked. Switch to an active or upcoming season in Settings to modify rosters.
+        </div>
+      )}
 
       {/* Search & Multiple Filter Toolbar */}
       {state.players.length > 0 && (

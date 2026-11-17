@@ -81,6 +81,8 @@ interface YouTubeLivePlayerModalProps {
   scoringRules?: BadmintonScoringRules;
   realtimeStatus?: 'connecting' | 'connected' | 'reconnecting' | 'offline';
   onRetryRealtime?: () => void;
+  seasonNumber?: string;
+  tournamentName?: string;
 }
 
 export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
@@ -95,6 +97,8 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
   courtNames,
   realtimeStatus = 'connected',
   onRetryRealtime,
+  seasonNumber = '3.0',
+  tournamentName = 'Smash Premier League',
 }) => {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const prevLiveIdsRef = useRef<Set<string>>(new Set());
@@ -337,7 +341,7 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
                   isMinimized ? 'text-xs' : 'text-sm sm:text-lg'
                 }`}
               >
-                {config.title || 'SPL 3.0 Live Stream'}
+                {config.title || `SPL ${seasonNumber} Live Stream`}
               </h3>
               {!isMinimized && config.status === 'scheduled' && config.scheduledAt && (
                 <p className="text-[11px] text-amber-300/90 font-medium truncate">
@@ -411,7 +415,7 @@ export const YouTubeLivePlayerModal: React.FC<YouTubeLivePlayerModalProps> = ({
                     ? 'Broadcast scheduled — live player updates automatically when stream starts.'
                     : config.status === 'ended'
                     ? 'Official SPL Championship Replay Broadcast'
-                    : 'Streaming live inside Smash Premier League 3.0 · Use player controls for HD & volume.'}
+                    : `Streaming live inside ${tournamentName} ${seasonNumber} · Use player controls for HD & volume.`}
                 </span>
               </div>
             )}

@@ -31,6 +31,11 @@ export { getKnockoutProgressionOrder, getMatchStatusDisplayLabel, normalizeMatch
 
 export const STORAGE_KEY = 'smash-premier-league-v8';
 
+export function getSeasonStorageKey(baseKey: string, seasonSlug?: string | null): string {
+  const cleanSlug = (seasonSlug || 'season-4').trim().toLowerCase().replace(/[^a-z0-9-_]/g, '-');
+  return `${baseKey}::${cleanSlug}`;
+}
+
 export const DEFAULT_REGISTRATION_SETTINGS = {
   enabled: true,
   seasonSlug: 'season-4',

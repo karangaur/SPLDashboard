@@ -36,6 +36,8 @@ interface LiveMatchHeroProps {
   onGoToFixtures?: () => void;
   youtubeLiveConfig?: YouTubeLiveConfig;
   onWatchLive?: () => void;
+  seasonNumber?: string;
+  editionName?: string;
 }
 
 const SEMI_FINAL_PARTICLES = [
@@ -197,6 +199,8 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
   onGoToFixtures,
   youtubeLiveConfig,
   onWatchLive,
+  seasonNumber = '3.0',
+  editionName = 'Champion Edition',
 }) => {
   const effectiveRules = scoringRules || DEFAULT_BADMINTON_RULES;
 
@@ -1096,7 +1100,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                     : 'text-slate-400'
                 }`}
               >
-                · SPL 3.0 · BWF {targetScore}-pt Rally
+                · SPL {seasonNumber} · BWF {targetScore}-pt Rally
               </span>
             </div>
 
@@ -1173,9 +1177,9 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
                   <div className="min-w-0 space-y-0.5">
                     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-0.5 text-[10px] sm:text-xs font-extrabold uppercase tracking-widest text-amber-200">
-                      <span>🏆 SMASH PREMIER LEAGUE 3.0</span>
+                      <span>🏆 SMASH PREMIER LEAGUE {seasonNumber}</span>
                       <span aria-hidden="true" className="text-amber-500/70 hidden sm:inline">·</span>
-                      <span className="text-yellow-300">👑 CHAMPION EDITION</span>
+                      <span className="text-yellow-300">👑 {editionName.toUpperCase()}</span>
                     </div>
                     <h3 className="text-base sm:text-2xl lg:text-3xl font-black font-display uppercase tracking-wide bg-gradient-to-r from-amber-100 via-yellow-300 to-orange-400 bg-clip-text text-transparent leading-tight">
                       🔥 THE GRAND FINAL
@@ -1711,7 +1715,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                       {currentGfCeremonyStep === 'step4_announce' ? (
                         <div className="space-y-2 spl-champion-text-reveal">
                           <div className="text-xs sm:text-sm font-black uppercase tracking-[0.2em] text-amber-200">
-                            🏆 SMASH PREMIER LEAGUE 3.0
+                            🏆 SMASH PREMIER LEAGUE {seasonNumber}
                           </div>
                           <div className="text-sm sm:text-base font-extrabold uppercase tracking-[0.18em] text-yellow-300">
                             👑 GRAND CHAMPIONS
@@ -1720,7 +1724,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
                             🎉 {winnerTeam?.name || 'CHAMPIONS'}
                           </h4>
                           <p className="text-xs sm:text-base font-black uppercase tracking-widest text-orange-300">
-                            🔥 THE CHAMPIONS OF SPL 3.0!
+                            🔥 THE CHAMPIONS OF SPL {seasonNumber}!
                           </p>
                           <div className="pt-1 flex flex-wrap items-center justify-center gap-2 text-xs sm:text-sm text-amber-100/95 font-semibold">
                             <span className="text-xl">{winnerTeam?.badge || '🏆'}</span>
@@ -1776,7 +1780,7 @@ export const LiveMatchHero: React.FC<LiveMatchHeroProps> = React.memo(({
 
                         <div className="min-w-0 space-y-1.5">
                           <div className="text-[10px] sm:text-xs font-extrabold uppercase tracking-[0.18em] sm:tracking-[0.22em] text-amber-300">
-                            🏆 SMASH PREMIER LEAGUE 3.0 · 👑 SPL 3.0 CHAMPION EDITION
+                            🏆 SMASH PREMIER LEAGUE {seasonNumber} · 👑 SPL {seasonNumber} {editionName.toUpperCase()}
                           </div>
                           <h4 className="text-2xl sm:text-4xl font-black font-display uppercase tracking-wider bg-gradient-to-r from-amber-100 via-yellow-300 to-orange-400 bg-clip-text text-transparent">
                             CHAMPIONS

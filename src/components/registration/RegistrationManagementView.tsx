@@ -86,6 +86,8 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
     deleteRegistration,
     deleteRegistrationsBulk,
     bulkApproveRegistrations,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const regSettings = state.registrationSettings;
@@ -482,7 +484,8 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           {/* Customize Registration Form Button */}
           <button
             onClick={() => setIsFormCustomizerOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all shadow-sm"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Sliders className="w-3.5 h-3.5 text-emerald-400" />
             <span>Customize Registration Form</span>
@@ -491,7 +494,8 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           {/* Regenerate Link Button */}
           <button
             onClick={() => setIsRegenerateModalOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all shadow-sm"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold bg-amber-500/15 border border-amber-500/30 text-amber-300 hover:bg-amber-500/25 transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
             <span>Regenerate Link</span>
@@ -500,10 +504,10 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           {/* Quick Registration Status Toggle */}
           <button
             type="button"
-            disabled={isUpdatingRegStatus}
+            disabled={isUpdatingRegStatus || isSeasonLocked}
             onClick={handleToggleRegistrationStatus}
             aria-pressed={!isRegistrationOpen}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border disabled:opacity-60 disabled:cursor-wait ${
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all border disabled:opacity-60 disabled:cursor-not-allowed ${
               isRegistrationOpen
                 ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/25'
                 : 'bg-rose-500/15 border-rose-500/30 text-rose-300 hover:bg-rose-500/25'
@@ -529,6 +533,12 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
           </button>
         </div>
       </div>
+
+      {isSeasonLocked && (
+        <div className="rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
+          <strong>SPL {activeSeason.seasonNumber} is Archived (Read-Only):</strong> Registration status toggles, form customization, approvals, and fee modifications are locked for this historical season.
+        </div>
+      )}
 
       {/* Registration Status Confirmation / Error Banner */}
       {regStatusFeedback && (
@@ -996,7 +1006,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
                 {isRegistrationsLoading && state.registrations.length === 0 ? '...' : stats.total}
               </div>
               <span className="text-[11px] text-slate-400 block tabular-nums">
-                {stats.approvedCount} approved · {regSettings.seasonSlug || 'season-4'}
+                {stats.approvedCount} approved · {regSettings.seasonSlug || activeSeason.seasonSlug}
               </span>
             </div>
 
@@ -2287,7 +2297,7 @@ export const RegistrationManagementView: React.FC<RegistrationManagementViewProp
         isOpen={isRegenerateModalOpen}
         onClose={() => setIsRegenerateModalOpen(false)}
         seasonSlug={currentSeasonSlug}
-        seasonTitle={formConfig.seasonTitle || state.settings.season || 'Season IV'}
+        seasonTitle={formConfig.seasonTitle || state.settings.season || activeSeason.editionName || `SPL ${activeSeason.seasonNumber}`}
         tokens={tokens}
         activeToken={activeToken}
         onRegenerate={regenerateToken}

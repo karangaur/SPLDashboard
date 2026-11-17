@@ -30,6 +30,8 @@ export const RegisteredView: React.FC = () => {
     isRegistrationsLoading,
     registrationsSyncError,
     refreshRegistrations,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const [search, setSearch] = useState('');
@@ -110,8 +112,13 @@ export const RegisteredView: React.FC = () => {
             </h1>
           </div>
           <p className="mt-1 text-xs sm:text-sm text-slate-400">
-            Payment tracking, financial ledger, and player directory for {state.settings.name}.
+            Payment tracking, financial ledger, and player directory for {state.settings.name} (SPL {activeSeason.seasonNumber}).
           </p>
+          {isSeasonLocked && (
+            <p className="mt-2 inline-block rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-1 text-[11px] font-semibold text-amber-200">
+              SPL {activeSeason.seasonNumber} is Archived (Read-Only): Payment statuses and registration edits are locked.
+            </p>
+          )}
         </div>
 
         <button
@@ -213,7 +220,7 @@ export const RegisteredView: React.FC = () => {
           <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
           <input
             type="text"
-            placeholder="Search by player name, mobile, or SPL-2026-XXX..."
+            placeholder={`Search by player name, mobile, or SPL-${activeSeason.tournamentYear || new Date().getFullYear()}-XXX...`}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="w-full bg-slate-900/80 border border-white/10 rounded-xl pl-9 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-emerald-400/50"

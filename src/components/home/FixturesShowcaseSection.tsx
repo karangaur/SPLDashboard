@@ -28,6 +28,7 @@ export interface FixturesShowcaseSectionProps {
   courtsListLabel: string;
   scoringRules?: BadmintonScoringRules;
   onOpenMatchModal: (match: Match) => void;
+  seasonNumber?: string;
 }
 
 type FixtureFilterTab = 'all' | 'upcoming' | 'live' | 'completed' | 'knockout';
@@ -91,6 +92,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
   courtsListLabel,
   scoringRules,
   onOpenMatchModal,
+  seasonNumber = '3.0',
 }) => {
   const [activeTab, setActiveTab] = useState<FixtureFilterTab>('all');
   const [selectedCourt, setSelectedCourt] = useState<number | 'all'>('all');
@@ -404,7 +406,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                   No League Fixtures in this Category
                 </h3>
                 <p className="text-xs sm:text-sm text-slate-400 mt-1.5">
-                  No League Stage matches currently match this filter. Knockout matches appear exclusively in Road to the SPL 3.0 Crown below.
+                  No League Stage matches currently match this filter. Knockout matches appear exclusively in Road to the SPL {seasonNumber} Crown below.
                 </p>
                 <button
                   type="button"
@@ -644,12 +646,12 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
           </div>
         )}
 
-        {/* ROAD TO THE SPL 3.0 CROWN — SINGLE OFFICIAL KNOCKOUT BRACKET LOCATION */}
+        {/* ROAD TO THE SPL CROWN — SINGLE OFFICIAL KNOCKOUT BRACKET LOCATION */}
         {bracketStages.hasBracket ? (
           <div
             ref={bracketRef}
             id="road-to-crown-bracket"
-            aria-label="Road to the SPL 3.0 Crown Knockout Bracket"
+            aria-label={`Road to the SPL ${seasonNumber} Crown Knockout Bracket`}
             className={`rounded-3xl border bg-gradient-to-br from-[#0b0e19] via-[#090a13] to-[#110c06] p-4 sm:p-6 shadow-2xl scroll-mt-24 transition-all ${
               activeTab === 'knockout'
                 ? 'border-amber-400/70 ring-2 ring-amber-400/35'
@@ -662,7 +664,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
                 <span>
                   {knockout?.format === 'ipl_top4'
                     ? 'Road to the Grand Final · SPL Championship Playoffs'
-                    : 'Road to the SPL 3.0 Crown'}
+                    : `Road to the SPL ${seasonNumber} Crown`}
                 </span>
               </div>
               <span className="text-[11px] font-mono text-slate-400">
@@ -972,7 +974,7 @@ export const FixturesShowcaseSection: React.FC<FixturesShowcaseSectionProps> = R
           >
             <Crown className="w-10 h-10 text-amber-400/80 mx-auto" />
             <h3 className="text-lg font-display font-black text-white uppercase mt-4">
-              Road to the SPL 3.0 Crown Awaiting Bracket
+              Road to the SPL {seasonNumber} Crown Awaiting Bracket
             </h3>
             <p className="text-xs sm:text-sm text-slate-400 mt-1.5">
               Semi-Final and Grand Final matchups will appear here automatically once the Knockout Stage bracket is generated.

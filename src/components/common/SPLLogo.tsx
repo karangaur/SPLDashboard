@@ -7,6 +7,7 @@ export interface SPLLogoProps {
   showTagline?: boolean;
   animated?: boolean;
   subtitle?: string;
+  seasonNumber?: string;
 }
 
 const SIZE_MAP = {
@@ -17,9 +18,14 @@ const SIZE_MAP = {
   xl: { icon: 'w-28 h-28 sm:w-36 sm:h-36', text: 'text-2xl sm:text-3xl', sub: 'text-xs sm:text-sm' },
 } as const;
 
-export const SPLLogoEmblemSvg: React.FC<{ className?: string; include30?: boolean }> = ({
+export const SPLLogoEmblemSvg: React.FC<{
+  className?: string;
+  include30?: boolean;
+  seasonNumber?: string;
+}> = ({
   className = 'w-14 h-14',
   include30 = false,
+  seasonNumber = '3.0',
 }) => {
   const uid = useId().replace(/:/g, '');
   const goldId = `spl-gold-${uid}`;
@@ -149,7 +155,7 @@ export const SPLLogoEmblemSvg: React.FC<{ className?: string; include30?: boolea
           fontWeight="900"
           letterSpacing="2.4"
         >
-          3.0 · CHAMPION
+          {seasonNumber} · CHAMPION
         </text>
       ) : (
         <path d="M148 286L180 298L212 286" stroke={`url(#${goldSoftId})`} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
@@ -164,9 +170,11 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
   size = 'md',
   showTagline = true,
   animated = false,
-  subtitle = 'SPL 3.0 · CHAMPION EDITION',
+  subtitle,
+  seasonNumber = '3.0',
 }) => {
   const s = SIZE_MAP[size];
+  const resolvedSubtitle = subtitle || `SPL ${seasonNumber} · CHAMPION EDITION`;
 
   if (variant === 'emblem') {
     return (
@@ -180,7 +188,7 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
             aria-hidden="true"
             className="absolute inset-1 rounded-full bg-amber-500/20 blur-xl pointer-events-none"
           />
-          <SPLLogoEmblemSvg className={`${s.icon} relative z-10 drop-shadow-[0_10px_24px_rgba(245,158,11,0.3)]`} include30 />
+            <SPLLogoEmblemSvg className={`${s.icon} relative z-10 drop-shadow-[0_10px_24px_rgba(245,158,11,0.3)]`} include30 seasonNumber={seasonNumber} />
         </div>
         {showTagline && (
           <div className="mt-2 space-y-0.5">
@@ -188,7 +196,7 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
               SMASH PREMIER LEAGUE
             </span>
             <span className={`block font-display font-extrabold uppercase tracking-[0.22em] text-amber-400 ${s.sub}`}>
-              {subtitle}
+              {resolvedSubtitle}
             </span>
           </div>
         )}
@@ -212,6 +220,7 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
         <SPLLogoEmblemSvg
           className={`${s.icon} relative z-10 drop-shadow-[0_8px_18px_rgba(245,158,11,0.32)]`}
           include30={variant === 'hero'}
+          seasonNumber={seasonNumber}
         />
       </div>
 
@@ -223,7 +232,7 @@ export const SPLLogo: React.FC<SPLLogoProps> = ({
           <div className="flex items-center gap-2 mt-0.5 min-w-0">
             <span className="h-[2px] w-4 bg-gradient-to-r from-red-500 to-amber-400 rounded-full shrink-0" />
             <span className={`font-display font-extrabold uppercase tracking-[0.12em] sm:tracking-[0.18em] text-amber-400 break-words sm:truncate ${s.sub}`}>
-              {subtitle}
+              {resolvedSubtitle}
             </span>
           </div>
         )}

@@ -1,15 +1,26 @@
 import React, { useState } from 'react';
 import heroSmashImg from '../../assets/images/spl_jump_smash_arena_1794553838311.jpg';
 import { SPLLogoEmblemSvg } from '../common/SPLLogo';
+import { SeasonBrandingConfig } from '../../types/tournament';
 
 interface BadmintonHeroVisualProps {
   venue?: string;
+  seasonNumber?: string;
+  editionName?: string;
+  seasonBranding?: SeasonBrandingConfig;
 }
 
 export const BadmintonHeroVisual: React.FC<BadmintonHeroVisualProps> = ({
   venue = 'Maharajganj Indoor Badminton Stadium',
+  seasonNumber = '3.0',
+  editionName = 'Champion Edition',
+  seasonBranding,
 }) => {
   const [imgError, setImgError] = useState(false);
+  const accentTextColor =
+    seasonBranding && seasonBranding.presetId !== 'spl-3-original'
+      ? seasonBranding.editionColor
+      : undefined;
 
   return (
     <div className="relative w-full flex items-stretch select-none">
@@ -34,7 +45,7 @@ export const BadmintonHeroVisual: React.FC<BadmintonHeroVisualProps> = ({
           />
         ) : (
           <div className="absolute inset-0 bg-gradient-to-br from-[#121728] via-[#090b12] to-[#1a0d08] flex items-center justify-center">
-            <SPLLogoEmblemSvg className="w-32 h-32 opacity-80" include30 />
+            <SPLLogoEmblemSvg className="w-32 h-32 opacity-80" include30 seasonNumber={seasonNumber} />
           </div>
         )}
 
@@ -93,13 +104,17 @@ export const BadmintonHeroVisual: React.FC<BadmintonHeroVisualProps> = ({
           <SPLLogoEmblemSvg
             className="w-10 h-10 sm:w-12 sm:h-12 drop-shadow-[0_6px_14px_rgba(0,0,0,0.85)]"
             include30
+            seasonNumber={seasonNumber}
           />
           <div className="hidden sm:block text-left">
-            <span className="block text-[10px] font-display font-black uppercase tracking-[0.22em] text-amber-300 leading-none">
-              SPL 3.0 Arena
+            <span
+              className="block text-[10px] font-display font-black uppercase tracking-[0.22em] text-amber-300 leading-none"
+              style={accentTextColor ? { color: accentTextColor } : undefined}
+            >
+              SPL {seasonNumber} Arena
             </span>
             <span className="block text-[11px] font-semibold text-slate-200/90 mt-0.5">
-              Champion Edition
+              {editionName}
             </span>
           </div>
         </div>

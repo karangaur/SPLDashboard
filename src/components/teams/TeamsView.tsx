@@ -45,6 +45,8 @@ export const TeamsView: React.FC = () => {
     assignPlayerToTeam,
     removePlayerFromTeam,
     triggerCelebration,
+    activeSeason,
+    isSeasonLocked,
   } = useTournament();
 
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -342,7 +344,8 @@ export const TeamsView: React.FC = () => {
           {/* Random Captain Selection Action */}
           <button
             onClick={handleOpenRandomCaptainModal}
-            className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 rounded-xl transition-all shadow-md active:scale-95"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 text-xs font-bold text-amber-300 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 rounded-xl transition-all shadow-md active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
             title="Randomly draw unique captains for teams"
           >
             <Crown className="w-4 h-4 text-amber-400" />
@@ -351,13 +354,20 @@ export const TeamsView: React.FC = () => {
 
           <button
             onClick={() => setCreateModalOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95"
+            disabled={isSeasonLocked}
+            className="flex items-center gap-1.5 px-4 py-2.5 text-xs font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 rounded-xl shadow-md transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Plus className="w-4 h-4" />
             <span>Add Custom Team</span>
           </button>
         </div>
       </div>
+
+      {isSeasonLocked && (
+        <div className="rounded-2xl border border-amber-500/35 bg-amber-500/10 px-4 py-2.5 text-xs text-amber-200">
+          <strong>SPL {activeSeason.seasonNumber} is Archived (Read-Only):</strong> Team creation, captaincy draws, and squad edits are locked. Switch to an active or upcoming season in Settings to make changes.
+        </div>
+      )}
 
       {/* Bulk Action Bar for Teams */}
       {state.teams.length > 0 && (
